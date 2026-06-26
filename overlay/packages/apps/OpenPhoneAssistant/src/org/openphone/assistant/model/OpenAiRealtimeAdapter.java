@@ -64,20 +64,20 @@ public final class OpenAiRealtimeAdapter implements ModelAdapter {
 
     @Override
     public String name() {
-        return mEndpointConfig.isBrokerMode()
+        return !mEndpointConfig.isDirectOpenAiResponses()
                 ? mResponsesFallback.name() : "openai-realtime-agent-dev";
     }
 
     @Override
     public String providerDisplayName() {
-        return mEndpointConfig.isBrokerMode()
+        return !mEndpointConfig.isDirectOpenAiResponses()
                 ? mResponsesFallback.providerDisplayName()
                 : (isRealtime2Model() ? "OpenAI Realtime 2 agent" : "OpenAI Realtime agent");
     }
 
     @Override
     public String modelName() {
-        return mEndpointConfig.isBrokerMode()
+        return !mEndpointConfig.isDirectOpenAiResponses()
                 ? mResponsesFallback.modelName() : mRealtimeModel;
     }
 
@@ -88,10 +88,10 @@ public final class OpenAiRealtimeAdapter implements ModelAdapter {
 
     @Override
     public String privacyDisclosure() {
-        if (mEndpointConfig.isBrokerMode()) {
+        if (!mEndpointConfig.isDirectOpenAiResponses()) {
             return mEndpointConfig.privacyDisclosure()
-                    + " Realtime direct WebSocket is not enabled through broker mode yet; "
-                    + "task execution falls back to the Responses agent.";
+                    + " Direct OpenAI Realtime WebSocket is not enabled for this provider; "
+                    + "task execution uses the HTTP model router.";
         }
         return "Realtime task mode keeps a WebSocket session open with OpenAI while a task "
                 + "is active. It sends the task goal, task-scoped screen observations, UI "
@@ -142,7 +142,7 @@ public final class OpenAiRealtimeAdapter implements ModelAdapter {
         if (!ToolCatalog.get().isLoaded()) {
             return unavailable("Action registry is not installed; no model tools available.");
         }
-        if (mEndpointConfig.isBrokerMode()) {
+        if (!mEndpointConfig.isDirectOpenAiResponses()) {
             return mResponsesFallback.runTask(taskId, userGoal, executor);
         }
 

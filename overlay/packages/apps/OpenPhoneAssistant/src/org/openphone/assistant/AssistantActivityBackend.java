@@ -32,9 +32,11 @@ import org.openphone.assistant.model.LocalHeuristicModelAdapter;
 import org.openphone.assistant.model.GeminiLiveVoiceSession;
 import org.openphone.assistant.model.ModelEndpointConfig;
 import org.openphone.assistant.model.ModelAdapter;
+import org.openphone.assistant.model.MultimodalSession;
 import org.openphone.assistant.model.OpenAiRealtimeAdapter;
 import org.openphone.assistant.model.OpenAiRealtimeVoiceSession;
 import org.openphone.assistant.model.OpenAiSpeechTranscriber;
+import org.openphone.assistant.model.QwenOmniRealtimeSession;
 import org.openphone.assistant.orchestrator.OpenPhoneOrchestrator;
 import org.openphone.assistant.orchestrator.OperatingMode;
 import org.openphone.assistant.orchestrator.OrchestratorDecision;
@@ -53,7 +55,8 @@ public class AssistantActivityBackend extends ComponentActivity {
         void setModelDisclosure(String text);
         void setModelConfig(boolean useRealtime, boolean useRealtime2,
                 boolean useLiveRealtimeVoice, boolean useGeminiLiveVoice,
-                boolean useBroker, String apiKey, String geminiApiKey,
+                boolean useBroker, String providerMode, String apiKey, String geminiApiKey,
+                String providerBaseUrl, String modelId, String providerApiKey,
                 String brokerUrl, String brokerToken);
         void setOtaStatus(String text, boolean canDownload);
         void setRuntimeStatus(String text, String activeTaskId, boolean running,
@@ -202,8 +205,7 @@ public class AssistantActivityBackend extends ComponentActivity {
     private ModelAdapter mRunningModelAdapter;
     private ModelAdapter mRunningChatAdapter;
     private volatile OpenAiSpeechTranscriber mRunningSpeechTranscriber;
-    private volatile OpenAiRealtimeVoiceSession mRunningRealtimeVoiceSession;
-    private volatile GeminiLiveVoiceSession mRunningGeminiLiveVoiceSession;
+    private volatile MultimodalSession mRunningMultimodalSession;
     private volatile String mRealtimeVoiceTaskId;
     private OtaUpdateClient.Update mLatestOtaUpdate;
     private boolean mListening;
@@ -219,8 +221,12 @@ public class AssistantActivityBackend extends ComponentActivity {
     private long mVoicePipelineStartedUptimeMillis;
     private String mComposeGoalText = "";
     private String mComposeActionJson = "";
+    private String mComposeProviderMode = ModelEndpointConfig.PROVIDER_LOCAL_HEURISTIC;
     private String mComposeApiKey = "";
     private String mComposeGeminiApiKey = "";
+    private String mComposeProviderBaseUrl = "";
+    private String mComposeModelId = "";
+    private String mComposeProviderApiKey = "";
     private String mComposeBrokerUrl = "";
     private String mComposeBrokerToken = "";
     private String mComposeOtaFeedUrl = "";
@@ -499,8 +505,7 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean isAgentOrVoiceActive() {
         return mListening || mActiveTaskId != null || mAgentThread != null
                 || mChatThread != null || mRunningChatAdapter != null
-                || mRunningRealtimeVoiceSession != null
-                || mRunningGeminiLiveVoiceSession != null;
+                || mRunningMultimodalSession != null;
     }
 
     private boolean hasPendingVolumeChord() {
@@ -657,18 +662,31 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     public void onComposeModelConfigChanged(boolean useRealtime, boolean useRealtime2,
             boolean useLiveRealtimeVoice, boolean useGeminiLiveVoice, boolean useBroker,
-            String apiKey, String geminiApiKey, String brokerUrl, String brokerToken) {
+            String providerMode, String apiKey, String geminiApiKey, String providerBaseUrl,
+            String modelId, String providerApiKey, String brokerUrl, String brokerToken) {
+        mComposeProviderMode = ModelEndpointConfig.cleanProviderMode(providerMode);
         mComposeUseRealtime = useRealtime;
         mComposeUseRealtime2 = useRealtime && useRealtime2;
         mComposeUseGeminiLiveVoice = useGeminiLiveVoice;
         mComposeUseLiveRealtimeVoice = useLiveRealtimeVoice && !useGeminiLiveVoice;
-        mComposeUseBroker = useBroker;
+        mComposeUseBroker = useBroker
+                || ModelEndpointConfig.PROVIDER_REMOTE_BROKER.equals(mComposeProviderMode);
+        if (!mComposeUseRealtime) {
+            mComposeProviderMode = ModelEndpointConfig.PROVIDER_LOCAL_HEURISTIC;
+            mComposeUseBroker = false;
+        }
         mComposeApiKey = apiKey == null ? "" : apiKey;
         mComposeGeminiApiKey = geminiApiKey == null ? "" : geminiApiKey;
+        mComposeProviderBaseUrl = providerBaseUrl == null ? "" : providerBaseUrl;
+        mComposeModelId = modelId == null ? "" : modelId;
+        mComposeProviderApiKey = providerApiKey == null ? "" : providerApiKey;
         mComposeBrokerUrl = brokerUrl == null ? "" : brokerUrl;
         mComposeBrokerToken = brokerToken == null ? "" : brokerToken;
         persistVoiceMode(useGeminiLiveVoice ? VOICE_MODE_GEMINI_LIVE
                 : useLiveRealtimeVoice ? VOICE_MODE_LIVE_REALTIME_2 : VOICE_MODE_CLASSIC);
+        ModelEndpointConfig.writeStoredSettings(this, mComposeProviderMode, mComposeApiKey,
+                mComposeProviderBaseUrl, mComposeModelId, mComposeProviderApiKey,
+                mComposeBrokerUrl, mComposeBrokerToken);
         persistDebugKey(SECURE_DEV_OPENAI_API_KEY, mComposeApiKey);
         persistDebugKey(SECURE_DEV_GEMINI_API_KEY, mComposeGeminiApiKey);
         refreshModelDisclosure();
@@ -836,6 +854,9 @@ public class AssistantActivityBackend extends ComponentActivity {
     }
 
     private boolean useOpenAiLiveRealtimeVoice() {
+        if (useQwenOmniLiveVoice()) {
+            return false;
+        }
         if (VOICE_MODE_LIVE_REALTIME_2.equals(voiceModeDefault())) {
             return true;
         }
@@ -849,18 +870,26 @@ public class AssistantActivityBackend extends ComponentActivity {
         return mComposeUseGeminiLiveVoice;
     }
 
+    private boolean useQwenOmniLiveVoice() {
+        return !useGeminiLiveVoice()
+                && useLiveRealtimeVoice()
+                && ModelEndpointConfig.PROVIDER_QWEN_OMNI_REALTIME.equals(mComposeProviderMode);
+    }
+
     private String liveVoiceLabel() {
-        return useGeminiLiveVoice() ? "Gemini Live" : "Live Realtime 2";
+        if (useGeminiLiveVoice()) {
+            return "Gemini Live";
+        }
+        if (useQwenOmniLiveVoice()) {
+            return "Qwen Omni";
+        }
+        return "Live Realtime 2";
     }
 
     private String realtimeModelId() {
         return mComposeUseRealtime2
                 ? OpenAiRealtimeAdapter.REALTIME_2_MODEL
                 : OpenAiRealtimeAdapter.DEFAULT_REALTIME_MODEL;
-    }
-
-    private boolean useBrokerModel() {
-        return mComposeUseBroker;
     }
 
     private String geminiApiKey() {
@@ -903,8 +932,9 @@ public class AssistantActivityBackend extends ComponentActivity {
         if (mComposeStateCallbacks != null) {
             mComposeStateCallbacks.setModelConfig(mComposeUseRealtime, mComposeUseRealtime2,
                     mComposeUseLiveRealtimeVoice, mComposeUseGeminiLiveVoice,
-                    mComposeUseBroker, mComposeApiKey, mComposeGeminiApiKey,
-                    mComposeBrokerUrl, mComposeBrokerToken);
+                    mComposeUseBroker, mComposeProviderMode, mComposeApiKey,
+                    mComposeGeminiApiKey, mComposeProviderBaseUrl, mComposeModelId,
+                    mComposeProviderApiKey, mComposeBrokerUrl, mComposeBrokerToken);
         }
     }
 
@@ -934,13 +964,36 @@ public class AssistantActivityBackend extends ComponentActivity {
         mComposeUseLiveRealtimeVoice = VOICE_MODE_LIVE_REALTIME_2.equals(voiceMode);
         mComposeUseGeminiLiveVoice = VOICE_MODE_GEMINI_LIVE.equals(voiceMode);
         pushIslandAutonomy();
+        ModelEndpointConfig.StoredSettings storedModelSettings =
+                ModelEndpointConfig.readStoredSettings(this);
+        mComposeProviderMode = ModelEndpointConfig.cleanProviderMode(
+                storedModelSettings.providerMode);
+        mComposeApiKey = storedModelSettings.openAiApiKey;
+        mComposeProviderBaseUrl = storedModelSettings.providerBaseUrl;
+        mComposeModelId = storedModelSettings.modelName;
+        mComposeProviderApiKey = storedModelSettings.providerApiKey;
+        mComposeBrokerUrl = storedModelSettings.brokerUrl;
+        mComposeBrokerToken = storedModelSettings.brokerToken;
+        if (ModelEndpointConfig.PROVIDER_LOCAL_HEURISTIC.equals(mComposeProviderMode)
+                && !mComposeApiKey.isEmpty() && storedModelSettings.providerMode.isEmpty()) {
+            mComposeProviderMode = ModelEndpointConfig.PROVIDER_OPENAI_RESPONSES;
+        }
+        mComposeUseRealtime = !ModelEndpointConfig.PROVIDER_LOCAL_HEURISTIC.equals(
+                mComposeProviderMode);
+        mComposeUseBroker = ModelEndpointConfig.PROVIDER_REMOTE_BROKER.equals(
+                mComposeProviderMode);
         if (debugIntentExtrasAllowed()) {
             String apiKey = Settings.Secure.getString(getContentResolver(),
                     SECURE_DEV_OPENAI_API_KEY);
-            mComposeApiKey = apiKey == null ? "" : apiKey;
+            if ((mComposeApiKey == null || mComposeApiKey.isEmpty()) && apiKey != null) {
+                mComposeApiKey = apiKey;
+            }
             if (!mComposeApiKey.isEmpty()) {
                 mComposeUseRealtime = true;
-                mComposeUseBroker = false;
+                if (storedModelSettings.providerMode.isEmpty()) {
+                    mComposeProviderMode = ModelEndpointConfig.PROVIDER_OPENAI_RESPONSES;
+                    mComposeUseBroker = false;
+                }
             }
             String geminiApiKey = Settings.Secure.getString(getContentResolver(),
                     SECURE_DEV_GEMINI_API_KEY);
@@ -948,8 +1001,12 @@ public class AssistantActivityBackend extends ComponentActivity {
         }
         if (mComposeUseLiveRealtimeVoice) {
             mComposeUseRealtime = true;
-            mComposeUseRealtime2 = true;
+            mComposeUseRealtime2 = !ModelEndpointConfig.PROVIDER_QWEN_OMNI_REALTIME.equals(
+                    mComposeProviderMode);
             mComposeUseBroker = false;
+            if (!ModelEndpointConfig.PROVIDER_QWEN_OMNI_REALTIME.equals(mComposeProviderMode)) {
+                mComposeProviderMode = ModelEndpointConfig.PROVIDER_OPENAI_RESPONSES;
+            }
         }
         if (mComposeUseGeminiLiveVoice) {
             mComposeUseBroker = false;
@@ -1077,6 +1134,13 @@ public class AssistantActivityBackend extends ComponentActivity {
                         + "Mic audio and about one screen frame per second stream to Gemini "
                         + "while the session is active, and model audio is played back on "
                         + "the phone.";
+            } else if (useQwenOmniLiveVoice()) {
+                disclosure += "\n\nVoice: Qwen Omni / "
+                        + endpointConfig.modelNameOrDefault(QwenOmniRealtimeSession.DEFAULT_MODEL)
+                        + ". Volume buttons start a live omni speech-to-speech session. "
+                        + "Mic audio, screen context, and phone tool results stream directly "
+                        + "to the configured Qwen Omni realtime endpoint while the session "
+                        + "is active, and model audio is played back on the phone.";
             } else if (useOpenAiLiveRealtimeVoice()) {
                 disclosure += "\n\nVoice: OpenAI Live Realtime 2 / "
                         + OpenAiRealtimeVoiceSession.MODEL
@@ -1098,26 +1162,39 @@ public class AssistantActivityBackend extends ComponentActivity {
                     + "Mic audio and about one screen frame per second stream to Gemini "
                     + "while the session is active, and model audio is played back on "
                     + "the phone.";
+        } else if (useQwenOmniLiveVoice()) {
+            ModelEndpointConfig endpointConfig = modelEndpointConfig();
+            disclosure += "\n\nVoice: Qwen Omni / "
+                    + endpointConfig.modelNameOrDefault(QwenOmniRealtimeSession.DEFAULT_MODEL)
+                    + ". Volume buttons start a live omni speech-to-speech session.";
         }
         setModelDisclosureText(disclosure);
     }
 
     private ModelAdapter selectedModelAdapter(ModelEndpointConfig endpointConfig) {
-        return useRealtimeModel()
-                ? new OpenAiRealtimeAdapter(endpointConfig, realtimeModelId(),
-                        "yolo".equals(mAutonomyMode))
-                : new LocalHeuristicModelAdapter();
+        if (!useRealtimeModel()) {
+            return new LocalHeuristicModelAdapter();
+        }
+        if (endpointConfig != null && endpointConfig.isDirectOpenAiResponses()) {
+            return new OpenAiRealtimeAdapter(endpointConfig, realtimeModelId(),
+                    "yolo".equals(mAutonomyMode));
+        }
+        return new org.openphone.assistant.model.OpenAiResponsesAgentAdapter(endpointConfig,
+                "yolo".equals(mAutonomyMode));
     }
 
     private ModelEndpointConfig modelEndpointConfig() {
-        if (useBrokerModel()) {
-            return ModelEndpointConfig.broker(mComposeBrokerUrl, mComposeBrokerToken);
-        }
         String apiKey = mComposeApiKey;
         if (apiKey.isEmpty() && debugIntentExtrasAllowed()) {
             apiKey = Settings.Secure.getString(getContentResolver(), SECURE_DEV_OPENAI_API_KEY);
         }
-        return ModelEndpointConfig.directOpenAi(apiKey == null ? "" : apiKey);
+        return ModelEndpointConfig.fromUiConfig(mComposeProviderMode,
+                apiKey == null ? "" : apiKey,
+                mComposeProviderBaseUrl,
+                mComposeModelId,
+                mComposeProviderApiKey,
+                mComposeBrokerUrl,
+                mComposeBrokerToken);
     }
 
     private static String modelRunDisclosure(ModelAdapter adapter) {
@@ -1149,7 +1226,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                 + " live=" + useLiveRealtimeVoice()
                 + " forceClassic=" + forceClassic
                 + " configured=" + modelEndpointConfig().isConfigured()
-                + " broker=" + modelEndpointConfig().isBrokerMode()
+                + " provider=" + modelEndpointConfig().providerName()
                 + " control=" + isControlSurface()
                 + " hold=" + holdToRecord);
         if (mListening) {
@@ -1164,9 +1241,11 @@ public class AssistantActivityBackend extends ComponentActivity {
             }
             return;
         }
-        if ((!useGeminiLiveVoice() || forceClassic) && !modelEndpointConfig().isConfigured()) {
-            setTaskText("Model setup is missing. Open Developer settings and add a "
-                    + "broker token or development API key.");
+        ModelEndpointConfig endpointConfig = modelEndpointConfig();
+        if ((forceClassic || !useLiveRealtimeVoice())
+                && (!endpointConfig.isConfigured() || !endpointConfig.supportsTranscription())) {
+            setTaskText("Voice transcription is not configured for the selected provider. "
+                    + "Use OpenAI, a remote broker with transcription, or type the task.");
             updateIsland("Setup needed");
             if (mIslandVoiceLaunch) {
                 finishIslandVoiceLaunch();
@@ -1233,7 +1312,7 @@ public class AssistantActivityBackend extends ComponentActivity {
             moveTaskToBack(true);
             return;
         }
-        if (mRunningRealtimeVoiceSession != null || mRunningGeminiLiveVoiceSession != null) {
+        if (mRunningMultimodalSession != null) {
             moveTaskToBack(true);
             return;
         }
@@ -1271,25 +1350,12 @@ public class AssistantActivityBackend extends ComponentActivity {
     }
 
     private void startLiveVoiceAgent() {
-        if (useGeminiLiveVoice()) {
-            startGeminiLiveVoiceAgent();
-        } else {
-            startOpenAiRealtimeVoiceAgent();
-        }
-    }
-
-    private void startOpenAiRealtimeVoiceAgent() {
-        if (mRunningRealtimeVoiceSession != null) {
+        if (mRunningMultimodalSession != null) {
             return;
         }
         final ModelEndpointConfig endpointConfig = modelEndpointConfig();
-        if (endpointConfig.isBrokerMode()) {
-            String setupMessage = "Live Realtime 2 needs a direct OpenAI API key for now.";
-            setTaskText(setupMessage);
-            updateIsland("Setup needed");
-            if (mIslandVoiceLaunch) {
-                finishIslandVoiceLaunch();
-            }
+        final MultimodalSession session = createMultimodalSession(endpointConfig);
+        if (session == null || !validateMultimodalSessionConfig(endpointConfig)) {
             return;
         }
         if (mAgentManager == null) {
@@ -1313,11 +1379,12 @@ public class AssistantActivityBackend extends ComponentActivity {
         mAgentRunCancelled = false;
         final int voiceGeneration = ++mVoiceRunGeneration;
         final int runGeneration = ++mAgentRunGeneration;
-        final OpenAiRealtimeVoiceSession session = new OpenAiRealtimeVoiceSession(endpointConfig,
-                liveVoiceContinuityContextJson(), "yolo".equals(mAutonomyMode));
-        mRunningRealtimeVoiceSession = session;
-        Log.i(TAG, "live realtime voice start control=" + isControlSurface());
-        setTaskText("Live Realtime 2 is listening.");
+        mRunningMultimodalSession = session;
+        final String sessionLabel = liveVoiceLabel();
+        final String taskGoal = sessionLabel + " voice session";
+        Log.i(TAG, "multimodal voice start provider=" + session.providerDisplayName()
+                + " model=" + session.modelName() + " control=" + isControlSurface());
+        setTaskText(sessionLabel + " is listening.");
         updateIsland("Live");
         updateComposerActionButton();
         if (mIslandVoiceLaunch) {
@@ -1333,8 +1400,7 @@ public class AssistantActivityBackend extends ComponentActivity {
             public void run() {
                 String taskId = null;
                 try {
-                    String response = mAgentManager.startTask(taskRequestJson(
-                            "Live Realtime 2 voice session"));
+                    String response = mAgentManager.startTask(taskRequestJson(taskGoal));
                     taskId = parseString(response, "task_id");
                     if (taskId == null || taskId.isEmpty()) {
                         postRealtimeVoiceError(voiceGeneration,
@@ -1344,13 +1410,14 @@ public class AssistantActivityBackend extends ComponentActivity {
                     }
                     final String liveTaskId = taskId;
                     mRealtimeVoiceTaskId = liveTaskId;
-                    Log.i(TAG, "live realtime task started id=" + liveTaskId);
+                    Log.i(TAG, "multimodal live task started id=" + liveTaskId
+                            + " provider=" + session.providerDisplayName());
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             if (voiceGeneration == mVoiceRunGeneration) {
                                 mActiveTaskId = liveTaskId;
-                                mActiveTaskGoal = "Live Realtime 2 voice session";
+                                mActiveTaskGoal = taskGoal;
                                 updateComposerActionButton();
                             }
                         }
@@ -1395,7 +1462,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                                     || voiceGeneration != mVoiceRunGeneration
                                     || Thread.currentThread().isInterrupted();
                         }
-                    }, new OpenAiRealtimeVoiceSession.Callback() {
+                    }, new MultimodalSession.Callback() {
                         @Override
                         public void onStatus(String status) {
                             postRealtimeVoiceStatus(voiceGeneration, status);
@@ -1437,173 +1504,53 @@ public class AssistantActivityBackend extends ComponentActivity {
                     postRealtimeVoiceStopped(voiceGeneration, taskId);
                 }
             }
-        }, "OpenPhoneRealtimeVoice");
+        }, "OpenPhoneMultimodalVoice");
         mAgentThread = realtimeThread;
         realtimeThread.start();
     }
 
-    private void startGeminiLiveVoiceAgent() {
-        if (mRunningGeminiLiveVoiceSession != null) {
-            return;
+    private MultimodalSession createMultimodalSession(ModelEndpointConfig endpointConfig) {
+        if (useGeminiLiveVoice()) {
+            return new GeminiLiveVoiceSession(geminiApiKey(), liveVoiceContinuityContextJson(),
+                    "yolo".equals(mAutonomyMode));
         }
-        final String apiKey = geminiApiKey();
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            String setupMessage = "Gemini Live needs a Gemini API key.";
-            setTaskText(setupMessage);
-            updateIsland("Setup needed");
-            if (mIslandVoiceLaunch) {
-                finishIslandVoiceLaunch();
+        if (useQwenOmniLiveVoice()) {
+            return new QwenOmniRealtimeSession(endpointConfig, liveVoiceContinuityContextJson(),
+                    "yolo".equals(mAutonomyMode));
+        }
+        return new OpenAiRealtimeVoiceSession(endpointConfig, liveVoiceContinuityContextJson(),
+                "yolo".equals(mAutonomyMode));
+    }
+
+    private boolean validateMultimodalSessionConfig(ModelEndpointConfig endpointConfig) {
+        if (useGeminiLiveVoice()) {
+            if (geminiApiKey().trim().isEmpty()) {
+                return showMultimodalSetupNeeded("Gemini Live needs a Gemini API key.");
             }
-            return;
+            return true;
         }
-        if (mAgentManager == null) {
-            String setupMessage = "OpenPhone system service is unavailable.";
-            setTaskText(setupMessage);
-            updateIsland("Unavailable");
-            if (mIslandVoiceLaunch) {
-                finishIslandVoiceLaunch();
+        if (useQwenOmniLiveVoice()) {
+            if (endpointConfig == null || !endpointConfig.isQwenOmniRealtime()
+                    || !endpointConfig.isConfigured()) {
+                return showMultimodalSetupNeeded("Qwen Omni needs a realtime endpoint URL "
+                        + "and model id.");
             }
-            return;
+            return true;
         }
-        if (isControlSurface()) {
-            sActiveControlRunner = this;
+        if (endpointConfig == null || !endpointConfig.isDirectOpenAiResponses()
+                || !endpointConfig.isConfigured()) {
+            return showMultimodalSetupNeeded("Live Realtime 2 needs a direct OpenAI API key.");
         }
-        mListening = true;
-        mVoiceHoldToRecord = false;
-        mVoiceCaptureFinishRequested = false;
-        mRealtimeVoiceErrorShown = false;
-        mLastVoiceStartUptimeMillis = SystemClock.uptimeMillis();
-        clearVoicePipelineProtection();
-        mAgentRunCancelled = false;
-        final int voiceGeneration = ++mVoiceRunGeneration;
-        final int runGeneration = ++mAgentRunGeneration;
-        final GeminiLiveVoiceSession session = new GeminiLiveVoiceSession(apiKey,
-                liveVoiceContinuityContextJson(), "yolo".equals(mAutonomyMode));
-        mRunningGeminiLiveVoiceSession = session;
-        Log.i(TAG, "gemini live voice start control=" + isControlSurface());
-        setTaskText("Gemini Live is listening.");
-        updateIsland("Live");
-        updateComposerActionButton();
+        return true;
+    }
+
+    private boolean showMultimodalSetupNeeded(String message) {
+        setTaskText(message);
+        updateIsland("Setup needed");
         if (mIslandVoiceLaunch) {
-            getWindow().getDecorView().post(new Runnable() {
-                @Override
-                public void run() {
-                    moveTaskToBack(true);
-                }
-            });
+            finishIslandVoiceLaunch();
         }
-        Thread realtimeThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                String taskId = null;
-                try {
-                    String response = mAgentManager.startTask(taskRequestJson(
-                            "Gemini Live voice session"));
-                    taskId = parseString(response, "task_id");
-                    if (taskId == null || taskId.isEmpty()) {
-                        postRealtimeVoiceError(voiceGeneration,
-                                "Could not start the Gemini Live voice task.");
-                        postRealtimeVoiceStopped(voiceGeneration, null);
-                        return;
-                    }
-                    final String liveTaskId = taskId;
-                    mRealtimeVoiceTaskId = liveTaskId;
-                    Log.i(TAG, "gemini live task started id=" + liveTaskId);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (voiceGeneration == mVoiceRunGeneration) {
-                                mActiveTaskId = liveTaskId;
-                                mActiveTaskGoal = "Gemini Live voice session";
-                                updateComposerActionButton();
-                            }
-                        }
-                    });
-                    FrameworkToolExecutor toolExecutor = new FrameworkToolExecutor(
-                            AssistantActivityBackend.this, mAgentManager);
-                    session.run(liveTaskId, new ModelAdapter.ToolExecutor() {
-                        @Override
-                        public String callTool(String toolName, String argumentsJson) {
-                            if (isCancelled()) {
-                                return "{\"status\":\"cancelled\",\"reason\":\"user_stopped\"}";
-                            }
-                            try {
-                                JSONObject toolArguments = new JSONObject(argumentsJson);
-                                String yoloBypass = yoloConfirmationBypass(liveTaskId,
-                                        toolExecutor, toolName, toolArguments);
-                                if (yoloBypass != null) {
-                                    return yoloBypass;
-                                }
-                                String dryRunPreview = dryRunPreview(toolName, toolArguments);
-                                if (dryRunPreview != null) {
-                                    return dryRunPreview;
-                                }
-                                String grantDenied = preflightDenial(toolName, toolArguments);
-                                if (grantDenied != null) {
-                                    return grantDenied;
-                                }
-                                movePointerFromTool(toolName, toolArguments);
-                                if (isCancelled()) {
-                                    return "{\"status\":\"cancelled\",\"reason\":\"user_stopped\"}";
-                                }
-                                return toolExecutor.execute(liveTaskId, toolName, toolArguments);
-                            } catch (JSONException e) {
-                                return "{\"status\":\"error\",\"reason\":\"bad_tool_json\"}";
-                            }
-                        }
-
-                        @Override
-                        public boolean isCancelled() {
-                            return mAgentRunCancelled
-                                    || runGeneration != mAgentRunGeneration
-                                    || voiceGeneration != mVoiceRunGeneration
-                                    || Thread.currentThread().isInterrupted();
-                        }
-                    }, new GeminiLiveVoiceSession.Callback() {
-                        @Override
-                        public void onStatus(String status) {
-                            postRealtimeVoiceStatus(voiceGeneration, status);
-                        }
-
-                        @Override
-                        public void onUserTranscript(String transcript) {
-                            postRealtimeVoiceUserTranscript(voiceGeneration, transcript);
-                        }
-
-                        @Override
-                        public void onAssistantTranscript(String transcript) {
-                            postRealtimeVoiceAssistantTranscript(voiceGeneration, transcript);
-                        }
-
-                        @Override
-                        public void onToolCall(String toolName) {
-                            postRealtimeVoiceStatus(voiceGeneration,
-                                    "Using " + (toolName == null ? "tool" : toolName));
-                        }
-
-                        @Override
-                        public void onToolResult(String toolName, String resultJson) {
-                            postRealtimeVoiceToolResult(voiceGeneration, toolName, resultJson);
-                        }
-
-                        @Override
-                        public void onError(String message) {
-                            postRealtimeVoiceError(voiceGeneration, message);
-                        }
-
-                        @Override
-                        public void onStopped() {
-                            postRealtimeVoiceStopped(voiceGeneration, liveTaskId);
-                        }
-                    });
-                } catch (RuntimeException e) {
-                    postRealtimeVoiceError(voiceGeneration, e.getClass().getSimpleName());
-                    postRealtimeVoiceStopped(voiceGeneration, taskId);
-                }
-            }
-        }, "OpenPhoneGeminiLiveVoice");
-        mAgentThread = realtimeThread;
-        realtimeThread.start();
+        return false;
     }
 
     private void postRealtimeVoiceStatus(final int voiceGeneration, final String status) {
@@ -1698,8 +1645,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                 stopFrameworkTaskAsync(taskId, "live_realtime_voice_stopped");
                 mListening = false;
                 mIslandVoiceLaunch = false;
-                mRunningRealtimeVoiceSession = null;
-                mRunningGeminiLiveVoiceSession = null;
+                mRunningMultimodalSession = null;
                 mAgentThread = null;
                 if (taskId != null && taskId.equals(mRealtimeVoiceTaskId)) {
                     mRealtimeVoiceTaskId = null;
@@ -1854,8 +1800,8 @@ public class AssistantActivityBackend extends ComponentActivity {
             return;
         }
         if (useRealtimeModel() && !modelEndpointConfig().isConfigured()) {
-            String setupMessage = "Model setup is missing. Open Developer settings and add a "
-                    + "broker token or development API key.";
+            String setupMessage = "Model setup is missing. Open Developer settings and choose "
+                    + "a provider, endpoint, model id, and key if needed.";
             setTaskText(setupMessage);
             appendConversation("OpenPhone", setupMessage);
             updateIsland("Setup needed");
@@ -1865,7 +1811,8 @@ public class AssistantActivityBackend extends ComponentActivity {
         if (!useRealtimeModel() && !LocalHeuristicModelAdapter.canHandleTask(goal)) {
             String localOnlyMessage = "I did not run that task. The local development adapter "
                     + "only handles simple Settings/Home/Back commands. Enable the "
-                    + "OpenPhone model broker or development API key for full phone-agent tasks.";
+                    + "OpenAI, OpenAI-compatible, Ollama, or broker provider for full "
+                    + "phone-agent tasks.";
             setTaskText(localOnlyMessage);
             appendConversation("OpenPhone", localOnlyMessage);
             updateIsland("Setup needed");
@@ -2096,8 +2043,10 @@ public class AssistantActivityBackend extends ComponentActivity {
                 || reply.startsWith("I could not start a screen observation.")
                 || reply.startsWith("I couldn't hear the task.")
                 || reply.startsWith("I didn't catch that.")
+                || reply.startsWith("Network screen understanding is not configured.")
                 || reply.startsWith("Cloud screen understanding is not configured.")
                 || reply.startsWith("I could not parse the screen context.")
+                || reply.startsWith("Network chat is not configured.")
                 || reply.startsWith("Cloud chat is not configured.")
                 || reply.startsWith("I could not parse the chat response.")
                 || reply.startsWith("I could not decide how to handle that message.");
@@ -2802,23 +2751,15 @@ public class AssistantActivityBackend extends ComponentActivity {
             speechTranscriber.cancel();
             mRunningSpeechTranscriber = null;
         }
-        OpenAiRealtimeVoiceSession realtimeVoiceSession = mRunningRealtimeVoiceSession;
-        if (realtimeVoiceSession != null) {
+        MultimodalSession multimodalSession = mRunningMultimodalSession;
+        if (multimodalSession != null) {
             try {
-                realtimeVoiceSession.cancel();
+                multimodalSession.cancel();
             } catch (RuntimeException e) {
-                Log.w(TAG, "live realtime cancel failed: " + e.getClass().getSimpleName());
+                Log.w(TAG, "multimodal session cancel failed: "
+                        + e.getClass().getSimpleName());
             }
-            mRunningRealtimeVoiceSession = null;
-        }
-        GeminiLiveVoiceSession geminiLiveVoiceSession = mRunningGeminiLiveVoiceSession;
-        if (geminiLiveVoiceSession != null) {
-            try {
-                geminiLiveVoiceSession.cancel();
-            } catch (RuntimeException e) {
-                Log.w(TAG, "gemini live cancel failed: " + e.getClass().getSimpleName());
-            }
-            mRunningGeminiLiveVoiceSession = null;
+            mRunningMultimodalSession = null;
         }
         mActiveTaskId = null;
         mActiveTaskGoal = null;

@@ -87,12 +87,16 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
 
     @Override
     public String modelName() {
-        return MODEL();
+        return requestModel();
     }
 
     @Override
     public boolean usesCloud() {
         return true;
+    }
+
+    private String requestModel() {
+        return mEndpointConfig.modelNameOrDefault(MODEL());
     }
 
     @Override
@@ -136,8 +140,8 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     public String chat(String userMessage) {
         mCancelled = false;
         if (!mEndpointConfig.isConfigured()) {
-            return "Cloud chat is not configured. Open Developer settings and add a "
-                    + "broker token or development API key.";
+            return "Network chat is not configured. Open Developer settings and choose "
+                    + "a provider, endpoint, model id, and key if needed.";
         }
         try {
             JSONObject response = callChatResponsesApi(userMessage);
@@ -190,7 +194,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 + "\n\nPage content (may be truncated):\n"
                 + (observedText == null ? "" : observedText);
         JSONObject body = new JSONObject()
-                .put("model", MODEL())
+                .put("model", requestModel())
                 .put("input", new JSONArray()
                         .put(new JSONObject()
                                 .put("role", "user")
@@ -209,8 +213,8 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     public String answerScreenQuestion(String userMessage, String screenJson) {
         mCancelled = false;
         if (!mEndpointConfig.isConfigured()) {
-            return "Cloud screen understanding is not configured. Open Developer settings and "
-                    + "add a broker token or development API key.";
+            return "Network screen understanding is not configured. Open Developer settings and "
+                    + "choose a provider, endpoint, model id, and key if needed.";
         }
         try {
             JSONObject screen = new JSONObject(screenJson == null ? "{}" : screenJson);
@@ -418,7 +422,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 + "as an action request. Keep the reply brief and helpful.\n\n"
                 + "User message: " + (userMessage == null ? "" : userMessage.trim());
         JSONObject body = new JSONObject()
-                .put("model", MODEL())
+                .put("model", requestModel())
                 .put("input", new JSONArray()
                         .put(new JSONObject()
                                 .put("role", "user")
@@ -431,43 +435,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                         .put("mode", "conversation"))
                 .put("max_output_tokens", 350);
 
-        HttpURLConnection connection = (HttpURLConnection) new URL(
-                mEndpointConfig.responsesUrl()).openConnection();
-        mActiveConnection = connection;
-        try {
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(45000);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer "
-                    + mEndpointConfig.bearerToken());
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Accept", "application/json");
-            if (mEndpointConfig.isBrokerMode()) {
-                connection.setRequestProperty("X-OpenPhone-Model-Provider", "openai_responses");
-                connection.setRequestProperty("X-OpenPhone-Request-Shape", "responses_proxy");
-            }
-
-            byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(bodyBytes.length);
-            try (OutputStream outputStream = connection.getOutputStream()) {
-                outputStream.write(bodyBytes);
-            }
-
-            int statusCode = connection.getResponseCode();
-            String responseBody = readAll(statusCode >= 200 && statusCode < 300
-                    ? connection.getInputStream() : connection.getErrorStream());
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
-                        + summarizeError(responseBody));
-            }
-            return new JSONObject(responseBody);
-        } finally {
-            if (mActiveConnection == connection) {
-                mActiveConnection = null;
-            }
-            connection.disconnect();
-        }
+        return postResponses(body);
     }
 
     private JSONObject callOrchestratorResponsesApi(String userMessage, boolean hasActiveTask,
@@ -608,7 +576,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 + "has_active_task: " + hasActiveTask + "\n"
                 + "user_message: " + (userMessage == null ? "" : userMessage.trim());
         JSONObject body = new JSONObject()
-                .put("model", MODEL())
+                .put("model", requestModel())
                 .put("input", new JSONArray()
                         .put(new JSONObject()
                                 .put("role", "user")
@@ -713,7 +681,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                     .put("detail", "low"));
         }
         JSONObject body = new JSONObject()
-                .put("model", MODEL())
+                .put("model", requestModel())
                 .put("input", new JSONArray()
                         .put(new JSONObject()
                                 .put("role", "user")
@@ -727,21 +695,41 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     }
 
     private JSONObject postResponses(JSONObject body) throws IOException, JSONException {
+        if (mEndpointConfig.isOpenAiCompatibleChat()) {
+            JSONObject response = postJson(mEndpointConfig.responsesUrl(),
+                    responsesToChatCompletions(body), false);
+            return chatCompletionsToResponses(response);
+        }
+        if (mEndpointConfig.isOllamaChat()) {
+            JSONObject response = postJson(mEndpointConfig.responsesUrl(),
+                    responsesToOllamaChat(body), false);
+            return ollamaChatToResponses(response);
+        }
+        return postJson(mEndpointConfig.responsesUrl(), body, true);
+    }
+
+    private JSONObject postJson(String url, JSONObject body, boolean includeOpenAiBeta)
+            throws IOException, JSONException {
         HttpURLConnection connection = (HttpURLConnection) new URL(
-                mEndpointConfig.responsesUrl()).openConnection();
+                url).openConnection();
         mActiveConnection = connection;
         try {
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(45000);
             connection.setRequestMethod("POST");
             connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer "
-                    + mEndpointConfig.bearerToken());
+            if (!mEndpointConfig.bearerToken().isEmpty()) {
+                connection.setRequestProperty("Authorization", "Bearer "
+                        + mEndpointConfig.bearerToken());
+            }
             connection.setRequestProperty("Content-Type", "application/json");
             connection.setRequestProperty("Accept", "application/json");
             if (mEndpointConfig.isBrokerMode()) {
                 connection.setRequestProperty("X-OpenPhone-Model-Provider", "openai_responses");
                 connection.setRequestProperty("X-OpenPhone-Request-Shape", "responses_proxy");
+            }
+            if (includeOpenAiBeta) {
+                connection.setRequestProperty("OpenAI-Beta", "responses=v1");
             }
 
             byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
@@ -754,7 +742,8 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
             String responseBody = readAll(statusCode >= 200 && statusCode < 300
                     ? connection.getInputStream() : connection.getErrorStream());
             if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
+                throw new IOException(mEndpointConfig.providerDisplayName() + " HTTP "
+                        + statusCode + ": "
                         + summarizeError(responseBody));
             }
             return new JSONObject(responseBody);
@@ -764,6 +753,196 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
             }
             connection.disconnect();
         }
+    }
+
+    private JSONObject responsesToChatCompletions(JSONObject responsesBody)
+            throws JSONException {
+        JSONObject body = new JSONObject()
+                .put("model", responsesBody.optString("model", requestModel()))
+                .put("messages", responsesInputToChatMessages(responsesBody, false))
+                .put("stream", false);
+        int maxOutputTokens = responsesBody.optInt("max_output_tokens", 0);
+        if (maxOutputTokens > 0) {
+            body.put("max_tokens", maxOutputTokens);
+        }
+        return body;
+    }
+
+    private JSONObject responsesToOllamaChat(JSONObject responsesBody) throws JSONException {
+        JSONObject body = new JSONObject()
+                .put("model", responsesBody.optString("model", requestModel()))
+                .put("messages", responsesInputToChatMessages(responsesBody, true))
+                .put("stream", false);
+        int maxOutputTokens = responsesBody.optInt("max_output_tokens", 0);
+        if (maxOutputTokens > 0) {
+            body.put("options", new JSONObject().put("num_predict", maxOutputTokens));
+        }
+        return body;
+    }
+
+    private JSONArray responsesInputToChatMessages(JSONObject responsesBody, boolean ollama)
+            throws JSONException {
+        JSONArray messages = new JSONArray();
+        JSONArray input = responsesBody.optJSONArray("input");
+        if (input == null || input.length() == 0) {
+            messages.put(new JSONObject()
+                    .put("role", "user")
+                    .put("content", responsesBody.optString("input", "")));
+            return messages;
+        }
+        for (int i = 0; i < input.length(); i++) {
+            JSONObject item = input.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String role = item.optString("role", "user");
+            JSONArray content = item.optJSONArray("content");
+            if (content == null) {
+                messages.put(new JSONObject()
+                        .put("role", role)
+                        .put("content", item.optString("content", "")));
+                continue;
+            }
+            messages.put(ollama
+                    ? ollamaMessage(role, content)
+                    : chatCompletionsMessage(role, content));
+        }
+        return messages;
+    }
+
+    private JSONObject chatCompletionsMessage(String role, JSONArray responsesContent)
+            throws JSONException {
+        JSONArray richContent = new JSONArray();
+        StringBuilder textOnly = new StringBuilder();
+        boolean hasImage = false;
+        for (int i = 0; i < responsesContent.length(); i++) {
+            JSONObject item = responsesContent.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String type = item.optString("type", "");
+            if ("input_text".equals(type)) {
+                String text = item.optString("text", "");
+                if (!text.isEmpty()) {
+                    if (textOnly.length() > 0) {
+                        textOnly.append('\n');
+                    }
+                    textOnly.append(text);
+                    richContent.put(new JSONObject().put("type", "text").put("text", text));
+                }
+            } else if ("input_image".equals(type)) {
+                String imageUrl = item.optString("image_url", "");
+                if (!imageUrl.isEmpty()) {
+                    hasImage = true;
+                    richContent.put(new JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", new JSONObject()
+                                    .put("url", imageUrl)
+                                    .put("detail", item.optString("detail", "low"))));
+                }
+            }
+        }
+        JSONObject message = new JSONObject().put("role", role);
+        if (hasImage) {
+            message.put("content", richContent);
+        } else {
+            message.put("content", textOnly.toString());
+        }
+        return message;
+    }
+
+    private JSONObject ollamaMessage(String role, JSONArray responsesContent)
+            throws JSONException {
+        StringBuilder text = new StringBuilder();
+        JSONArray images = new JSONArray();
+        for (int i = 0; i < responsesContent.length(); i++) {
+            JSONObject item = responsesContent.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String type = item.optString("type", "");
+            if ("input_text".equals(type)) {
+                String value = item.optString("text", "");
+                if (!value.isEmpty()) {
+                    if (text.length() > 0) {
+                        text.append('\n');
+                    }
+                    text.append(value);
+                }
+            } else if ("input_image".equals(type)) {
+                String imageData = imageDataFromDataUrl(item.optString("image_url", ""));
+                if (!imageData.isEmpty()) {
+                    images.put(imageData);
+                }
+            }
+        }
+        JSONObject message = new JSONObject()
+                .put("role", role)
+                .put("content", text.toString());
+        if (images.length() > 0) {
+            message.put("images", images);
+        }
+        return message;
+    }
+
+    private static String imageDataFromDataUrl(String imageUrl) {
+        String value = imageUrl == null ? "" : imageUrl.trim();
+        int comma = value.indexOf(',');
+        if (comma >= 0 && comma + 1 < value.length()) {
+            return value.substring(comma + 1);
+        }
+        return value.startsWith("data:") ? "" : value;
+    }
+
+    private static JSONObject chatCompletionsToResponses(JSONObject response)
+            throws JSONException {
+        String outputText = "";
+        JSONArray choices = response.optJSONArray("choices");
+        if (choices != null && choices.length() > 0) {
+            JSONObject choice = choices.optJSONObject(0);
+            JSONObject message = choice == null ? null : choice.optJSONObject("message");
+            if (message != null) {
+                outputText = chatContentToText(message.opt("content"));
+            }
+        }
+        return new JSONObject()
+                .put("id", response.optString("id", "chat-" + System.currentTimeMillis()))
+                .put("output_text", outputText);
+    }
+
+    private static JSONObject ollamaChatToResponses(JSONObject response) throws JSONException {
+        JSONObject message = response.optJSONObject("message");
+        String outputText = message == null
+                ? response.optString("response", "") : message.optString("content", "");
+        return new JSONObject()
+                .put("id", response.optString("id", "ollama-" + System.currentTimeMillis()))
+                .put("output_text", outputText);
+    }
+
+    private static String chatContentToText(Object content) {
+        if (content instanceof String) {
+            return (String) content;
+        }
+        if (!(content instanceof JSONArray)) {
+            return content == null ? "" : String.valueOf(content);
+        }
+        JSONArray array = (JSONArray) content;
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject item = array.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String text = item.optString("text", "");
+            if (text.isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(text);
+        }
+        return builder.toString();
     }
 
     private String captureScreenWithRetry(ToolExecutor executor) {
@@ -893,7 +1072,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
         }
 
         JSONObject body = new JSONObject()
-                .put("model", MODEL())
+                .put("model", requestModel())
                 .put("input", new JSONArray()
                         .put(new JSONObject()
                                 .put("role", "user")
@@ -901,43 +1080,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 .put("metadata", requestMetadata(screenJson))
                 .put("max_output_tokens", 500);
 
-        HttpURLConnection connection = (HttpURLConnection) new URL(
-                mEndpointConfig.responsesUrl()).openConnection();
-        mActiveConnection = connection;
-        try {
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(45000);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer "
-                    + mEndpointConfig.bearerToken());
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Accept", "application/json");
-            if (mEndpointConfig.isBrokerMode()) {
-                connection.setRequestProperty("X-OpenPhone-Model-Provider", "openai_responses");
-                connection.setRequestProperty("X-OpenPhone-Request-Shape", "responses_proxy");
-            }
-
-            byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(bodyBytes.length);
-            try (OutputStream outputStream = connection.getOutputStream()) {
-                outputStream.write(bodyBytes);
-            }
-
-            int statusCode = connection.getResponseCode();
-            String responseBody = readAll(statusCode >= 200 && statusCode < 300
-                    ? connection.getInputStream() : connection.getErrorStream());
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
-                        + summarizeError(responseBody));
-            }
-            return new JSONObject(responseBody);
-        } finally {
-            if (mActiveConnection == connection) {
-                mActiveConnection = null;
-            }
-            connection.disconnect();
-        }
+        return postResponses(body);
     }
 
     private static JSONObject parseDecision(String outputText) throws JSONException {
@@ -1553,30 +1696,30 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
         return responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody;
     }
 
-    private static String unavailable(String reason) {
+    private String unavailable(String reason) {
         try {
             return new JSONObject()
                     .put("status", "provider_unavailable")
-                    .put("provider", "openai_responses")
+                    .put("provider", name())
                     .put("reason", reason)
-                    .put("next", "Configure a broker token or temporary dev API key")
+                    .put("next", "Configure a model provider, endpoint, model id, and key if needed")
                     .toString(2);
         } catch (JSONException e) {
             return "{\"status\":\"provider_unavailable\"}";
         }
     }
 
-    private static String result(String status, String userGoal, JSONArray steps) throws JSONException {
+    private String result(String status, String userGoal, JSONArray steps) throws JSONException {
         return new JSONObject()
                 .put("status", status)
-                .put("provider", "openai_responses")
-                .put("model", MODEL())
+                .put("provider", name())
+                .put("model", requestModel())
                 .put("goal", userGoal == null ? "" : userGoal)
                 .put("steps", steps)
                 .toString(2);
     }
 
-    private static String cancelledResult(String userGoal, JSONArray steps) {
+    private String cancelledResult(String userGoal, JSONArray steps) {
         try {
             return result("cancelled", userGoal, steps);
         } catch (JSONException e) {

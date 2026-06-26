@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
+import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -34,25 +35,16 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
-import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
-public final class OpenAiRealtimeVoiceSession {
+public final class OpenAiRealtimeVoiceSession implements MultimodalSession {
     private static final String TAG = "OpenPhoneRealtimeVoice";
-
-    public interface Callback {
-        void onStatus(String status);
-        void onUserTranscript(String transcript);
-        void onAssistantTranscript(String transcript);
-        void onToolCall(String toolName);
-        void onToolResult(String toolName, String resultJson);
-        void onError(String message);
-        void onStopped();
-    }
 
     public static final String MODEL = "gpt-realtime-2";
 
-    private static final int SAMPLE_RATE = 24000;
+    private static final int OPENAI_SAMPLE_RATE = 24000;
+    private static final String OPENAI_PROVIDER_LABEL = "OpenAI Live Realtime 2";
+    private static final String OPENAI_STATUS_LABEL = "Live Realtime 2";
     private static final long CONNECT_TIMEOUT_MS = 20000;
     private static final long EVENT_TIMEOUT_MS = 2000;
     private static final long SELF_ECHO_GUARD_MS = 900;
@@ -60,10 +52,12 @@ public final class OpenAiRealtimeVoiceSession {
     private static final long MAX_PLAYBACK_DRAIN_MS = 6000;
     private static final long BARGE_IN_COOLDOWN_MS = 900;
     private static final long LOCAL_BARGE_IN_GUARD_MS = 240;
+    private static final long SIMPLE_TURN_END_SILENCE_MS = 900;
     private static final long INTERRUPTED_FUNCTION_CALL_GRACE_MS = 2500;
     private static final long INTERRUPTED_AUDIO_DROP_GRACE_MS = 2500;
     private static final double LOCAL_BARGE_IN_RMS = 1700.0;
     private static final double SERVER_BARGE_IN_RMS = 900.0;
+    private static final double SIMPLE_SPEECH_RMS = 900.0;
     private static final int AUTO_SCREEN_MAX_TEXT_CHARS = 8000;
     private static final int AUTO_SCREEN_MAX_ARRAY_ITEMS = 40;
     private static final long SCREEN_CACHE_INTERVAL_MS = 850;
@@ -71,10 +65,17 @@ public final class OpenAiRealtimeVoiceSession {
     private static final long ACTION_RESPONSE_STALL_MS = 9000;
     private static final long STALL_CANCEL_GRACE_MS = 1800;
     private static final int ACTION_RESPONSE_STALL_MAX_RECOVERIES = 2;
-    private static final String REALTIME_URL =
+    private static final String OPENAI_REALTIME_URL =
             "wss://api.openai.com/v1/realtime?model=" + MODEL;
 
     private final ModelEndpointConfig mEndpointConfig;
+    private final String mProviderLabel;
+    private final String mStatusLabel;
+    private final String mModelName;
+    private final String mRealtimeUrl;
+    private final int mInputSampleRate;
+    private final int mOutputSampleRate;
+    private final boolean mSimpleRealtimeProtocol;
     private final ReentrantLock mToolExecutorLock = new ReentrantLock();
     private final Set<String> mCompletedCallIds = new HashSet<>();
     private final Set<String> mTruncatedAssistantItemIds = new HashSet<>();
@@ -100,6 +101,9 @@ public final class OpenAiRealtimeVoiceSession {
     private volatile long mLastBargeInUptimeMillis;
     private volatile long mDropAssistantAudioUntilUptimeMillis;
     private volatile long mIgnorePartialFunctionCallsUntilUptimeMillis;
+    private volatile boolean mSimpleSpeechStarted;
+    private volatile boolean mSimpleInputFinalCommitted;
+    private volatile long mSimpleLastSpeechUptimeMillis;
     private volatile String mCurrentResponseId;
     private volatile String mCurrentAssistantItemId;
     private volatile int mCurrentAssistantContentIndex;
@@ -126,13 +130,55 @@ public final class OpenAiRealtimeVoiceSession {
 
     public OpenAiRealtimeVoiceSession(ModelEndpointConfig endpointConfig,
             String continuityContextJson, boolean fullYolo) {
+        this(endpointConfig, OPENAI_PROVIDER_LABEL, OPENAI_STATUS_LABEL,
+                endpointConfig == null ? MODEL : endpointConfig.modelNameOrDefault(MODEL),
+                endpointConfig == null
+                        ? OPENAI_REALTIME_URL
+                        : endpointConfig.realtimeWebSocketUrl(MODEL),
+                OPENAI_SAMPLE_RATE, OPENAI_SAMPLE_RATE, false, continuityContextJson, fullYolo);
+    }
+
+    OpenAiRealtimeVoiceSession(ModelEndpointConfig endpointConfig, String providerLabel,
+            String statusLabel, String modelName, String realtimeUrl, int inputSampleRate,
+            int outputSampleRate, boolean simpleRealtimeProtocol, String continuityContextJson,
+            boolean fullYolo) {
         mEndpointConfig = endpointConfig == null
                 ? ModelEndpointConfig.directOpenAi("") : endpointConfig;
+        mProviderLabel = emptyToDefault(providerLabel, OPENAI_PROVIDER_LABEL);
+        mStatusLabel = emptyToDefault(statusLabel, OPENAI_STATUS_LABEL);
+        mModelName = emptyToDefault(modelName, MODEL);
+        mRealtimeUrl = realtimeUrl == null ? "" : realtimeUrl.trim();
+        mInputSampleRate = inputSampleRate > 0 ? inputSampleRate : OPENAI_SAMPLE_RATE;
+        mOutputSampleRate = outputSampleRate > 0 ? outputSampleRate : OPENAI_SAMPLE_RATE;
+        mSimpleRealtimeProtocol = simpleRealtimeProtocol;
         mContinuityContextJson = continuityContextJson == null
                 ? "" : continuityContextJson.trim();
         mFullYolo = fullYolo;
     }
 
+    @Override
+    public String providerDisplayName() {
+        return mProviderLabel;
+    }
+
+    @Override
+    public String modelName() {
+        return mModelName;
+    }
+
+    @Override
+    public String privacyDisclosure() {
+        return mProviderLabel + " streams mic audio, screen context, tool calls, and tool "
+                + "results to the configured realtime model endpoint while the session is "
+                + "active. Model audio is played back on the phone.";
+    }
+
+    private static String emptyToDefault(String value, String fallback) {
+        String clean = value == null ? "" : value.trim();
+        return clean.isEmpty() ? fallback : clean;
+    }
+
+    @Override
     public void cancel() {
         mCancelled = true;
         AudioRecord recorder = mRecorder;
@@ -170,13 +216,15 @@ public final class OpenAiRealtimeVoiceSession {
         }
     }
 
-    public void run(String taskId, ModelAdapter.ToolExecutor executor, Callback callback) {
+    @Override
+    public void run(String taskId, ModelAdapter.ToolExecutor executor,
+            MultimodalSession.Callback callback) {
         if (!mEndpointConfig.isConfigured()) {
             callback.onError(mEndpointConfig.missingCredentialReason());
             return;
         }
-        if (mEndpointConfig.isBrokerMode()) {
-            callback.onError("Live Realtime 2 voice needs a direct OpenAI API key for now.");
+        if (mRealtimeUrl.isEmpty()) {
+            callback.onError("missing_realtime_endpoint");
             return;
         }
         if (!ToolCatalog.get().isLoaded()) {
@@ -186,15 +234,18 @@ public final class OpenAiRealtimeVoiceSession {
 
         RealtimeWebSocket socket = null;
         try {
-            Log.i(TAG, "connect model=" + MODEL);
-            socket = RealtimeWebSocket.connect(REALTIME_URL, mEndpointConfig.bearerToken());
+            Log.i(TAG, "connect provider=" + mProviderLabel + " model=" + mModelName);
+            socket = RealtimeWebSocket.connect(mRealtimeUrl, mEndpointConfig.bearerToken());
             mSocket = socket;
-            callback.onStatus("Starting live voice");
+            callback.onStatus("Starting " + mStatusLabel);
             socket.send(sessionUpdateEvent());
+            if (mSimpleRealtimeProtocol) {
+                sendSimpleInputCommit(socket, false);
+            }
             startScreenCache(executor);
             startAudioInput(socket, callback);
             Log.i(TAG, "audio streaming started");
-            callback.onStatus("Live Realtime 2");
+            callback.onStatus(mStatusLabel);
             while (!mCancelled && !executor.isCancelled()) {
                 try {
                     JSONObject event = socket.readJson(EVENT_TIMEOUT_MS);
@@ -205,7 +256,7 @@ public final class OpenAiRealtimeVoiceSession {
                     if (!recovered) {
                         callback.onStatus(mActionResponseOutstanding
                                 || mRetryActionAfterStallCancel
-                                        ? "Thinking" : "Live Realtime 2");
+                                        ? "Thinking" : mStatusLabel);
                     }
                 }
             }
@@ -225,6 +276,11 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private JSONObject sessionUpdateEvent() throws JSONException {
+        if (mSimpleRealtimeProtocol) {
+            return new JSONObject()
+                    .put("type", "session.update")
+                    .put("model", mModelName);
+        }
         JSONObject turnDetection = new JSONObject()
                 .put("type", "semantic_vad")
                 .put("eagerness", "high")
@@ -233,18 +289,18 @@ public final class OpenAiRealtimeVoiceSession {
         JSONObject input = new JSONObject()
                 .put("format", new JSONObject()
                         .put("type", "audio/pcm")
-                        .put("rate", SAMPLE_RATE))
+                        .put("rate", mInputSampleRate))
                 .put("transcription", new JSONObject()
                         .put("model", OpenAiSpeechTranscriber.modelName()))
                 .put("turn_detection", turnDetection);
         JSONObject output = new JSONObject()
                 .put("format", new JSONObject()
                         .put("type", "audio/pcm")
-                        .put("rate", SAMPLE_RATE))
+                        .put("rate", mOutputSampleRate))
                 .put("voice", "marin");
         JSONObject session = new JSONObject()
                 .put("type", "realtime")
-                .put("model", MODEL)
+                .put("model", mModelName)
                 .put("instructions", liveVoiceInstructions(mContinuityContextJson, mFullYolo))
                 .put("output_modalities", new JSONArray().put("audio"))
                 .put("audio", new JSONObject()
@@ -356,11 +412,12 @@ public final class OpenAiRealtimeVoiceSession {
                 + "tool and arguments. ";
     }
 
-    private void startAudioInput(final RealtimeWebSocket socket, final Callback callback)
+    private void startAudioInput(final RealtimeWebSocket socket,
+            final MultimodalSession.Callback callback)
             throws IOException {
-        int minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE,
+        int minBuffer = AudioRecord.getMinBufferSize(mInputSampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        int bufferSize = Math.max(minBuffer, SAMPLE_RATE / 5);
+        int bufferSize = Math.max(minBuffer, mInputSampleRate / 5);
         AudioRecord recorder = createAudioRecord(bufferSize);
         configureAudioEffects(recorder.getAudioSessionId());
         mRecorder = recorder;
@@ -386,6 +443,9 @@ public final class OpenAiRealtimeVoiceSession {
                         byte[] chunk = new byte[read];
                         System.arraycopy(buffer, 0, chunk, 0, read);
                         sendAudioChunk(socket, chunk);
+                        if (maybeCommitSimpleAudioTurn(socket, callback, rms)) {
+                            return;
+                        }
                         maybeStopPlaybackForLocalBargeIn(socket, callback, rms);
                     } catch (IOException | JSONException e) {
                         if (!mCancelled) {
@@ -401,14 +461,38 @@ public final class OpenAiRealtimeVoiceSession {
         audioThread.start();
     }
 
-    private static AudioRecord createAudioRecord(int bufferSize) throws IOException {
+    private boolean maybeCommitSimpleAudioTurn(RealtimeWebSocket socket,
+            MultimodalSession.Callback callback, double rms) throws IOException, JSONException {
+        if (!mSimpleRealtimeProtocol || mSimpleInputFinalCommitted) {
+            return false;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (rms >= SIMPLE_SPEECH_RMS) {
+            mSimpleSpeechStarted = true;
+            mSimpleLastSpeechUptimeMillis = now;
+            return false;
+        }
+        if (!mSimpleSpeechStarted || mSimpleLastSpeechUptimeMillis <= 0L) {
+            return false;
+        }
+        if (now - mSimpleLastSpeechUptimeMillis < SIMPLE_TURN_END_SILENCE_MS) {
+            return false;
+        }
+        sendSimpleInputCommit(socket, true);
+        mSimpleInputFinalCommitted = true;
+        callback.onStatus("Thinking");
+        Log.i(TAG, "simple realtime audio turn committed");
+        return true;
+    }
+
+    private AudioRecord createAudioRecord(int bufferSize) throws IOException {
         int[] sources = new int[] {
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC
         };
         for (int source : sources) {
-            AudioRecord recorder = new AudioRecord(source, SAMPLE_RATE,
+            AudioRecord recorder = new AudioRecord(source, mInputSampleRate,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                     bufferSize);
             if (recorder.getState() == AudioRecord.STATE_INITIALIZED) {
@@ -428,6 +512,13 @@ public final class OpenAiRealtimeVoiceSession {
         socket.send(new JSONObject()
                 .put("type", "input_audio_buffer.append")
                 .put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP)));
+    }
+
+    private static void sendSimpleInputCommit(RealtimeWebSocket socket, boolean terminal)
+            throws IOException, JSONException {
+        socket.send(new JSONObject()
+                .put("type", "input_audio_buffer.commit")
+                .put("final", terminal));
     }
 
     private void startScreenCache(final ModelAdapter.ToolExecutor executor) {
@@ -453,7 +544,7 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private void handleEvent(RealtimeWebSocket socket, String taskId,
-            ModelAdapter.ToolExecutor executor, Callback callback, JSONObject event)
+            ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback, JSONObject event)
             throws IOException, JSONException {
         String type = event.optString("type");
         markActionResponseActivity(type);
@@ -486,6 +577,31 @@ public final class OpenAiRealtimeVoiceSession {
         }
         if ("input_audio_buffer.speech_stopped".equals(type)) {
             callback.onStatus("Observing");
+            return;
+        }
+        if (mSimpleRealtimeProtocol && "transcription.delta".equals(type)) {
+            String delta = event.optString("delta", "");
+            if (!delta.isEmpty()) {
+                mPendingAssistantTranscript =
+                        (mPendingAssistantTranscript == null ? "" : mPendingAssistantTranscript)
+                                + delta;
+            }
+            return;
+        }
+        if (mSimpleRealtimeProtocol && "transcription.done".equals(type)) {
+            String text = event.optString("text", "").trim();
+            if (text.isEmpty()) {
+                text = mPendingAssistantTranscript == null
+                        ? "" : mPendingAssistantTranscript.trim();
+            }
+            mPendingAssistantTranscript = null;
+            if (!text.isEmpty()) {
+                callback.onAssistantTranscript(text);
+            }
+            return;
+        }
+        if (mSimpleRealtimeProtocol && "input_audio_buffer.committed".equals(type)) {
+            callback.onStatus("Thinking");
             return;
         }
         if ("input_audio_buffer.committed".equals(type)) {
@@ -586,7 +702,7 @@ public final class OpenAiRealtimeVoiceSession {
         }
     }
 
-    private void flushAssistantTranscript(Callback callback) {
+    private void flushAssistantTranscript(MultimodalSession.Callback callback) {
         String transcript = mPendingAssistantTranscript;
         if (transcript == null || transcript.trim().isEmpty()) {
             return;
@@ -596,7 +712,7 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private boolean executeFunctionCall(RealtimeWebSocket socket, String taskId,
-            ModelAdapter.ToolExecutor executor, Callback callback, RealtimeFunctionCall call)
+            ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback, RealtimeFunctionCall call)
             throws IOException, JSONException {
         if (call.callId.isEmpty() || mCompletedCallIds.contains(call.callId)) {
             return false;
@@ -770,7 +886,7 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private boolean maybeRecoverStalledActionResponse(RealtimeWebSocket socket,
-            ModelAdapter.ToolExecutor executor, Callback callback)
+            ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback)
             throws IOException, JSONException {
         if (socket == null || executor == null || executor.isCancelled() || mCancelled) {
             return false;
@@ -815,7 +931,7 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private void sendRecoveryAfterStallCancel(RealtimeWebSocket socket,
-            ModelAdapter.ToolExecutor executor, Callback callback, String reason)
+            ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback, String reason)
             throws IOException, JSONException {
         mRetryActionAfterStallCancel = false;
         if (mPendingTerminalToolResponseCreate) {
@@ -1018,6 +1134,9 @@ public final class OpenAiRealtimeVoiceSession {
 
     private synchronized void playAudioDelta(JSONObject event) throws IOException {
         String base64Audio = event.optString("delta", "");
+        if ((base64Audio == null || base64Audio.isEmpty()) && mSimpleRealtimeProtocol) {
+            base64Audio = event.optString("audio", "");
+        }
         if (base64Audio == null || base64Audio.isEmpty()) {
             return;
         }
@@ -1054,10 +1173,10 @@ public final class OpenAiRealtimeVoiceSession {
         if (player != null) {
             return player;
         }
-        int minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE,
+        int minBuffer = AudioTrack.getMinBufferSize(mOutputSampleRate,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        int bufferSize = Math.max(minBuffer, SAMPLE_RATE * 2);
-        player = new AudioTrack(AudioManager.STREAM_MUSIC, SAMPLE_RATE,
+        int bufferSize = Math.max(minBuffer, mOutputSampleRate * 2);
+        player = new AudioTrack(AudioManager.STREAM_MUSIC, mOutputSampleRate,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize, AudioTrack.MODE_STREAM);
         if (player.getState() != AudioTrack.STATE_INITIALIZED) {
@@ -1114,11 +1233,12 @@ public final class OpenAiRealtimeVoiceSession {
         long remainingFrames = Math.max(0, mPlaybackFramesWritten - playbackHeadPosition(player));
         long drainBudgetMs = Math.min(MAX_PLAYBACK_DRAIN_MS,
                 Math.max(PLAYBACK_DRAIN_GRACE_MS,
-                        (remainingFrames * 1000L / SAMPLE_RATE) + PLAYBACK_DRAIN_GRACE_MS));
+                        (remainingFrames * 1000L / mOutputSampleRate)
+                                + PLAYBACK_DRAIN_GRACE_MS));
         long deadline = start + drainBudgetMs;
         while (!mCancelled && SystemClock.uptimeMillis() < deadline) {
             remainingFrames = Math.max(0, mPlaybackFramesWritten - playbackHeadPosition(player));
-            if (remainingFrames <= SAMPLE_RATE / 20) {
+            if (remainingFrames <= mOutputSampleRate / 20) {
                 break;
             }
             try {
@@ -1146,8 +1266,8 @@ public final class OpenAiRealtimeVoiceSession {
         }
     }
 
-    private void maybeStopPlaybackForLocalBargeIn(RealtimeWebSocket socket, Callback callback,
-            double rms) throws IOException, JSONException {
+    private void maybeStopPlaybackForLocalBargeIn(RealtimeWebSocket socket,
+            MultimodalSession.Callback callback, double rms) throws IOException, JSONException {
         if (mCancelled || !mAssistantAudioActive) {
             return;
         }
@@ -1160,7 +1280,7 @@ public final class OpenAiRealtimeVoiceSession {
         requestBargeIn(socket, callback, "local_mic");
     }
 
-    private void requestBargeIn(RealtimeWebSocket socket, Callback callback, String reason)
+    private void requestBargeIn(RealtimeWebSocket socket, MultimodalSession.Callback callback, String reason)
             throws IOException, JSONException {
         long now = SystemClock.uptimeMillis();
         if (now - mLastBargeInUptimeMillis < BARGE_IN_COOLDOWN_MS) {
@@ -1185,7 +1305,7 @@ public final class OpenAiRealtimeVoiceSession {
     }
 
     private void handleServerSpeechStartedDuringPlayback(RealtimeWebSocket socket,
-            Callback callback) throws IOException, JSONException {
+            MultimodalSession.Callback callback) throws IOException, JSONException {
         markResponseInterrupted(SystemClock.uptimeMillis());
         Log.i(TAG, "server speech_started interrupted playback micRms="
                 + Math.round(mRecentMicRms));
@@ -1211,7 +1331,7 @@ public final class OpenAiRealtimeVoiceSession {
         }
         long playedFrames = Math.max(0,
                 playbackHeadPosition(player) - mCurrentAssistantItemStartFrame);
-        int audioEndMs = (int) Math.max(0, playedFrames * 1000L / SAMPLE_RATE);
+        int audioEndMs = (int) Math.max(0, playedFrames * 1000L / mOutputSampleRate);
         mTruncatedAssistantItemIds.add(itemId);
         Log.i(TAG, "conversation truncate prepared for barge-in item=" + itemId
                 + " audioEndMs=" + audioEndMs);
@@ -1647,12 +1767,12 @@ public final class OpenAiRealtimeVoiceSession {
 
     static final class RealtimeWebSocket {
         private static final String WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-        private final SSLSocket mSocket;
+        private final Socket mSocket;
         private final InputStream mInput;
         private final OutputStream mOutput;
         private final SecureRandom mRandom = new SecureRandom();
 
-        private RealtimeWebSocket(SSLSocket socket) throws IOException {
+        private RealtimeWebSocket(Socket socket) throws IOException {
             mSocket = socket;
             mInput = socket.getInputStream();
             mOutput = socket.getOutputStream();
@@ -1660,23 +1780,31 @@ public final class OpenAiRealtimeVoiceSession {
 
         static RealtimeWebSocket connect(String url, String bearerToken) throws IOException {
             URI uri = URI.create(url);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.US);
+            boolean secure = "wss".equals(scheme);
+            if (!secure && !"ws".equals(scheme)) {
+                throw new IOException("Unsupported realtime WebSocket scheme: " + scheme);
+            }
             String host = uri.getHost();
-            int port = uri.getPort() > 0 ? uri.getPort() : 443;
+            int port = uri.getPort() > 0 ? uri.getPort() : secure ? 443 : 80;
             String path = uri.getRawPath();
+            if (path == null || path.isEmpty()) {
+                path = "/";
+            }
             if (uri.getRawQuery() != null && !uri.getRawQuery().isEmpty()) {
                 path += "?" + uri.getRawQuery();
             }
-            SSLSocket socket = (SSLSocket) SSLSocketFactory.getDefault()
-                    .createSocket(host, port);
+            Socket socket = secure
+                    ? SSLSocketFactory.getDefault().createSocket(host, port)
+                    : new Socket(host, port);
             socket.setSoTimeout((int) CONNECT_TIMEOUT_MS);
-            socket.startHandshake();
 
             byte[] nonce = new byte[16];
             new SecureRandom().nextBytes(nonce);
             String key = Base64.encodeToString(nonce, Base64.NO_WRAP);
             StringBuilder request = new StringBuilder()
                     .append("GET ").append(path).append(" HTTP/1.1\r\n")
-                    .append("Host: ").append(host).append("\r\n")
+                    .append("Host: ").append(hostHeader(host, port, secure)).append("\r\n")
                     .append("Upgrade: websocket\r\n")
                     .append("Connection: Upgrade\r\n")
                     .append("Sec-WebSocket-Key: ").append(key).append("\r\n")
@@ -1712,6 +1840,13 @@ public final class OpenAiRealtimeVoiceSession {
             }
             socket.setSoTimeout((int) EVENT_TIMEOUT_MS);
             return new RealtimeWebSocket(socket);
+        }
+
+        private static String hostHeader(String host, int port, boolean secure) {
+            if ((secure && port == 443) || (!secure && port == 80)) {
+                return host;
+            }
+            return host + ":" + port;
         }
 
         synchronized void send(JSONObject event) throws IOException {

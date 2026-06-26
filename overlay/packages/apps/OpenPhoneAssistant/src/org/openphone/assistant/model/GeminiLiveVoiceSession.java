@@ -22,18 +22,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.SocketTimeoutException;
 import java.net.URLEncoder;
 
-public final class GeminiLiveVoiceSession {
+public final class GeminiLiveVoiceSession implements MultimodalSession {
     private static final String TAG = "OpenPhoneGeminiLive";
-
-    public interface Callback {
-        void onStatus(String status);
-        void onUserTranscript(String transcript);
-        void onAssistantTranscript(String transcript);
-        void onToolCall(String toolName);
-        void onToolResult(String toolName, String resultJson);
-        void onError(String message);
-        void onStopped();
-    }
 
     public static final String MODEL = "gemini-3.1-flash-live-preview";
 
@@ -84,6 +74,24 @@ public final class GeminiLiveVoiceSession {
         mFullYolo = fullYolo;
     }
 
+    @Override
+    public String providerDisplayName() {
+        return "Gemini Live";
+    }
+
+    @Override
+    public String modelName() {
+        return MODEL;
+    }
+
+    @Override
+    public String privacyDisclosure() {
+        return "Gemini Live streams mic audio, screen frames, tool calls, and tool results "
+                + "to Gemini while the session is active. Model audio is played back on "
+                + "the phone.";
+    }
+
+    @Override
     public void cancel() {
         mCancelled = true;
         AudioRecord recorder = mRecorder;
@@ -121,7 +129,9 @@ public final class GeminiLiveVoiceSession {
         }
     }
 
-    public void run(String taskId, ModelAdapter.ToolExecutor executor, Callback callback) {
+    @Override
+    public void run(String taskId, ModelAdapter.ToolExecutor executor,
+            MultimodalSession.Callback callback) {
         if (mApiKey.isEmpty()) {
             callback.onError("Gemini Live needs a Gemini API key.");
             return;
@@ -290,7 +300,7 @@ public final class GeminiLiveVoiceSession {
     }
 
     private void startAudioInput(final OpenAiRealtimeVoiceSession.RealtimeWebSocket socket,
-            final Callback callback) throws IOException {
+            final MultimodalSession.Callback callback) throws IOException {
         int minBuffer = AudioRecord.getMinBufferSize(INPUT_SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         int bufferSize = Math.max(minBuffer, INPUT_SAMPLE_RATE / 5);
@@ -366,7 +376,7 @@ public final class GeminiLiveVoiceSession {
     }
 
     private void startScreenInput(final OpenAiRealtimeVoiceSession.RealtimeWebSocket socket,
-            final ModelAdapter.ToolExecutor executor, final Callback callback) {
+            final ModelAdapter.ToolExecutor executor, final MultimodalSession.Callback callback) {
         Thread screenThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -425,7 +435,7 @@ public final class GeminiLiveVoiceSession {
     }
 
     private void handleEvent(OpenAiRealtimeVoiceSession.RealtimeWebSocket socket,
-            String taskId, ModelAdapter.ToolExecutor executor, Callback callback,
+            String taskId, ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback,
             JSONObject event) throws IOException, JSONException {
         JSONObject error = event.optJSONObject("error");
         if (error != null) {
@@ -441,7 +451,7 @@ public final class GeminiLiveVoiceSession {
         }
     }
 
-    private void handleServerContent(Callback callback, JSONObject serverContent)
+    private void handleServerContent(MultimodalSession.Callback callback, JSONObject serverContent)
             throws IOException, JSONException {
         if (serverContent.optBoolean("interrupted", false)) {
             Log.i(TAG, "server interrupted current generation micRms="
@@ -484,7 +494,7 @@ public final class GeminiLiveVoiceSession {
     }
 
     private void executeToolCall(OpenAiRealtimeVoiceSession.RealtimeWebSocket socket,
-            String taskId, ModelAdapter.ToolExecutor executor, Callback callback,
+            String taskId, ModelAdapter.ToolExecutor executor, MultimodalSession.Callback callback,
             JSONObject toolCall) throws IOException, JSONException {
         JSONArray calls = toolCall.optJSONArray("functionCalls");
         if (calls == null || calls.length() == 0) {
@@ -633,7 +643,7 @@ public final class GeminiLiveVoiceSession {
         }
     }
 
-    private void maybeStopPlaybackForLocalBargeIn(Callback callback, double rms) {
+    private void maybeStopPlaybackForLocalBargeIn(MultimodalSession.Callback callback, double rms) {
         if (mCancelled || !mAssistantAudioActive) {
             return;
         }
@@ -676,7 +686,7 @@ public final class GeminiLiveVoiceSession {
         return current + " " + chunk;
     }
 
-    private void flushTranscripts(Callback callback) {
+    private void flushTranscripts(MultimodalSession.Callback callback) {
         String userTranscript = mPendingUserTranscript;
         if (userTranscript != null && !userTranscript.trim().isEmpty()) {
             mPendingUserTranscript = null;

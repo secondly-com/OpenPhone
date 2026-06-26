@@ -2,7 +2,6 @@ package org.openphone.assistant;
 
 import android.app.Service;
 import android.content.Intent;
-import android.os.Build;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.openphone.OpenPhoneAgentManager;
@@ -294,15 +293,7 @@ public final class OpenPhoneAssistantService extends Service {
     }
 
     private ModelEndpointConfig sheetModelEndpointConfig() {
-        // Sheet answers run in the assistant service with no activity-held dev key,
-        // so the Secure setting is the only credential source (dev builds only) —
-        // same pattern as background watcher evaluation.
-        if (!"userdebug".equals(Build.TYPE) && !"eng".equals(Build.TYPE)) {
-            return ModelEndpointConfig.directOpenAi("");
-        }
-        String apiKey = Settings.Secure.getString(getContentResolver(),
-                "openphone_dev_openai_api_key");
-        return ModelEndpointConfig.directOpenAi(apiKey == null ? "" : apiKey);
+        return ModelEndpointConfig.fromStoredSettings(getApplicationContext());
     }
 
     private static String summarizeScreen(String prompt, String screenJson, String uiTreeJson) {

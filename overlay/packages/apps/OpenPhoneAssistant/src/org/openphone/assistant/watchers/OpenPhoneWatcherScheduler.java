@@ -6,9 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.openphone.OpenPhoneAgentManager;
-import android.os.Build;
 import android.os.UserManager;
-import android.provider.Settings;
 import android.provider.Telephony;
 import android.telephony.PhoneNumberUtils;
 import android.util.Log;
@@ -1099,15 +1097,7 @@ public final class OpenPhoneWatcherScheduler {
     }
 
     private static ModelEndpointConfig watcherModelEndpointConfig(Context context) {
-        // Watchers run from a BroadcastReceiver with no activity, so the in-memory dev
-        // key held by the assistant UI is unavailable; the Secure setting is the only
-        // credential source for background evaluation (dev builds only).
-        if (!"userdebug".equals(Build.TYPE) && !"eng".equals(Build.TYPE)) {
-            return ModelEndpointConfig.directOpenAi("");
-        }
-        String apiKey = Settings.Secure.getString(context.getContentResolver(),
-                "openphone_dev_openai_api_key");
-        return ModelEndpointConfig.directOpenAi(apiKey == null ? "" : apiKey);
+        return ModelEndpointConfig.fromStoredSettings(context.getApplicationContext());
     }
 
     private static String webTextForJudgment(byte[] content) {

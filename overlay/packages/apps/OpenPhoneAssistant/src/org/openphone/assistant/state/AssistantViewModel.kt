@@ -172,6 +172,8 @@ class AssistantViewModel(
                     useRealtime2 = true,
                     useLiveRealtimeVoice = true,
                     useBroker = false,
+                    providerMode = "openai_responses",
+                    modelId = "gpt-5.4-mini",
                     brokerUrl = "https://broker.openphone.invalid/v1",
                     disclosure = "Live Realtime 2 with the classic OpenPhone agent available.",
                 ),

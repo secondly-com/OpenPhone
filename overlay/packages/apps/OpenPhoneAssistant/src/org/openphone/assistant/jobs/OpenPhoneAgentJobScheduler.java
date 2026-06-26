@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.UserManager;
-import android.provider.Settings;
 import android.util.Log;
 
 import android.openphone.OpenPhoneAgentManager;
@@ -207,12 +206,7 @@ public final class OpenPhoneAgentJobScheduler {
     }
 
     private static ModelEndpointConfig backgroundEndpointConfig(Context context) {
-        if (!"userdebug".equals(Build.TYPE) && !"eng".equals(Build.TYPE)) {
-            return ModelEndpointConfig.directOpenAi("");
-        }
-        String apiKey = Settings.Secure.getString(context.getContentResolver(),
-                "openphone_dev_openai_api_key");
-        return ModelEndpointConfig.directOpenAi(apiKey == null ? "" : apiKey);
+        return ModelEndpointConfig.fromStoredSettings(context.getApplicationContext());
     }
 
     private static String taskRequestJson(AgentJobRecord job) {

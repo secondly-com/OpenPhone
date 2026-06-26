@@ -7,6 +7,9 @@ build, architecture, release, device, and policy docs.
 
 - [Architecture](ARCHITECTURE.md) - system layers, OS services, agent runtime,
   and current implementation boundaries.
+- [Model Router](MODEL_ROUTER.md) - Android-local BYOK model routing for
+  OpenAI, OpenAI-compatible endpoints, Ollama, Qwen Omni realtime endpoints,
+  and the optional remote broker.
 - [Build](BUILD.md) - Android repo sync, patch application, generic build, and
   Pixel 9a build commands.
 - [Testing](TESTING.md) - repository checks, physical device smoke tests,

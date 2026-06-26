@@ -76,9 +76,9 @@ public final class LocalHeuristicModelAdapter implements ModelAdapter {
                     + "Ask a question, or use an action request like \"Open Settings\".";
         }
         if (message.endsWith("?")) {
-            return "I can answer simple questions locally, but cloud chat is not configured. "
-                    + "Open Developer settings and enable the broker or development API key "
-                    + "for full AI chat.";
+            return "I can answer simple questions locally, but network chat is not configured. "
+                    + "Open Developer settings and choose OpenAI, OpenAI-compatible, "
+                    + "Ollama, Qwen Omni, or broker mode for full AI chat.";
         }
         return "I can chat here. For phone actions, phrase it as a command like "
                 + "\"Open Settings\" or \"Go back\".";
@@ -698,7 +698,7 @@ public final class LocalHeuristicModelAdapter implements ModelAdapter {
             }
             return error("task.failed",
                     "The local development adapter cannot complete this phone task. "
-                            + "Enable the OpenPhone model broker or development API key "
+                            + "Enable OpenAI, OpenAI-compatible, Ollama, Qwen Omni, or broker mode "
                             + "for full phone-agent tasks.",
                     steps);
         } catch (JSONException e) {

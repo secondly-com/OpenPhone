@@ -98,10 +98,14 @@ The current repo implements the first OpenPhone product layer:
 - Confirmed share chooser actions.
 - One-shot pending action confirmation through the assistant control surface.
 - Durable framework audit log under `/data/system/openphone/`.
-- Model adapter transport split between direct development provider calls and
-  an OpenPhone broker/proxy mode. The broker mode keeps provider API keys off
-  the phone by sending Responses/transcription-shaped requests to an
-  OpenPhone-controlled endpoint with a session token.
+- Android-local model router for bring-your-own-key and self-hosted endpoints.
+  The assistant can call OpenAI Responses, OpenAI-compatible chat-completions
+  servers, Ollama `/api/chat`, Qwen Omni realtime endpoints, or the optional
+  remote OpenPhone broker through one model-router path. Live omni providers
+  use a shared `MultimodalSession` lifecycle so OpenAI Realtime and
+  OpenAI-style self-hosted realtime endpoints plug into the same assistant
+  voice/tool callback flow. The model-router contract and cleanup plan are
+  documented in [MODEL_ROUTER.md](MODEL_ROUTER.md).
 - First reference model broker under `services/model-broker/` for development
   deployments. It accepts phone-side broker requests, validates bearer session
   tokens, applies coarse size/rate limits, avoids request-body logging, and
