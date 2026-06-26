@@ -30,7 +30,9 @@ fi
   exit 1
 }
 
-python3 - <<'PY' "$input"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+python3 - <<'PY' "$input" "$root"
 import base64
 import json
 import pathlib
@@ -38,15 +40,12 @@ import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
-root = pathlib.Path(__file__).resolve().parents[1] if "__file__" in globals() else pathlib.Path.cwd()
-contract_path = pathlib.Path.cwd() / "schemas/audit-event.schema.json"
-if not contract_path.is_file():
-    contract_path = path.parent / "schemas/audit-event.schema.json"
+root = pathlib.Path(sys.argv[2])
+contract_path = root / "schemas/audit-event.schema.json"
 
 allowed_events = None
-if contract_path.is_file():
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    allowed_events = set(contract["properties"]["event_type"]["enum"])
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+allowed_events = set(contract["properties"]["event_type"]["enum"])
 
 secret_name_re = re.compile(r"(api[_-]?key|authorization|token|secret|private[_-]?key)", re.I)
 secret_value_re = re.compile(
