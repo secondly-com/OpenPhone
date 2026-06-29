@@ -29,6 +29,8 @@ build, architecture, release, device, and policy docs.
   Pixel 9a build commands.
 - [Testing](TESTING.md) - repository checks, physical device smoke tests,
   assistant evals, and trajectory validation.
+- [PR Reviewer Routine](PR_REVIEWER_ROUTINE.md) - Codex/GitHub pull request
+  review triggers, checklist, severity, eval requests, and exit conditions.
 - [Capability Model](CAPABILITIES.md) - named capabilities, risk levels, and
   policy configuration.
 - [Local Agent Notes](LOCAL_AGENT_NOTES.md) - convention for ignored local-only

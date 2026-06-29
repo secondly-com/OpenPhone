@@ -94,6 +94,10 @@ Use for pull requests before merge.
 The goal is not to make agents argue forever. The loop exits when findings are
 fixed, explicitly declined, or moved to follow-up work.
 
+Use [PR Reviewer Routine](PR_REVIEWER_ROUTINE.md) for the concrete triggers,
+context, severity model, device-eval requirements, GitHub Actions/Codex
+integration path, and exit conditions.
+
 ### Docs Freshness Loop
 
 Run regularly, and whenever product behavior changes.
@@ -191,7 +195,8 @@ Good lanes:
 These routines should run in isolated worktrees where possible.
 
 - **PR reviewer:** review new pull requests for correctness, safety, docs drift,
-  missing tests, and privacy risk.
+  missing tests, privacy risk, release risk, and required device/eval evidence.
+  See [PR Reviewer Routine](PR_REVIEWER_ROUTINE.md).
 - **CI watchdog:** when CI fails, produce a diagnosis or small patch.
 - **Daily docs gardener:** find stale, contradictory, or orphaned docs and
   propose a small cleanup.
