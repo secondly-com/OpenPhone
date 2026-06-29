@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npm run typecheck && npm run build",
+  "installCommand": "npm ci --ignore-scripts",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "rootDirectory": "apps/docs"
+}

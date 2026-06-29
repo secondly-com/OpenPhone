@@ -3,7 +3,8 @@
 This is the public documentation map for OpenPhone. Start here for current
 build, architecture, release, device, and policy docs.
 
-The first static docs site scaffold uses Mintlify. Validate it locally with:
+The first static docs site scaffold uses Fumadocs with a Next.js app in
+`apps/docs`. Build it locally with:
 
 ```bash
 ./scripts/build-docs.sh

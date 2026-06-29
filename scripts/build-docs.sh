@@ -4,14 +4,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-export npm_config_yes=true
+cd "$root/apps/docs"
 
-cd "$root/docs"
-
-if ! command -v npx >/dev/null 2>&1; then
-  printf 'npx is required to run Mintlify docs validation\n' >&2
+if ! command -v npm >/dev/null 2>&1; then
+  printf 'npm is required to build the Fumadocs site\n' >&2
   exit 1
 fi
 
-npx mint@latest validate
-npx mint@latest broken-links
+npm ci --ignore-scripts
+npm run typecheck
+npm run build
