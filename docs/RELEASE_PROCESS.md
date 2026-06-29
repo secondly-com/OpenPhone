@@ -76,6 +76,7 @@ Repository:
 Validation:
 
 - `./scripts/check.sh` passes.
+- `./scripts/check-release-notes.sh <version> [release-notes.md]` passes.
 - `git diff --check` passes.
 - `./scripts/verify-tegu-device.sh` output is captured for any Pixel 9a OTA
   artifact that is being published.
@@ -162,6 +163,13 @@ scripts/generate-release-manifest.sh 0.0.1-preview .worktree/releases/v0.0.1-pre
 scripts/validate-release-artifacts.sh .worktree/releases/v0.0.1-preview
 scripts/prepare-github-release.sh \
   0.0.1-preview .worktree/releases/v0.0.1-preview docs/releases/0.0.1.md
+```
+
+Before publishing, validate that the GitHub release tag, release notes file,
+and changelog are aligned:
+
+```bash
+scripts/check-release-notes.sh v0.0.1-preview docs/releases/0.0.1.md
 ```
 
 Attach the generated OTA ZIP, `SHA256SUMS`, and `ARTIFACTS.md` to the GitHub

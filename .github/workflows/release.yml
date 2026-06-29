@@ -14,6 +14,10 @@ on:
         type: choice
         options:
           - tegu
+      release_notes:
+        description: "Release notes markdown file to publish"
+        required: true
+        default: "docs/releases/0.0.1.md"
       prerelease:
         description: "Mark as a GitHub prerelease"
         required: true
@@ -22,10 +26,6 @@ on:
         options:
           - "true"
           - "false"
-      release_notes:
-        description: "Release notes markdown file to publish"
-        required: true
-        default: "docs/releases/0.0.1.md"
       make_latest:
         description: "Whether this GitHub release becomes Latest"
         required: true
@@ -56,6 +56,7 @@ jobs:
         run: |
           set -euxo pipefail
           ./scripts/check.sh
+          ./scripts/check-release-notes.sh "${{ inputs.version }}" "${{ inputs.release_notes }}"
           git diff --check
           test -f "${{ inputs.release_notes }}"
 

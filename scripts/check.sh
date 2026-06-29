@@ -64,6 +64,7 @@ required=(
   manifests/openphone.xml
   scripts/prepare-tegu-dtb.sh
   scripts/generate-release-manifest.sh
+  scripts/check-release-notes.sh
   scripts/generate-ota-feed.sh
   scripts/prepare-github-release.sh
   scripts/prepare-release-signing.sh
