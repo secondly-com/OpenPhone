@@ -128,21 +128,24 @@ validation point.
 
 ## GitHub Actions And Codex Path
 
-The current repo already has the lightweight automation this routine can rely
-on:
+The current repo has lightweight automation for this routine:
 
 - `.github/workflows/ci.yml` runs on pull requests and executes
   `./scripts/check.sh` plus `git diff --check`;
+- `.github/workflows/codex-pr-review.yml` runs on every non-draft pull request,
+  checks out the PR merge ref, invokes `openai/codex-action@v1` with the
+  tracked `.github/codex/prompts/pr-review.md` prompt, and posts the review
+  output as a PR comment from a read-only Codex sandbox;
 - `.github/workflows/eval.yml` can be dispatched for physical trajectory
   smokes, benchmarks, and optional OpenClaw runtime smoke on the
   `openphone-device` runner.
 
-An obvious first integration is a Codex/GitHub routine that runs on
-`pull_request` events after CI finishes, checks out the PR in an isolated
-worktree, reads the required context above, summarizes CI/eval evidence, and
-posts review comments using this severity model. It should request the existing
-manual `eval.yml` workflow instead of adding new device automation until the
-review comments prove useful and low-noise.
+The Codex PR review workflow intentionally does not run repository scripts or
+tests from the PR branch because it receives `OPENAI_API_KEY`. CI runs
+`./scripts/check.sh` and `git diff --check` separately without model secrets.
+The reviewer should inspect the diff, identify missing evidence, and request
+the existing manual `eval.yml` workflow when device or runtime evidence is
+needed.
 
 ## Exit Conditions
 

@@ -123,6 +123,8 @@ See `docs/LOCAL_AGENT_NOTES.md`.
 ### Current Baseline
 
 - `ci.yml` runs repository checks and whitespace checks on GitHub-hosted Linux.
+- `codex-pr-review.yml` runs Codex reviewer comments on every non-draft pull
+  request using the tracked PR reviewer prompt.
 - `eval.yml` runs physical trajectory smokes on the `openphone-device`
   self-hosted runner.
 - `release.yml` runs release work on the `openphone-build` self-hosted runner.
@@ -194,9 +196,6 @@ Good lanes:
 
 These routines should run in isolated worktrees where possible.
 
-- **PR reviewer:** review new pull requests for correctness, safety, docs drift,
-  missing tests, privacy risk, release risk, and required device/eval evidence.
-  See [PR Reviewer Routine](PR_REVIEWER_ROUTINE.md).
 - **CI watchdog:** when CI fails, produce a diagnosis or small patch.
 - **Daily docs gardener:** find stale, contradictory, or orphaned docs and
   propose a small cleanup.

@@ -55,3 +55,23 @@ Commit shape:
 - Prefer one atomic commit per green unit of work.
 - Do not commit unrelated local changes.
 - Summarize changed files, validation run, and any residual risk.
+
+## Pull Request Review Routine
+
+When reviewing PRs, act as a correctness, safety, privacy, docs, release, and
+eval reviewer before acting as a style reviewer.
+
+- Compare the PR against the base branch, not just the latest commit.
+- Read `.github/pull_request_template.md`, `docs/AI_FIRST_ENGINEERING.md`, and
+  `docs/PR_REVIEWER_ROUTINE.md`.
+- Lead with actionable findings by severity: `blocker`, `high`, `medium`,
+  then `low`.
+- Treat assistant, runtime, OpenClaw, watcher, background-job, device-control,
+  policy, audit, release, runner, screenshot, accessibility, notification,
+  message, call, location, memory, trajectory, and audit-log changes as
+  high-scrutiny areas.
+- Require clear validation evidence, and call out missing device, emulator,
+  OpenClaw, trajectory, benchmark, or release validation when behavior needs
+  it.
+- Do not request broad rewrites or style-only churn unless it protects a
+  contract or prevents future agent confusion.

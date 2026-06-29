@@ -52,8 +52,10 @@ required=(
   schemas/screen-context.schema.json
   schemas/trajectory-event.schema.json
   .github/workflows/ci.yml
+  .github/workflows/codex-pr-review.yml
   .github/workflows/eval.yml
   .github/workflows/release.yml
+  .github/codex/prompts/pr-review.md
   .github/RUNNERS.md
   .github/ISSUE_TEMPLATE/bug_report.md
   .github/ISSUE_TEMPLATE/feature_request.md
