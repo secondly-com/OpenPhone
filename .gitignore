@@ -11,3 +11,8 @@ docs/local/
 docs/local-temp/
 __pycache__/
 *.pyc
+apps/docs/.next/
+apps/docs/.source/
+apps/docs/content/docs/
+apps/docs/node_modules/
+apps/docs/tsconfig.tsbuildinfo

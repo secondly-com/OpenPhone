@@ -1,0 +1,32 @@
+{
+  "title": "OpenPhone",
+  "pages": [
+    "index",
+    "---Concepts---",
+    "AI_FIRST_ENGINEERING",
+    "ARCHITECTURE",
+    "CAPABILITIES",
+    "AGENT_RUNTIME_V1",
+    "---Build---",
+    "BUILD",
+    "EMULATOR",
+    "GMS",
+    "---Testing---",
+    "TESTING",
+    "---Runtime---",
+    "runtime",
+    "---Devices---",
+    "DEVICE_SUPPORT",
+    "devices",
+    "TEGU_BOOTCHAIN",
+    "---Releases---",
+    "RELEASE_PROCESS",
+    "releases",
+    "---Legal---",
+    "LICENSING",
+    "legal",
+    "---Contributing---",
+    "contribution-guide",
+    "LOCAL_AGENT_NOTES"
+  ]
+}
