@@ -15,7 +15,8 @@ OpenPhone-owned materials are licensed as follows:
 
 The authoritative files are:
 
-- [LICENSE](../LICENSE): repository license summary and boundary statement.
+- [LICENSE](https://github.com/secondly-com/OpenPhone/blob/main/LICENSE):
+  repository license summary and boundary statement.
 - [LICENSE.noncommercial](legal/LICENSE.noncommercial): full PolyForm
   Noncommercial License 1.0.0 text.
 - [COMMERCIAL.md](legal/COMMERCIAL.md): commercial licensing policy.
@@ -86,6 +87,6 @@ Every supported device should document:
 ## Contributions
 
 External contributions require the contributor policy in
-[CONTRIBUTING.md](../.github/CONTRIBUTING.md). The key requirement is that contributors
+[CONTRIBUTING.md](https://github.com/secondly-com/OpenPhone/blob/main/.github/CONTRIBUTING.md). The key requirement is that contributors
 must agree that OpenPhone may distribute their contribution under both the
 public non-commercial license and separate commercial licenses.

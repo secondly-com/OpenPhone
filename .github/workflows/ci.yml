@@ -29,8 +29,16 @@ jobs:
         with:
           packages: 'platforms;android-35'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install validation tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+
+      - name: Build docs site
+        run: ./scripts/build-docs.sh
 
       - name: Run OpenPhone checks
         run: ./scripts/check.sh

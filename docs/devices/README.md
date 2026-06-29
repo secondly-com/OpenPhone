@@ -3,7 +3,7 @@
 OpenPhone device support is tracked per exact model and codename.
 
 Candidate ports usually start from the official LineageOS supported-device
-list: <https://wiki.lineageos.org/devices/>. OpenPhone only marks a device as
+list: [LineageOS devices](https://wiki.lineageos.org/devices/). OpenPhone only marks a device as
 supported after OpenPhone-specific bringup and validation.
 
 The first physical bringup target is Google Pixel 9a / `tegu`. The current

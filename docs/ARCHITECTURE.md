@@ -76,7 +76,7 @@ The current repo implements the first OpenPhone product layer:
   The protocol is documented in
   [runtime/runtime-agent-protocol.md](runtime/runtime-agent-protocol.md), with
   machine-readable command/event/capability manifests in
-  [`runtime/protocol`](../runtime/protocol).
+  [`runtime/protocol`](https://github.com/secondly-com/OpenPhone/tree/main/runtime/protocol).
 - Local manifest and patch-stack workflow.
 - Hidden OpenPhone framework manager and Binder service.
 - `system_server` OpenPhone agent manager service.

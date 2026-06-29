@@ -4,7 +4,7 @@ OpenPhone supports exact device models, not generic Android phones.
 
 OpenPhone uses LineageOS device infrastructure where possible. The official
 LineageOS supported-device list is the starting point for candidate ports:
-<https://wiki.lineageos.org/devices/>. A LineageOS-supported device is not
+[LineageOS supported-device list](https://wiki.lineageos.org/devices/). A LineageOS-supported device is not
 automatically an OpenPhone-supported device; OpenPhone support requires its own
 product target, flash notes, hardware validation, agent validation, and release
 coverage.

@@ -3,6 +3,12 @@
 This is the public documentation map for OpenPhone. Start here for current
 build, architecture, release, device, and policy docs.
 
+The first static docs site scaffold uses Mintlify. Validate it locally with:
+
+```bash
+./scripts/build-docs.sh
+```
+
 ## Start Here
 
 - [Architecture](ARCHITECTURE.md) - system layers, OS services, agent runtime,

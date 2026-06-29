@@ -1,0 +1,146 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "OpenPhone",
+  "description": "AI-first Android distribution docs for OpenPhone architecture, runtime contracts, builds, devices, releases, and contribution workflows.",
+  "theme": "mint",
+  "icons": {
+    "library": "lucide"
+  },
+  "colors": {
+    "primary": "#1E7A8A",
+    "dark": "#45B7C7",
+    "light": "#176E7D"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/secondly-com/OpenPhone",
+        "icon": "github"
+      },
+      {
+        "label": "Releases",
+        "href": "https://github.com/secondly-com/OpenPhone/releases",
+        "icon": "package"
+      }
+    ]
+  },
+  "navigation": {
+    "languages": [
+      {
+        "language": "en",
+        "tabs": [
+          {
+            "tab": "Concepts",
+            "groups": [
+              {
+                "group": "Overview",
+                "pages": [
+                  "index",
+                  "AI_FIRST_ENGINEERING",
+                  "ARCHITECTURE",
+                  "CAPABILITIES",
+                  "AGENT_RUNTIME_V1"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Build",
+            "groups": [
+              {
+                "group": "Build OpenPhone",
+                "pages": [
+                  "BUILD",
+                  "EMULATOR",
+                  "GMS"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Testing",
+            "groups": [
+              {
+                "group": "Validation",
+                "pages": [
+                  "TESTING"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Runtime",
+            "groups": [
+              {
+                "group": "Agent Runtime",
+                "pages": [
+                  "runtime/runtime-agent-protocol",
+                  "runtime/security-model",
+                  "runtime/mcp-bridge",
+                  "runtime/openclaw-integration",
+                  "runtime/hermes-integration"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Devices",
+            "groups": [
+              {
+                "group": "Device Support",
+                "pages": [
+                  "DEVICE_SUPPORT",
+                  "devices/index",
+                  "devices/MATRIX",
+                  "devices/tegu",
+                  "TEGU_BOOTCHAIN"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Releases",
+            "groups": [
+              {
+                "group": "Release Management",
+                "pages": [
+                  "RELEASE_PROCESS",
+                  "releases/index",
+                  "releases/history",
+                  "releases/0.0.1"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Legal",
+            "groups": [
+              {
+                "group": "Policies",
+                "pages": [
+                  "LICENSING",
+                  "legal/index",
+                  "legal/COMMERCIAL",
+                  "legal/THIRD_PARTY_NOTICES"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "Contributing",
+            "groups": [
+              {
+                "group": "Contribution Guide",
+                "pages": [
+                  "contribution-guide",
+                  "LOCAL_AGENT_NOTES"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
