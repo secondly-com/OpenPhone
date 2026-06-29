@@ -56,7 +56,10 @@ else
 fi
 
 info "mounting $image_path"
-mount_output="$(hdiutil attach "$image_path" -mountpoint "$OPENPHONE_ROOT/.worktree/$volume_name" -nobrowse 2>&1 || true)"
+mount_output="$(hdiutil attach "$image_path" -mountpoint "$OPENPHONE_ROOT/.worktree/$volume_name" -nobrowse 2>&1)" || {
+  printf '%s\n' "$mount_output" >&2
+  die "failed to mount sparsebundle: $image_path"
+}
 printf '%s\n' "$mount_output"
 
 mount_path="$OPENPHONE_ROOT/.worktree/$volume_name"
