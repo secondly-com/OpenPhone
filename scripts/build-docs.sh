@@ -4,7 +4,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-cd "$root/apps/docs"
+cd "$root/docs/site"
 
 if ! command -v npm >/dev/null 2>&1; then
   printf 'npm is required to build the Fumadocs site\n' >&2

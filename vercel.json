@@ -3,5 +3,5 @@
   "installCommand": "npm ci --ignore-scripts",
   "framework": "nextjs",
   "outputDirectory": ".next",
-  "rootDirectory": "apps/docs"
+  "rootDirectory": "docs/site"
 }

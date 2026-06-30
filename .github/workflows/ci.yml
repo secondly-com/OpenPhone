@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: apps/docs/package-lock.json
+          cache-dependency-path: docs/site/package-lock.json
 
       - name: Install validation tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
