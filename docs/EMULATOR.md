@@ -204,6 +204,36 @@ Expected signs of a working emulator:
   registered services
 - `org.openphone.assistant` is installed
 
+## CI Smoke
+
+The emulator path is also a CI gate. The
+[Emulator workflow](../.github/workflows/emulator.yml) runs on pull requests
+that touch runtime, assistant, overlay, patch, integration, or emulator
+scripts. It uses a self-hosted `openphone-emulator` runner and calls:
+
+```bash
+./scripts/run-emulator-smoke.sh --arch x86_64
+```
+
+The smoke harness:
+
+- builds or reuses the OpenPhone SDK phone image;
+- boots a wiped headless emulator;
+- waits for `sys.boot_completed=1`;
+- verifies OpenPhone framework services are registered;
+- verifies `org.openphone.assistant` is installed;
+- starts the assistant UI;
+- runs `runtime status` through the OpenPhone CLI;
+- invokes `openphone.screen.get` through the ADB runtime transport;
+- runs one local assistant task without provider API keys;
+- uploads logcat, screenshot, UI XML, runtime status, screen result, and
+  assistant smoke output as workflow artifacts.
+
+This is the fast merge gate for AI-generated runtime and assistant changes. It
+does not replace the nightly physical `openphone-device` eval, but it should
+catch broken boot, package, service, ADB transport, CLI, and local assistant
+paths before code reaches device-only validation.
+
 ## CLI And MCP On The Emulator
 
 The local Runtime CLI and MCP server use ADB, so they can target the emulator

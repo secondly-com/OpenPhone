@@ -17,6 +17,7 @@ required=(
   docs/BUILD.md
   docs/CAPABILITIES.md
   docs/DEVICE_SUPPORT.md
+  docs/EMULATOR.md
   docs/GMS.md
   docs/LOCAL_AGENT_NOTES.md
   docs/LICENSING.md
@@ -52,6 +53,7 @@ required=(
   schemas/screen-context.schema.json
   schemas/trajectory-event.schema.json
   .github/workflows/ci.yml
+  .github/workflows/emulator.yml
   .github/workflows/eval.yml
   .github/workflows/release.yml
   .github/RUNNERS.md
@@ -138,6 +140,7 @@ required=(
   overlay/vendor/openphone/products/openphone_tegu.mk
   scripts/bootstrap-android-build-host.sh
   scripts/build-emulator.sh
+  scripts/run-emulator-smoke.sh
   scripts/run-emulator.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp
   overlay/packages/apps/OpenPhoneAssistant/AndroidManifest.xml
