@@ -266,7 +266,7 @@ git fetch origin "$ref" || true
 git checkout --force "$ref" || git checkout --force FETCH_HEAD
 
 ./scripts/bootstrap-android-build-host.sh
-./scripts/check.sh
+OPENPHONE_SKIP_JAVA_CHECK=1 ./scripts/check.sh
 
 if [[ "$skip_build" != "1" ]]; then
   mkdir -p "$OPENPHONE_ANDROID_DIR"
@@ -276,6 +276,7 @@ if [[ "$skip_build" != "1" ]]; then
     ./scripts/sync.sh -j"$(nproc)"
   fi
   ./scripts/apply-patches.sh
+  ./scripts/check.sh
 fi
 
 IFS=',' read -r -a runtimes <<< "$runtime_csv"
