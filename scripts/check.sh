@@ -55,6 +55,7 @@ required=(
   .github/workflows/ci.yml
   .github/workflows/emulator.yml
   .github/workflows/eval.yml
+  .github/workflows/gcp-lab.yml
   .github/workflows/release.yml
   .github/RUNNERS.md
   .github/ISSUE_TEMPLATE/bug_report.md
@@ -142,6 +143,18 @@ required=(
   scripts/build-emulator.sh
   scripts/run-emulator-smoke.sh
   scripts/run-emulator.sh
+  scripts/lab/allocate-slot.sh
+  scripts/lab/up.sh
+  scripts/lab/down.sh
+  scripts/lab/local-up.sh
+  scripts/lab/local-down.sh
+  scripts/lab/smoke.sh
+  scripts/lab/gcp/common.sh
+  scripts/lab/gcp/setup-wif.sh
+  scripts/lab/gcp/create-vm.sh
+  scripts/lab/gcp/delete-vm.sh
+  scripts/lab/gcp/bootstrap-vm.sh
+  scripts/lab/gcp/run-smoke.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp
   overlay/packages/apps/OpenPhoneAssistant/AndroidManifest.xml
   overlay/packages/apps/OpenPhoneAssistant/LICENSE
@@ -187,7 +200,8 @@ for file in "${required[@]}"; do
   }
 done
 
-for script in "$root"/scripts/*.sh; do
+for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/gcp/*.sh; do
+  [[ -e "$script" ]] || continue
   bash -n "$script"
 done
 

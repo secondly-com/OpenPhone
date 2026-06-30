@@ -12,6 +12,7 @@ on:
       - "runtime/**"
       - "scripts/build.sh"
       - "scripts/build-emulator.sh"
+      - "scripts/lab/**"
       - "scripts/run-emulator*.sh"
       - "scripts/run-assistant-task.sh"
   push:
@@ -27,6 +28,7 @@ on:
       - "runtime/**"
       - "scripts/build.sh"
       - "scripts/build-emulator.sh"
+      - "scripts/lab/**"
       - "scripts/run-emulator*.sh"
       - "scripts/run-assistant-task.sh"
   workflow_dispatch:
@@ -91,12 +93,19 @@ jobs:
         run: |
           set -euxo pipefail
           arch="${{ inputs.arch || vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
-          ./scripts/run-emulator-smoke.sh --arch "$arch"
+          slot="ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          ./scripts/lab/allocate-slot.sh --slot "$slot"
+          # shellcheck disable=SC1090
+          source ".worktree/lab/$slot/env"
+          ./scripts/lab/smoke.sh \
+            --slot "$OPENPHONE_LAB_SLOT" \
+            --arch "$arch" \
+            --ci
 
       - name: Upload emulator smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: openphone-emulator-smoke
-          path: .worktree/emulator-smoke/
+          path: .worktree/lab/*/artifacts/emulator-smoke/
           if-no-files-found: warn

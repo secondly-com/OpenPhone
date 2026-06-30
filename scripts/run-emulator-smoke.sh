@@ -16,6 +16,7 @@ and runs the fast OpenPhone runtime smoke checks used by CI.
 Options:
   --arch arm64|x86_64      Emulator image architecture. Default: host arch.
   --variant eng|userdebug  Emulator build variant. Default: eng.
+  --slot <name>            Lab slot name for isolated data/artifacts.
   --port <port>            Emulator console port. Default: 5584.
   --serial <serial>        ADB serial. Default: emulator-<port>.
   --timeout <seconds>      Boot timeout. Default: 600.
@@ -25,6 +26,10 @@ Options:
 
 Environment:
   OPENPHONE_ANDROID_DIR                 Android checkout path.
+  OPENPHONE_LAB_SLOT                    Lab slot name.
+  OPENPHONE_LAB_DIR                     Lab slot directory.
+  OPENPHONE_EMULATOR_PORT               Emulator console port.
+  OPENPHONE_EMULATOR_SERIAL             Emulator ADB serial.
   OPENPHONE_EMULATOR_BUILD              Set to 0 to skip build.
   OPENPHONE_EMULATOR_ASSISTANT_SMOKE    Set to 0 to skip local assistant task.
   OPENPHONE_EMULATOR_ARGS               Extra emulator arguments.
@@ -43,7 +48,8 @@ detect_emulator_arch() {
 
 arch=""
 variant="eng"
-port="5584"
+slot="${OPENPHONE_LAB_SLOT:-}"
+port="${OPENPHONE_EMULATOR_PORT:-5584}"
 serial=""
 timeout_seconds="600"
 build="${OPENPHONE_EMULATOR_BUILD:-1}"
@@ -59,6 +65,11 @@ while [[ $# -gt 0 ]]; do
     --variant)
       [[ $# -ge 2 ]] || die "--variant requires a value"
       variant="$2"
+      shift 2
+      ;;
+    --slot)
+      [[ $# -ge 2 ]] || die "--slot requires a value"
+      slot="$2"
       shift 2
       ;;
     --port)
@@ -95,7 +106,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 arch="${arch:-$(detect_emulator_arch)}"
-serial="${serial:-emulator-$port}"
+serial="${serial:-${OPENPHONE_EMULATOR_SERIAL:-${ANDROID_SERIAL:-emulator-$port}}}"
 
 case "$arch" in
   arm64|x86_64) ;;
@@ -116,7 +127,16 @@ need_cmd python3
 need_cmd emulator
 
 stamp="$(date -u +%Y%m%d-%H%M%S)"
-out_dir="$root/.worktree/emulator-smoke/$stamp"
+if [[ -n "$slot" ]]; then
+  lab_dir="${OPENPHONE_LAB_DIR:-$root/.worktree/lab/$slot}"
+  emulator_data_dir="$lab_dir/emulator-data"
+  out_dir="$lab_dir/artifacts/emulator-smoke/$stamp"
+else
+  lab_dir=""
+  emulator_data_dir="$root/.worktree/emulator-smoke/$stamp/emulator-data"
+  out_dir="$root/.worktree/emulator-smoke/$stamp"
+fi
+mkdir -p "$emulator_data_dir"
 mkdir -p "$out_dir"
 
 export ANDROID_SERIAL="$serial"
@@ -153,6 +173,7 @@ if [[ -n "${OPENPHONE_EMULATOR_ARGS:-}" ]]; then
 fi
 emulator_args=(
   -port "$port"
+  -datadir "$emulator_data_dir"
   -no-window
   -gpu swiftshader_indirect
   -no-snapshot

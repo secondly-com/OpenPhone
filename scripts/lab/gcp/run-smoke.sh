@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lab/gcp/common.sh
+source "$script_dir/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/lab/gcp/run-smoke.sh [options]
+
+Creates a disposable GCP lab VM, checks out OpenPhone, syncs/builds the Android
+tree, runs the same lab smoke used locally, copies artifacts back, and tears the
+VM down unless --keep-vm is set.
+
+Options:
+  --name <name>               VM name. Default: generated from current ref/time.
+  --repo-url <url>            Git repo URL. Default: current origin or GitHub.
+  --ref <ref>                 Git ref/SHA to test. Default: current HEAD.
+  --slot <name>               Lab slot name on the VM. Default: VM name.
+  --project <id>              GCP project. Default: OPENPHONE_GCP_PROJECT.
+  --zone <zone>               GCP zone. Default: OPENPHONE_GCP_ZONE.
+  --machine-type <type>       Machine type. Default: c3-standard-22.
+  --boot-disk-size <size>     Boot disk size. Default: 1000GB.
+  --boot-disk-type <type>     Boot disk type. Default: pd-ssd.
+  --cache-mode <mode>         scratch or attach-disk. Default: scratch.
+  --cache-disk <name>         Existing disk to attach for attach-disk mode.
+  --arch arm64|x86_64         Emulator arch. Default: x86_64.
+  --variant eng|userdebug     Emulator variant. Default: eng.
+  --runtime <name>            Runtime intent: local, openclaw, or hermes.
+                             May be repeated. Default: local.
+  --timeout <seconds>         Emulator boot timeout. Default: 900.
+  --repo-sync-jobs <n>        repo sync jobs. Default: nproc.
+  --keep-vm                   Leave VM running for debug.
+  --skip-build                Reuse existing Android build outputs on the VM.
+  -h, --help                  Show this help.
+EOF
+}
+
+default_ref="$(git -C "$root" rev-parse HEAD 2>/dev/null || printf 'main')"
+default_repo_url="$(git -C "$root" config --get remote.origin.url 2>/dev/null || printf 'https://github.com/secondly-com/OpenPhone.git')"
+case "$default_repo_url" in
+  git@github.com:secondly-com/OpenPhone.git)
+    default_repo_url="https://github.com/secondly-com/OpenPhone.git"
+    ;;
+esac
+
+name=""
+repo_url="$default_repo_url"
+ref="$default_ref"
+slot=""
+project="$OPENPHONE_GCP_PROJECT"
+zone="$OPENPHONE_GCP_ZONE"
+machine_type="$OPENPHONE_GCP_MACHINE_TYPE"
+boot_disk_size="$OPENPHONE_GCP_BOOT_DISK_SIZE"
+boot_disk_type="$OPENPHONE_GCP_BOOT_DISK_TYPE"
+cache_mode="$OPENPHONE_GCP_CACHE_MODE"
+cache_disk="${OPENPHONE_GCP_CACHE_DISK:-}"
+arch="x86_64"
+variant="eng"
+timeout_seconds=900
+repo_sync_jobs=""
+keep_vm=false
+skip_build=false
+runtimes=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --name)
+      [[ $# -ge 2 ]] || die "--name requires a value"
+      name="$2"
+      shift 2
+      ;;
+    --repo-url)
+      [[ $# -ge 2 ]] || die "--repo-url requires a value"
+      repo_url="$2"
+      shift 2
+      ;;
+    --ref)
+      [[ $# -ge 2 ]] || die "--ref requires a value"
+      ref="$2"
+      shift 2
+      ;;
+    --slot)
+      [[ $# -ge 2 ]] || die "--slot requires a value"
+      slot="$2"
+      shift 2
+      ;;
+    --project)
+      [[ $# -ge 2 ]] || die "--project requires a value"
+      project="$2"
+      shift 2
+      ;;
+    --zone)
+      [[ $# -ge 2 ]] || die "--zone requires a value"
+      zone="$2"
+      shift 2
+      ;;
+    --machine-type)
+      [[ $# -ge 2 ]] || die "--machine-type requires a value"
+      machine_type="$2"
+      shift 2
+      ;;
+    --boot-disk-size)
+      [[ $# -ge 2 ]] || die "--boot-disk-size requires a value"
+      boot_disk_size="$2"
+      shift 2
+      ;;
+    --boot-disk-type)
+      [[ $# -ge 2 ]] || die "--boot-disk-type requires a value"
+      boot_disk_type="$2"
+      shift 2
+      ;;
+    --cache-mode)
+      [[ $# -ge 2 ]] || die "--cache-mode requires a value"
+      cache_mode="$2"
+      shift 2
+      ;;
+    --cache-disk)
+      [[ $# -ge 2 ]] || die "--cache-disk requires a value"
+      cache_disk="$2"
+      shift 2
+      ;;
+    --arch)
+      [[ $# -ge 2 ]] || die "--arch requires a value"
+      arch="$2"
+      shift 2
+      ;;
+    --variant)
+      [[ $# -ge 2 ]] || die "--variant requires a value"
+      variant="$2"
+      shift 2
+      ;;
+    --runtime)
+      [[ $# -ge 2 ]] || die "--runtime requires a value"
+      runtimes+=("$2")
+      shift 2
+      ;;
+    --timeout)
+      [[ $# -ge 2 ]] || die "--timeout requires a value"
+      timeout_seconds="$2"
+      shift 2
+      ;;
+    --repo-sync-jobs)
+      [[ $# -ge 2 ]] || die "--repo-sync-jobs requires a value"
+      repo_sync_jobs="$2"
+      shift 2
+      ;;
+    --keep-vm)
+      keep_vm=true
+      shift
+      ;;
+    --skip-build)
+      skip_build=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+need_gcloud
+
+case "$arch" in
+  arm64|x86_64) ;;
+  *) die "unsupported emulator arch: $arch" ;;
+esac
+
+case "$variant" in
+  eng|userdebug) ;;
+  *) die "unsupported emulator variant: $variant" ;;
+esac
+
+case "$cache_mode" in
+  scratch|attach-disk) ;;
+  *) die "unsupported cache mode: $cache_mode" ;;
+esac
+
+if [[ ${#runtimes[@]} -eq 0 ]]; then
+  runtimes=(local)
+fi
+
+if [[ -z "$name" ]]; then
+  short_ref="$(printf '%s' "$ref" | cut -c1-12)"
+  name="openphone-lab-${short_ref}-$(date -u +%H%M%S)"
+fi
+name="$(sanitize_gcp_name "$name")"
+slot="${slot:-$name}"
+slot="$(printf '%s' "$slot" | tr -c 'A-Za-z0-9_.-' '-')"
+
+artifact_root="$root/.worktree/gcp-lab/$name"
+artifact_dir="$artifact_root/artifacts"
+mkdir -p "$artifact_dir"
+
+vm_created=false
+remote_script="$(mktemp "${TMPDIR:-/tmp}/openphone-gcp-remote.XXXXXX")"
+cleanup() {
+  local status=$?
+  set +e
+  rm -f "$remote_script"
+  if [[ "$vm_created" == true ]]; then
+    mkdir -p "$artifact_dir"
+    gcloud compute scp --recurse \
+      "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
+      "$artifact_dir/" \
+      --project "$project" \
+      --zone "$zone" >/dev/null 2>&1 || true
+  fi
+  if [[ "$vm_created" == true && "$keep_vm" != true ]]; then
+    "$script_dir/delete-vm.sh" --name "$name" --project "$project" --zone "$zone" || true
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+create_args=(
+  --name "$name"
+  --project "$project"
+  --zone "$zone"
+  --machine-type "$machine_type"
+  --boot-disk-size "$boot_disk_size"
+  --boot-disk-type "$boot_disk_type"
+  --cache-mode "$cache_mode"
+)
+if [[ -n "$cache_disk" ]]; then
+  create_args+=(--cache-disk "$cache_disk")
+fi
+
+"$script_dir/create-vm.sh" "${create_args[@]}"
+vm_created=true
+
+"$script_dir/bootstrap-vm.sh" --name "$name" --project "$project" --zone "$zone"
+
+cat > "$remote_script" <<'REMOTE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_url="${OPENPHONE_REPO_URL:?}"
+ref="${OPENPHONE_REF:?}"
+slot="${OPENPHONE_LAB_SLOT:?}"
+arch="${OPENPHONE_EMULATOR_ARCH:?}"
+variant="${OPENPHONE_EMULATOR_VARIANT:?}"
+timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
+repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
+skip_build="${OPENPHONE_SKIP_BUILD:-0}"
+runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
+
+export OPENPHONE_RELEASE="${OPENPHONE_RELEASE:-bp4a}"
+export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
+
+if [[ ! -d "$HOME/openphone-src/.git" ]]; then
+  rm -rf "$HOME/openphone-src"
+  git clone "$repo_url" "$HOME/openphone-src"
+fi
+
+cd "$HOME/openphone-src"
+git remote set-url origin "$repo_url"
+git fetch --tags --prune origin
+git fetch origin "$ref" || true
+git checkout --force "$ref" || git checkout --force FETCH_HEAD
+
+./scripts/bootstrap-android-build-host.sh
+./scripts/check.sh
+
+if [[ "$skip_build" != "1" ]]; then
+  mkdir -p "$OPENPHONE_ANDROID_DIR"
+  if [[ -n "$repo_sync_jobs" ]]; then
+    ./scripts/sync.sh -j"$repo_sync_jobs"
+  else
+    ./scripts/sync.sh -j"$(nproc)"
+  fi
+  ./scripts/apply-patches.sh
+fi
+
+IFS=',' read -r -a runtimes <<< "$runtime_csv"
+smoke_args=(--slot "$slot" --arch "$arch" --variant "$variant" --timeout "$timeout_seconds")
+if [[ "$skip_build" == "1" ]]; then
+  smoke_args+=(--skip-build)
+fi
+for runtime in "${runtimes[@]}"; do
+  [[ -n "$runtime" ]] || continue
+  smoke_args+=(--runtime "$runtime")
+done
+
+./scripts/lab/smoke.sh "${smoke_args[@]}"
+REMOTE
+
+info "Copying remote smoke script to $name"
+gcloud compute scp "$remote_script" "$name:/tmp/openphone-gcp-run-smoke.sh" \
+  --project "$project" \
+  --zone "$zone" >/dev/null
+
+runtime_csv="$(IFS=,; printf '%s' "${runtimes[*]}")"
+skip_build_value=0
+if [[ "$skip_build" == true ]]; then
+  skip_build_value=1
+fi
+remote_command="OPENPHONE_REPO_URL=$(shell_quote "$repo_url")"
+remote_command+=" OPENPHONE_REF=$(shell_quote "$ref")"
+remote_command+=" OPENPHONE_LAB_SLOT=$(shell_quote "$slot")"
+remote_command+=" OPENPHONE_EMULATOR_ARCH=$(shell_quote "$arch")"
+remote_command+=" OPENPHONE_EMULATOR_VARIANT=$(shell_quote "$variant")"
+remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
+remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
+remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
+remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"
+remote_command+=" bash /tmp/openphone-gcp-run-smoke.sh"
+
+info "Running GCP lab smoke on $name"
+gcloud compute ssh "$name" \
+  --project "$project" \
+  --zone "$zone" \
+  --command "$remote_command" \
+  | tee "$artifact_root/gcp-run-smoke.log"
+
+info "GCP lab smoke passed; artifacts copied to $artifact_dir"
