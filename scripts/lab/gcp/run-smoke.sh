@@ -266,6 +266,10 @@ git fetch origin "$ref" || true
 git checkout --force "$ref" || git checkout --force FETCH_HEAD
 
 ./scripts/bootstrap-android-build-host.sh
+./scripts/lab/install-android-sdk-tools.sh
+export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/opt/android-sdk}"
+export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+export PATH="$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
 OPENPHONE_SKIP_JAVA_CHECK=1 ./scripts/check.sh
 
 if [[ "$skip_build" != "1" ]]; then
