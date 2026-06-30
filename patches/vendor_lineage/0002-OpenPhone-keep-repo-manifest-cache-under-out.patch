@@ -12,27 +12,17 @@ blocked as a read-only write.
 Run the manifest invocation with HOME pointed at a rule-owned directory under
 PRODUCT_OUT so repo's cache stays in writable build output.
 ---
- build/tasks/build-manifest_xml.mk | 5 ++++-
- 1 file changed, 4 insertions(+), 1 deletion(-)
+ build/tasks/build-manifest_xml.mk | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/build/tasks/build-manifest_xml.mk b/build/tasks/build-manifest_xml.mk
-index 54a6f1bb..79471e4e 100644
+index 5f54967..ecf6d83 100644
 --- a/build/tasks/build-manifest_xml.mk
 +++ b/build/tasks/build-manifest_xml.mk
-@@ -16,9 +16,12 @@ ifdef MANIFEST_EXCLUDES
- MANIFEST_EXCLUDES := |$(MANIFEST_EXCLUDES)
- endif
+@@ -21,3 +21,4 @@ $(INSTALLED_BUILD_MANIFEST_XML_TARGET):
+-	REPO_TRACE=0 python3 .repo/repo/repo manifest -o - -r | grep -Ev "proprietary_$(MANIFEST_EXCLUDES)" > $@
 -
-+
-+BUILD_MANIFEST_REPO_HOME := $(PRODUCT_OUT)/obj/PACKAGING/build_manifest_intermediates/home
-+
- $(INSTALLED_BUILD_MANIFEST_XML_TARGET):
--	mkdir -p $(dir $@)
--	python3 .repo/repo/repo manifest -o - -r | grep -Ev "proprietary_$(MANIFEST_EXCLUDES)" > $@
-+	mkdir -p $(dir $@)
-+	mkdir -p $(BUILD_MANIFEST_REPO_HOME)
-+	HOME=$(abspath $(BUILD_MANIFEST_REPO_HOME)) python3 .repo/repo/repo manifest -o - -r | grep -Ev "proprietary_$(MANIFEST_EXCLUDES)" > $@
--
++	mkdir -p $(PRODUCT_OUT)/obj/PACKAGING/build_manifest_intermediates/home
++	HOME=$(abspath $(PRODUCT_OUT)/obj/PACKAGING/build_manifest_intermediates/home) REPO_TRACE=0 python3 .repo/repo/repo manifest -o - -r | grep -Ev "proprietary_$(MANIFEST_EXCLUDES)" > $@
 +
  .PHONY: build-manifest.xml
- build-manifest.xml: $(INSTALLED_BUILD_MANIFEST_XML_TARGET)

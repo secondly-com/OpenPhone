@@ -32,6 +32,8 @@ for patch_dir in "$OPENPHONE_ROOT"/patches/*; do
   info "applying patches for $repo_path"
   (
     cd "$target_dir"
+    git config user.name "${OPENPHONE_PATCH_GIT_NAME:-OpenPhone}"
+    git config user.email "${OPENPHONE_PATCH_GIT_EMAIL:-openphone@example.invalid}"
     applied_patch_ids="$(mktemp)"
     git log --format=email --patch --no-ext-diff -n 400 \
       | git patch-id --stable \
