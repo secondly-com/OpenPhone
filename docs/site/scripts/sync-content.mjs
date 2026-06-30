@@ -9,7 +9,7 @@ const targetRoot = join(appRoot, 'content', 'docs');
 
 const includedExtensions = new Set(['.md']);
 const includedNames = new Set(['meta.json']);
-const skippedDirectories = new Set(['local-temp']);
+const skippedDirectories = new Set(['local-temp', 'site']);
 
 async function copyDocs(sourceDir) {
   const entries = await readdir(sourceDir, { withFileTypes: true });
