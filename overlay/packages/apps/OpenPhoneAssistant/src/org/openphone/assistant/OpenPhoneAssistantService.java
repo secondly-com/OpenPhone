@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.RemoteException;
+import android.os.UserManager;
 import android.openphone.OpenPhoneAgentManager;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
@@ -58,6 +59,8 @@ public final class OpenPhoneAssistantService extends Service {
     private static final int MAX_PENDING_RUNTIME_VOICE_REPLIES = 16;
     private static volatile String sLatestRuntimeStatusJson =
             "{\"status\":\"disabled\",\"manager_status\":\"not_created\"}";
+    private static final String USER_LOCKED_RUNTIME_STATUS =
+            "{\"status\":\"locked\",\"manager_status\":\"user_locked\"}";
 
     private OpenPhoneAgentManager mAgentManager;
     private PointerOverlayController mPointerOverlayController;
@@ -156,9 +159,7 @@ public final class OpenPhoneAssistantService extends Service {
         });
         refreshIslandAutonomy();
         mAgentManager = getSystemService(OpenPhoneAgentManager.class);
-        mRuntimeManager = new RuntimeManager(this, mAgentManager);
-        configureRuntimeCallback();
-        mRuntimeManager.start();
+        ensureRuntimeManagerReady();
         OpenPhoneNotificationListenerService.ensureEnabled(this);
         if (mAgentManager == null) {
             Log.w(TAG, "OpenPhone framework service is not available");
@@ -178,6 +179,7 @@ public final class OpenPhoneAssistantService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         refreshIslandAutonomy();
+        ensureRuntimeManagerReady();
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_HIDE_ISLAND.equals(action)) {
             mIslandHiddenByActivity = true;
@@ -271,7 +273,8 @@ public final class OpenPhoneAssistantService extends Service {
 
     private String runtimeStatusJson() {
         String status = mRuntimeManager == null
-                ? "{\"status\":\"disabled\",\"manager_status\":\"not_created\"}"
+                ? (isUserUnlocked() ? "{\"status\":\"disabled\",\"manager_status\":\"not_created\"}"
+                        : USER_LOCKED_RUNTIME_STATUS)
                 : mRuntimeManager.statusJson();
         sLatestRuntimeStatusJson = status;
         return status;
@@ -281,7 +284,31 @@ public final class OpenPhoneAssistantService extends Service {
         return sLatestRuntimeStatusJson;
     }
 
+    private boolean ensureRuntimeManagerReady() {
+        if (!isUserUnlocked()) {
+            sLatestRuntimeStatusJson = USER_LOCKED_RUNTIME_STATUS;
+            Log.i(TAG, "User locked; deferring runtime manager start");
+            return false;
+        }
+        if (mRuntimeManager == null) {
+            mRuntimeManager = new RuntimeManager(this, mAgentManager);
+            configureRuntimeCallback();
+            mRuntimeManager.start();
+        }
+        return true;
+    }
+
+    private boolean isUserUnlocked() {
+        UserManager userManager = getSystemService(UserManager.class);
+        return userManager == null || userManager.isUserUnlocked();
+    }
+
     private void reloadRuntimeManager() {
+        if (!isUserUnlocked()) {
+            sLatestRuntimeStatusJson = USER_LOCKED_RUNTIME_STATUS;
+            Log.i(TAG, "User locked; skipping runtime reload");
+            return;
+        }
         if (mRuntimeManager == null) {
             mRuntimeManager = new RuntimeManager(this, mAgentManager);
         }
@@ -303,12 +330,16 @@ public final class OpenPhoneAssistantService extends Service {
     }
 
     private void requestRuntimeAttention(Intent intent) {
-        if (mRuntimeManager == null) {
-            mRuntimeManager = new RuntimeManager(this, mAgentManager);
-            configureRuntimeCallback();
-            mRuntimeManager.start();
-        } else if (shouldReloadRuntimeManagerForAttention(mRuntimeManager.statusJson())) {
+        if (!ensureRuntimeManagerReady()) {
+            Log.w(TAG, "runtime attention ignored while user is locked");
+            return;
+        }
+        if (shouldReloadRuntimeManagerForAttention(mRuntimeManager.statusJson())) {
             reloadRuntimeManager();
+        }
+        if (mRuntimeManager == null) {
+            Log.w(TAG, "runtime attention ignored; runtime manager unavailable");
+            return;
         }
         String text = cleanExtra(intent == null ? "" :
                 intent.getStringExtra(EXTRA_RUNTIME_ATTENTION_TEXT), "");

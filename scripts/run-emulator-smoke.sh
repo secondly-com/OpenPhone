@@ -78,6 +78,54 @@ run_adb_shell_with_timeout() {
   wait "$command_pid"
 }
 
+capture_user_state() {
+  {
+    echo "cmd user is-user-unlocked 0:"
+    adb -s "$serial" shell 'cmd user is-user-unlocked 0 2>/dev/null || true' \
+      | tr -d '\r' || true
+    echo
+    echo "dumpsys user:"
+    adb -s "$serial" shell dumpsys user 2>/dev/null | tr -d '\r' || true
+  } > "$out_dir/user-state.txt"
+}
+
+is_user_unlocked() {
+  local state
+  state="$(adb -s "$serial" shell 'cmd user is-user-unlocked 0 2>/dev/null' \
+    | tr -d '\r' || true)"
+  if printf '%s\n' "$state" | grep -Eq '(^|[[:space:]])true($|[[:space:]])'; then
+    return 0
+  fi
+
+  state="$(adb -s "$serial" shell dumpsys user 2>/dev/null | tr -d '\r' || true)"
+  printf '%s\n' "$state" \
+    | grep -Eq 'RUNNING_UNLOCKED|unlocked=true|mUnlockedUsers:.*0'
+}
+
+drive_user_unlock() {
+  adb -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb -s "$serial" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  adb -s "$serial" shell input keyevent KEYCODE_MENU >/dev/null 2>&1 || true
+  adb -s "$serial" shell input keyevent 82 >/dev/null 2>&1 || true
+  adb -s "$serial" shell am start-user -w 0 >/dev/null 2>&1 || true
+  adb -s "$serial" shell cmd user unlock-user 0 >/dev/null 2>&1 || true
+}
+
+wait_for_user_unlocked() {
+  info "Waiting for Android user 0 unlock"
+  local unlock_deadline=$((SECONDS + 90))
+  while [[ "$SECONDS" -lt "$unlock_deadline" ]]; do
+    if is_user_unlocked; then
+      capture_user_state
+      return 0
+    fi
+    drive_user_unlock
+    sleep 2
+  done
+  capture_user_state
+  die "Android user 0 did not unlock; see $out_dir/user-state.txt"
+}
+
 arch=""
 variant="eng"
 slot="${OPENPHONE_LAB_SLOT:-}"
@@ -290,6 +338,8 @@ info "Preparing emulator for headless smoke"
 
   adb -s "$serial" shell input keyevent KEYCODE_HOME || true
 } > "$out_dir/headless-provisioning.txt" 2>&1
+
+wait_for_user_unlocked
 
 identity="$out_dir/device-identity.txt"
 adb -s "$serial" shell 'printf "model="; getprop ro.product.model; printf "device="; getprop ro.product.device; printf "openphone="; getprop ro.openphone.version; printf "lineage="; getprop ro.lineage.version; printf "boot_completed="; getprop sys.boot_completed' \

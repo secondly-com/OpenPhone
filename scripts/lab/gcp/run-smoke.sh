@@ -416,6 +416,11 @@ emulator_product_dir() {
   esac
 }
 
+if [[ "$export_emulator_image" == "1" && "$skip_build" != "1" ]]; then
+  ./scripts/build-emulator.sh --arch "$arch" --variant "$variant"
+  skip_build=1
+fi
+
 if [[ "$export_emulator_image" == "1" ]]; then
   product_dir="$(emulator_product_dir)"
   image_zip="$OPENPHONE_ANDROID_DIR/out/target/product/$product_dir/sdk-repo-linux-system-images.zip"
