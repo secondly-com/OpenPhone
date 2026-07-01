@@ -79,7 +79,7 @@ labs on a Mac Studio, prefer the slot-safe prebuilt path:
 scripts/lab/up.sh \
   --slot codex-local-main \
   --arch arm64 \
-  --emulator-image /path/to/sdk-repo-linux-system-images.zip \
+  --emulator-image /path/to/openphone-sdk-phone-arm64-eng.zip \
   --runtime local \
   --timeout 900
 ```

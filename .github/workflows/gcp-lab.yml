@@ -64,6 +64,14 @@ on:
         options:
           - "false"
           - "true"
+      export_emulator_image:
+        description: "Upload sdk-repo-linux-system-images.zip for local SDK/AVD use"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   pull_request_review:
     types:
       - submitted
@@ -228,6 +236,9 @@ jobs:
           fi
           if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
             args+=(--keep-vm)
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.export_emulator_image }}" == "true" ]]; then
+            args+=(--export-emulator-image)
           fi
           IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
           for runtime in "${runtimes[@]}"; do

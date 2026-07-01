@@ -70,13 +70,22 @@ For local agent work, do not sync/build Android on macOS. Use a portable image
 zip produced by Linux/GCP, then let the lab scripts create an isolated AVD and
 userdata directory per Codex slot.
 
+To produce a Mac-usable image from GCP, run the `GCP Lab` workflow manually with
+`arch=arm64` and `export_emulator_image=true`. The uploaded `openphone-gcp-lab`
+artifact will contain:
+
+```text
+artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip
+artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip.sha256
+```
+
 First run for a slot, with a local zip path or URL:
 
 ```bash
 scripts/lab/up.sh \
   --slot codex-local-main \
   --arch arm64 \
-  --emulator-image /path/to/sdk-repo-linux-system-images.zip \
+  --emulator-image /path/to/openphone-sdk-phone-arm64-eng.zip \
   --runtime local \
   --timeout 900
 ```
