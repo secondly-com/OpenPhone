@@ -76,7 +76,8 @@ Repository:
 Validation:
 
 - `./scripts/check.sh` passes.
-- `./scripts/check-release-notes.sh <version> [release-notes.md]` passes.
+- `./scripts/check-release-notes.sh <version> docs/releases/<version>.md`
+  passes, with the leading `v` stripped from the notes filename.
 - `git diff --check` passes.
 - `./scripts/verify-tegu-device.sh` output is captured for any Pixel 9a OTA
   artifact that is being published.
@@ -156,20 +157,20 @@ Stage only the files intended for publication into a clean release directory,
 then generate the artifact manifest before drafting release notes:
 
 ```bash
-mkdir -p .worktree/releases/v0.0.1-preview
+mkdir -p .worktree/releases/v0.0.1
 cp .worktree/artifacts/tegu/openphone_tegu-<build>-ota.zip \
-  .worktree/releases/v0.0.1-preview/
-scripts/generate-release-manifest.sh 0.0.1-preview .worktree/releases/v0.0.1-preview
-scripts/validate-release-artifacts.sh .worktree/releases/v0.0.1-preview
+  .worktree/releases/v0.0.1/
+scripts/generate-release-manifest.sh 0.0.1 .worktree/releases/v0.0.1
+scripts/validate-release-artifacts.sh .worktree/releases/v0.0.1
 scripts/prepare-github-release.sh \
-  0.0.1-preview .worktree/releases/v0.0.1-preview docs/releases/0.0.1.md
+  0.0.1 .worktree/releases/v0.0.1 docs/releases/0.0.1.md
 ```
 
 Before publishing, validate that the GitHub release tag, release notes file,
 and changelog are aligned:
 
 ```bash
-scripts/check-release-notes.sh v0.0.1-preview docs/releases/0.0.1.md
+scripts/check-release-notes.sh v0.0.1 docs/releases/0.0.1.md
 ```
 
 Attach the generated OTA ZIP, `SHA256SUMS`, and `ARTIFACTS.md` to the GitHub
@@ -181,18 +182,18 @@ Generate an updater feed for a staged OTA:
 
 ```bash
 scripts/generate-ota-feed.sh \
-  --version 0.0.1-preview \
+  --version 0.0.1 \
   --channel preview \
   --device tegu \
-  --artifact .worktree/releases/v0.0.1-preview/openphone_tegu-<build>-ota.zip \
-  --base-url https://downloads.example/openphone/v0.0.1-preview \
-  --release-notes-url https://github.com/secondly-com/OpenPhone/releases/tag/v0.0.1-preview \
-  --output .worktree/releases/v0.0.1-preview/ota-feed-tegu-preview.json \
+  --artifact .worktree/releases/v0.0.1/openphone_tegu-<build>-ota.zip \
+  --base-url https://downloads.example/openphone/v0.0.1 \
+  --release-notes-url https://github.com/secondly-com/OpenPhone/releases/tag/v0.0.1 \
+  --output .worktree/releases/v0.0.1/ota-feed-tegu-preview.json \
   --requires-wipe
 
 scripts/validate-ota-feed.sh \
-  .worktree/releases/v0.0.1-preview/ota-feed-tegu-preview.json \
-  .worktree/releases/v0.0.1-preview
+  .worktree/releases/v0.0.1/ota-feed-tegu-preview.json \
+  .worktree/releases/v0.0.1
 ```
 
 The feed contract is documented in
@@ -207,7 +208,7 @@ manual for `0.0.1`; use recovery sideload or the documented host flashing flow.
 Use `.github/workflows/release.yml` for the normal device-preview path. The
 workflow requires:
 
-- `version`, such as `v0.0.1-preview.1`;
+- `version`, such as `v0.0.1`;
 - `device`, currently `tegu`;
 - `release_notes`, the markdown file that becomes the GitHub Release body;
 - `prerelease`, usually `true` before `1.0.0`;
@@ -223,7 +224,8 @@ Before dispatching a release:
 
 - move relevant entries from `[Unreleased]` in `docs/releases/CHANGELOG.md`
   into the target version section;
-- update the target `docs/releases/<version>.md` notes;
+- update the target `docs/releases/<version>.md` notes, using the tag without a
+  leading `v`;
 - run or review the relevant device/eval evidence;
 - decide whether the release should become GitHub's Latest release.
 

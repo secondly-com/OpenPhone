@@ -80,9 +80,6 @@ on:
         options:
           - "true"
           - "false"
-  pull_request_review:
-    types:
-      - submitted
   pull_request_target:
     types:
       - labeled
@@ -102,11 +99,6 @@ jobs:
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
-        (
-          github.event_name == 'pull_request_review' &&
-          github.event.review.state == 'approved' &&
-          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
-        ) ||
         (
           github.event_name == 'pull_request_target' &&
           github.event.action == 'labeled' &&

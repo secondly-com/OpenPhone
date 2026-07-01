@@ -21,10 +21,15 @@ die() {
   exit 1
 }
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
 version="${1:-}"
 release_notes="${2:-}"
 
-if [[ -z "$version" || "$version" == "-h" || "$version" == "--help" ]]; then
+if [[ -z "$version" ]]; then
   usage >&2
   exit 2
 fi
@@ -35,25 +40,26 @@ expected_notes="docs/releases/$normalized_version.md"
 
 if [[ -z "$release_notes" ]]; then
   release_notes="$expected_notes"
-  explicit_notes=false
-else
-  explicit_notes=true
 fi
 
 case "$release_notes" in
-  /*) release_notes_path="$release_notes" ;;
-  *) release_notes_path="$root/$release_notes" ;;
+  /*)
+    release_notes_path="$release_notes"
+    case "$release_notes" in
+      "$root"/*) release_notes_display="${release_notes#"$root"/}" ;;
+      *) release_notes_display="$release_notes" ;;
+    esac
+    ;;
+  *)
+    release_notes_path="$root/$release_notes"
+    release_notes_display="$release_notes"
+    ;;
 esac
 
 [[ -f "$release_notes_path" ]] || die "missing release notes file: $release_notes"
 
-if [[ "$explicit_notes" != true && "$release_notes" != "$expected_notes" ]]; then
-  die "release $tag should use $expected_notes unless a notes file is supplied explicitly"
-fi
-
-if [[ "$explicit_notes" == true && "$release_notes" != "$expected_notes" ]]; then
-  printf 'check-release-notes: using explicit release notes file %s for %s\n' \
-    "$release_notes" "$tag"
+if [[ "$release_notes_display" != "$expected_notes" ]]; then
+  die "release $tag must use $expected_notes, got $release_notes"
 fi
 
 changelog=""
@@ -66,13 +72,11 @@ done
 [[ -n "$changelog" ]] \
   || die "missing changelog: expected CHANGELOG.md or docs/releases/CHANGELOG.md"
 
-escaped_version="${normalized_version//./\\.}"
-if grep -Eq "^##[[:space:]]+\\[?v?${escaped_version}\\]?" "$changelog"; then
+escaped_version="$(printf '%s' "$normalized_version" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')"
+if grep -Eq "^##[[:space:]]+\\[?v?${escaped_version}\\]?([[:space:]]|$)" "$changelog"; then
   printf 'check-release-notes: changelog contains release section for %s\n' "$tag"
-elif grep -Eq '^##[[:space:]]+\[?Unreleased\]?' "$changelog"; then
-  printf 'check-release-notes: changelog has an Unreleased section for %s\n' "$tag"
 else
-  die "changelog must mention $tag/$normalized_version or include a clear Unreleased section"
+  die "changelog must contain an exact release section for $tag/$normalized_version"
 fi
 
 printf 'check-release-notes: validated %s with %s\n' "$tag" "$release_notes"
