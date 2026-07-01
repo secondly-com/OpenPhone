@@ -46,6 +46,33 @@ detect_emulator_arch() {
   esac
 }
 
+run_adb_shell_with_timeout() {
+  local seconds="$1"
+  local log_file="$2"
+  shift 2
+
+  adb -s "$serial" shell "$@" > "$log_file" 2>&1 &
+  local command_pid="$!"
+  local command_deadline=$((SECONDS + seconds))
+
+  while kill -0 "$command_pid" >/dev/null 2>&1; do
+    if [[ "$SECONDS" -ge "$command_deadline" ]]; then
+      {
+        echo
+        echo "Timed out after ${seconds}s: adb -s $serial shell $*"
+      } >> "$log_file"
+      kill "$command_pid" >/dev/null 2>&1 || true
+      sleep 2
+      kill -9 "$command_pid" >/dev/null 2>&1 || true
+      wait "$command_pid" >/dev/null 2>&1 || true
+      return 124
+    fi
+    sleep 1
+  done
+
+  wait "$command_pid"
+}
+
 arch=""
 variant="eng"
 slot="${OPENPHONE_LAB_SLOT:-}"
@@ -217,6 +244,24 @@ info "Emulator booted"
 adb -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
 adb -s "$serial" shell wm dismiss-keyguard >/dev/null 2>&1 || true
 
+info "Preparing emulator for headless smoke"
+{
+  echo "Marking setup complete"
+  adb -s "$serial" shell settings put global device_provisioned 1 || true
+  adb -s "$serial" shell settings put secure user_setup_complete 1 || true
+  adb -s "$serial" shell settings put secure tv_user_setup_complete 1 || true
+
+  for package in org.lineageos.setupwizard com.google.android.setupwizard com.android.provision; do
+    if adb -s "$serial" shell pm path "$package" >/dev/null 2>&1; then
+      echo "Disabling setup/provisioning package: $package"
+      adb -s "$serial" shell am force-stop "$package" || true
+      adb -s "$serial" shell pm disable-user --user 0 "$package" || true
+    fi
+  done
+
+  adb -s "$serial" shell input keyevent KEYCODE_HOME || true
+} > "$out_dir/headless-provisioning.txt" 2>&1
+
 identity="$out_dir/device-identity.txt"
 adb -s "$serial" shell 'printf "model="; getprop ro.product.model; printf "device="; getprop ro.product.device; printf "openphone="; getprop ro.openphone.version; printf "lineage="; getprop ro.lineage.version; printf "boot_completed="; getprop sys.boot_completed' \
   > "$identity"
@@ -241,8 +286,18 @@ grep -q 'org.openphone.assistant' "$out_dir/assistant-package.txt" \
   || die "OpenPhone Assistant package is not installed"
 
 info "Starting assistant activity"
-adb -s "$serial" shell am start -W -n org.openphone.assistant/.MainActivity \
-  > "$out_dir/start-assistant.txt"
+if ! run_adb_shell_with_timeout 60 "$out_dir/start-assistant.txt" \
+  am start -W -n org.openphone.assistant/.MainActivity; then
+  adb -s "$serial" shell dumpsys activity activities \
+    > "$out_dir/activity-after-start-failure.txt" 2>/dev/null || true
+  die "assistant activity did not start within 60s; see $out_dir/start-assistant.txt"
+fi
+grep -q 'Status: ok' "$out_dir/start-assistant.txt" \
+  || die "assistant activity start did not report Status: ok"
+adb -s "$serial" shell dumpsys activity activities > "$out_dir/activity-after-start.txt"
+grep -q 'ResumedActivity: .*org.openphone.assistant/.MainActivity' \
+  "$out_dir/activity-after-start.txt" \
+  || die "assistant activity was not the resumed activity"
 
 info "Running runtime CLI status smoke"
 node "$root/integrations/cli/src/index.mjs" --serial "$serial" --json runtime status \
