@@ -77,8 +77,8 @@ scripts/       Sync, patch, build, flash, validation, and release helpers.
 services/      Reference services, including the development model broker.
 ```
 
-Start with [docs/README.md](docs/README.md) if you are looking for a specific
-document.
+Start with [docs/index.md](docs/index.md) for the docs landing, or
+[docs/README.md](docs/README.md) for a topic index.
 
 ## How It Works
 
@@ -114,65 +114,35 @@ live under [schemas](schemas).
 
 ## Quick Start
 
-Validate the repository:
+The fastest way to see OpenPhone running is the SDK phone emulator. On a
+Linux Android build host:
+
+```bash
+./scripts/install-repo.sh          # once, if you don't have `repo`
+./scripts/sync.sh
+./scripts/apply-patches.sh
+./scripts/build-emulator.sh --arch arm64     # or --arch x86_64
+```
+
+Then copy the resulting `sdk-repo-linux-system-images.zip` to your
+workstation and boot it in a local AVD. The full walkthrough — sync, image
+install, AVD creation, boot, and verification — is in
+**[docs/quickstart.md](docs/quickstart.md)**.
+
+**Other paths:**
+
+- Flash a Pixel 9a → [docs/BUILD.md](docs/BUILD.md)
+- Understand the system → [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Integrate a runtime → [docs/runtime/runtime-agent-protocol.md](docs/runtime/runtime-agent-protocol.md)
+- Port a new device → [docs/DEVICE_SUPPORT.md](docs/DEVICE_SUPPORT.md)
+- Contribute → [docs/contribution-guide.md](docs/contribution-guide.md)
+
+Validate the repository at any time with:
 
 ```bash
 ./scripts/check.sh
 git diff --check
 ```
-
-The first runnable OS test path is the OpenPhone SDK phone emulator. Build an
-emulator system image on a Linux Android build host, install it into a local
-Android SDK/AVD, and verify the OpenPhone framework services before moving to
-Pixel 9a hardware evals:
-
-```bash
-./scripts/sync.sh
-./scripts/apply-patches.sh
-./scripts/build-emulator.sh --arch arm64     # Apple Silicon UI target
-# or: ./scripts/build-emulator.sh --arch x86_64
-```
-
-The portable artifact is
-`$OPENPHONE_ANDROID_DIR/out/target/product/<emu64a|emu64x>/sdk-repo-linux-system-images.zip`.
-The local install, AVD creation, UI launch, CLI/MCP smoke, and OpenClaw runtime
-smoke are documented in [docs/EMULATOR.md](docs/EMULATOR.md).
-
-Install `repo` if needed:
-
-```bash
-./scripts/install-repo.sh
-```
-
-Sync and patch the Android tree:
-
-```bash
-./scripts/sync.sh
-./scripts/apply-patches.sh
-```
-
-Build the generic OpenPhone ARM64 product for validation:
-
-```bash
-./scripts/build.sh openphone_arm64
-```
-
-Build the Pixel 9a target on a Linux Android build host:
-
-```bash
-OPENPHONE_BUILD_GOAL="droid target-files-package otapackage" \
-  ./scripts/build.sh openphone_tegu
-```
-
-For assistant-only iteration on an already flashed development device:
-
-```bash
-OPENPHONE_BUILD_GOAL=OpenPhoneAssistant ./scripts/build.sh openphone_tegu
-scripts/push-assistant-apk.sh /path/to/OpenPhoneAssistant.apk
-```
-
-Full build instructions are in [docs/BUILD.md](docs/BUILD.md). Testing and
-emulator/physical eval guidance is in [docs/TESTING.md](docs/TESTING.md).
 
 ## Device Support
 
