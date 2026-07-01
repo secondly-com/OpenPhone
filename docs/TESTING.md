@@ -73,7 +73,10 @@ ls -lh "$OPENPHONE_ANDROID_DIR/out/target/product/emu64a/sdk-repo-linux-system-i
 
 Copy that zip to the workstation, install it into the Android SDK, create an
 AVD, and boot it with the steps in [EMULATOR.md](EMULATOR.md). For local Codex
-labs on a Mac Studio, prefer the slot-safe prebuilt path:
+labs on a Mac Studio, prefer the slot-safe prebuilt path. When exporting an
+ARM64 zip from GCP for Apple Silicon, dispatch `GCP Lab` with
+`export_emulator_image=true` and `run_smoke=false`; the local slot boot is the
+ARM64 smoke proof.
 
 ```bash
 scripts/lab/up.sh \

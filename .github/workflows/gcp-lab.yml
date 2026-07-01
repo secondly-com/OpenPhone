@@ -72,6 +72,14 @@ on:
         options:
           - "false"
           - "true"
+      run_smoke:
+        description: "Boot emulator and run smoke after build/export"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
   pull_request_review:
     types:
       - submitted
@@ -239,6 +247,9 @@ jobs:
           fi
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.export_emulator_image }}" == "true" ]]; then
             args+=(--export-emulator-image)
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.run_smoke }}" != "true" ]]; then
+            args+=(--skip-smoke)
           fi
           IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
           for runtime in "${runtimes[@]}"; do

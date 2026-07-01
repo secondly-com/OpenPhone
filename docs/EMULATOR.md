@@ -71,8 +71,10 @@ zip produced by Linux/GCP, then let the lab scripts create an isolated AVD and
 userdata directory per Codex slot.
 
 To produce a Mac-usable image from GCP, run the `GCP Lab` workflow manually with
-`arch=arm64` and `export_emulator_image=true`. The uploaded `openphone-gcp-lab`
-artifact will contain:
+`arch=arm64`, `export_emulator_image=true`, and `run_smoke=false`. The GCP lab
+still syncs, checks, builds, and exports the image; the actual ARM64 boot smoke
+then happens on the Mac Studio. The uploaded `openphone-gcp-lab` artifact will
+contain:
 
 ```text
 artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip

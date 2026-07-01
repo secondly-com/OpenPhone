@@ -41,6 +41,8 @@ Options:
   --skip-build                Reuse existing Android build outputs on the VM.
   --export-emulator-image     Copy sdk-repo-linux-system-images.zip into lab
                               artifacts for local Mac/SDK installation.
+  --skip-smoke                Build/export artifacts but do not boot the
+                              emulator. Intended for cross-arch image exports.
   -h, --help                  Show this help.
 EOF
 }
@@ -73,6 +75,7 @@ repo_sync_jobs=""
 keep_vm=false
 skip_build=false
 export_emulator_image=false
+skip_smoke=false
 runtimes=()
 
 while [[ $# -gt 0 ]]; do
@@ -177,6 +180,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --export-emulator-image)
       export_emulator_image=true
+      shift
+      ;;
+    --skip-smoke)
+      skip_smoke=true
       shift
       ;;
     -h|--help)
@@ -296,6 +303,7 @@ timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
 repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
 skip_build="${OPENPHONE_SKIP_BUILD:-0}"
 export_emulator_image="${OPENPHONE_EXPORT_EMULATOR_IMAGE:-0}"
+skip_smoke="${OPENPHONE_SKIP_SMOKE:-0}"
 runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
 cache_mode="${OPENPHONE_GCP_CACHE_MODE:-scratch}"
 cache_mount="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
@@ -438,6 +446,11 @@ if [[ "$export_emulator_image" == "1" ]]; then
   )
 fi
 
+if [[ "$skip_smoke" == "1" ]]; then
+  printf '==> Skipping emulator smoke by request after build/export\n'
+  exit 0
+fi
+
 IFS=',' read -r -a runtimes <<< "$runtime_csv"
 smoke_args=(--slot "$slot" --arch "$arch" --variant "$variant" --timeout "$timeout_seconds")
 if [[ "$skip_build" == "1" ]]; then
@@ -465,6 +478,10 @@ export_emulator_image_value=0
 if [[ "$export_emulator_image" == true ]]; then
   export_emulator_image_value=1
 fi
+skip_smoke_value=0
+if [[ "$skip_smoke" == true ]]; then
+  skip_smoke_value=1
+fi
 remote_command="OPENPHONE_REPO_URL=$(shell_quote "$repo_url")"
 remote_command+=" OPENPHONE_REF=$(shell_quote "$ref")"
 remote_command+=" OPENPHONE_LAB_SLOT=$(shell_quote "$slot")"
@@ -474,6 +491,7 @@ remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
 remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
 remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
 remote_command+=" OPENPHONE_EXPORT_EMULATOR_IMAGE=$(shell_quote "$export_emulator_image_value")"
+remote_command+=" OPENPHONE_SKIP_SMOKE=$(shell_quote "$skip_smoke_value")"
 remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"
 remote_command+=" OPENPHONE_GCP_CACHE_MODE=$(shell_quote "$cache_mode")"
 remote_command+=" OPENPHONE_GCP_CACHE_MOUNT=$(shell_quote "$cache_mount")"
