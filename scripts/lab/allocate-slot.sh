@@ -112,6 +112,7 @@ export OPENPHONE_HERMES_PORT='$hermes_port'
 export OPENPHONE_HERMES_URL='http://127.0.0.1:$hermes_port'
 export OPENPHONE_MODEL_BROKER_PORT='$model_broker_port'
 export OPENPHONE_MODEL_BROKER_URL='http://127.0.0.1:$model_broker_port'
+export OPENPHONE_ANDROID_DIR='$OPENPHONE_ANDROID_DIR'
 EOF
 
 printf 'OpenPhone lab slot written to %s\n' "$env_file"

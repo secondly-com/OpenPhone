@@ -149,6 +149,7 @@ required=(
   scripts/lab/local-up.sh
   scripts/lab/local-down.sh
   scripts/lab/smoke.sh
+  scripts/lab/prepare-local.sh
   scripts/lab/install-android-sdk-tools.sh
   scripts/lab/gcp/common.sh
   scripts/lab/gcp/setup-wif.sh

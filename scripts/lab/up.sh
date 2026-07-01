@@ -16,8 +16,15 @@ and leaves the emulator running for Codex/human iteration.
 Options:
   --slot <name>              Lab slot name. Default: checkout hash.
   --arch arm64|x86_64        Emulator image architecture. Default: host arch.
+  --variant eng|userdebug    Emulator build variant. Default: eng.
   --runtime <name>           Runtime intent: local, openclaw, or hermes.
                              May be repeated. Default: local.
+  --android-dir <path>       Android checkout path for this slot.
+  --prepare                  Run local Android tree sync/patch prep before smoke.
+  --no-prepare               Do not auto-prepare a missing Android tree.
+  --repo-sync-jobs <n>       repo sync jobs when preparation runs.
+  --from-scratch             Force repo sync/checkout when preparation runs.
+  --reset-patch-targets      Reset patched Android repos before applying patches.
   --skip-build               Reuse an already-built emulator image.
   --timeout <seconds>        Boot timeout. Default: run-emulator-smoke default.
   -h, --help                 Show this help.
@@ -26,6 +33,12 @@ EOF
 
 slot=""
 arch=""
+variant=""
+android_dir="${OPENPHONE_ANDROID_DIR:-}"
+prepare_mode="auto"
+repo_sync_jobs=""
+from_scratch=false
+reset_patch_targets=false
 skip_build=false
 timeout_seconds=""
 runtimes=()
@@ -41,6 +54,37 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die "--arch requires a value"
       arch="$2"
       shift 2
+      ;;
+    --variant)
+      [[ $# -ge 2 ]] || die "--variant requires a value"
+      variant="$2"
+      shift 2
+      ;;
+    --android-dir)
+      [[ $# -ge 2 ]] || die "--android-dir requires a value"
+      android_dir="$2"
+      shift 2
+      ;;
+    --prepare)
+      prepare_mode="always"
+      shift
+      ;;
+    --no-prepare)
+      prepare_mode="never"
+      shift
+      ;;
+    --repo-sync-jobs)
+      [[ $# -ge 2 ]] || die "--repo-sync-jobs requires a value"
+      repo_sync_jobs="$2"
+      shift 2
+      ;;
+    --from-scratch)
+      from_scratch=true
+      shift
+      ;;
+    --reset-patch-targets)
+      reset_patch_targets=true
+      shift
       ;;
     --runtime)
       [[ $# -ge 2 ]] || die "--runtime requires a value"
@@ -83,6 +127,10 @@ if [[ ${#runtimes[@]} -eq 0 ]]; then
   runtimes=(local)
 fi
 
+if [[ -n "$android_dir" ]]; then
+  export OPENPHONE_ANDROID_DIR="$android_dir"
+fi
+
 "$root/scripts/lab/allocate-slot.sh" --slot "$slot" >/dev/null
 
 env_file="$root/.worktree/lab/$slot/env"
@@ -90,9 +138,53 @@ env_file="$root/.worktree/lab/$slot/env"
 # shellcheck disable=SC1090
 source "$env_file"
 
+should_prepare=false
+case "$prepare_mode" in
+  always)
+    should_prepare=true
+    ;;
+  auto)
+    if [[ "$skip_build" != true && ! -f "$OPENPHONE_ANDROID_DIR/build/envsetup.sh" ]]; then
+      should_prepare=true
+    fi
+    ;;
+  never)
+    ;;
+  *)
+    die "invalid prepare mode: $prepare_mode"
+    ;;
+esac
+
+if [[ "$should_prepare" == true ]]; then
+  prepare_args=(--slot "$OPENPHONE_LAB_SLOT" --android-dir "$OPENPHONE_ANDROID_DIR")
+  if [[ -n "$arch" ]]; then
+    prepare_args+=(--arch "$arch")
+  fi
+  if [[ -n "$variant" ]]; then
+    prepare_args+=(--variant "$variant")
+  fi
+  if [[ -n "$repo_sync_jobs" ]]; then
+    prepare_args+=(--repo-sync-jobs "$repo_sync_jobs")
+  fi
+  if [[ "$from_scratch" == true ]]; then
+    prepare_args+=(--from-scratch)
+  fi
+  if [[ "$reset_patch_targets" == true ]]; then
+    prepare_args+=(--reset-patch-targets)
+  fi
+  "$root/scripts/lab/prepare-local.sh" "${prepare_args[@]}"
+  # Refresh the env file because prepare-local may choose/create the macOS
+  # case-sensitive build volume and persist its Android dir into the slot.
+  # shellcheck disable=SC1090
+  source "$env_file"
+fi
+
 args=(--slot "$OPENPHONE_LAB_SLOT" --keep-running)
 if [[ -n "$arch" ]]; then
   args+=(--arch "$arch")
+fi
+if [[ -n "$variant" ]]; then
+  args+=(--variant "$variant")
 fi
 if [[ "$skip_build" == true ]]; then
   args+=(--skip-build)
