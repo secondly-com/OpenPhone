@@ -21,10 +21,13 @@ The public release pipeline is manual by design:
 4. Trigger [release.yml](../../.github/workflows/release.yml) from GitHub
    Actions with a version such as `v0.0.1-preview.1`, the release-notes file,
    prerelease setting, and whether the release should become Latest.
-5. The self-hosted Android build runner builds the OTA, stages the artifact,
+5. Release validation checks that the release notes file exists and that
+   `docs/releases/CHANGELOG.md` either mentions the release version or has a
+   clear `Unreleased` section.
+6. The self-hosted Android build runner builds the OTA, stages the artifact,
    generates checksums/manifests, validates the release directory, and uploads
    the OTA plus metadata to GitHub Releases.
-6. Release notes should link to device support, flashing notes, known issues,
+7. Release notes should link to device support, flashing notes, known issues,
    and validation evidence.
 
 ## Latest Release Policy
