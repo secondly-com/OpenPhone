@@ -81,6 +81,10 @@ artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip
 artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip.sha256
 ```
 
+Keep the `.zip` and `.zip.sha256` sidecar together. The installer verifies a
+local sibling sidecar automatically. For a remote zip URL, pass
+`--emulator-image-sha256` or publish a sibling `<zip-url>.sha256`.
+
 First run for a slot, with a local zip path or URL:
 
 ```bash
@@ -88,6 +92,7 @@ scripts/lab/up.sh \
   --slot codex-local-main \
   --arch arm64 \
   --emulator-image /path/to/openphone-sdk-phone-arm64-eng.zip \
+  --emulator-image-sha256 /path/to/openphone-sdk-phone-arm64-eng.zip.sha256 \
   --runtime local \
   --timeout 900
 ```

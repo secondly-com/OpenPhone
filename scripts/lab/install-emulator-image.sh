@@ -16,6 +16,10 @@ image zip, and local Codex lab slots boot it without syncing/building Android.
 
 Options:
   --zip <path-or-url>       sdk-repo-linux-system-images.zip path or URL.
+  --sha256 <digest|path|url>
+                            Expected image SHA-256 digest or sidecar file.
+                            If omitted, local <zip>.sha256 and remote
+                            <zip-url>.sha256 sidecars are used when present.
   --arch arm64|x86_64      Emulator image architecture. Default: host arch.
   --sdk-root <path>        Android SDK root. Default: ANDROID_SDK_ROOT,
                             ANDROID_HOME, or the host SDK default.
@@ -52,7 +56,33 @@ abi_for_arch() {
   esac
 }
 
+is_url() {
+  case "$1" in
+    http://*|https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+compute_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die "missing SHA-256 tool: install sha256sum or shasum"
+  fi
+}
+
+extract_sha256_digest() {
+  grep -Eo '[[:xdigit:]]{64}' "$1" | head -n 1 || true
+}
+
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 image_zip=""
+sha256_source=""
 arch=""
 sdk_root="$(default_sdk_root)"
 force=false
@@ -62,6 +92,11 @@ while [[ $# -gt 0 ]]; do
     --zip)
       [[ $# -ge 2 ]] || die "--zip requires a value"
       image_zip="$2"
+      shift 2
+      ;;
+    --sha256)
+      [[ $# -ge 2 ]] || die "--sha256 requires a value"
+      sha256_source="$2"
       shift 2
       ;;
     --arch)
@@ -101,21 +136,68 @@ download_dir="$root/.worktree/emulator-images"
 mkdir -p "$download_dir"
 
 image_path="$image_zip"
-case "$image_zip" in
-  http://*|https://*)
-    need_cmd curl
-    file_name="${image_zip##*/}"
-    file_name="${file_name%%\?*}"
-    [[ -n "$file_name" ]] || file_name="sdk-repo-linux-system-images-${arch}.zip"
-    image_path="$download_dir/$file_name"
-    if [[ "$force" == true || ! -f "$image_path" ]]; then
-      info "Downloading OpenPhone emulator image zip"
-      curl --fail --location --show-error --output "$image_path" "$image_zip"
+if is_url "$image_zip"; then
+  need_cmd curl
+  file_name="${image_zip##*/}"
+  file_name="${file_name%%\?*}"
+  [[ -n "$file_name" ]] || file_name="sdk-repo-linux-system-images-${arch}.zip"
+  image_path="$download_dir/$file_name"
+  if [[ "$force" == true || ! -f "$image_path" ]]; then
+    info "Downloading OpenPhone emulator image zip"
+    curl --fail --location --show-error --output "$image_path" "$image_zip"
+  fi
+  if [[ -z "$sha256_source" ]]; then
+    sidecar_url="${image_zip%%\?*}.sha256"
+    sidecar_path="$image_path.sha256"
+    if [[ "$force" == true || ! -f "$sidecar_path" ]]; then
+      if curl --fail --location --show-error --output "$sidecar_path" "$sidecar_url"; then
+        sha256_source="$sidecar_path"
+      else
+        rm -f "$sidecar_path"
+      fi
+    else
+      sha256_source="$sidecar_path"
     fi
-    ;;
-esac
+  fi
+fi
 
 [[ -f "$image_path" ]] || die "emulator image zip not found: $image_path"
+
+if [[ -z "$sha256_source" && -f "$image_path.sha256" ]]; then
+  sha256_source="$image_path.sha256"
+fi
+
+if [[ -n "$sha256_source" ]]; then
+  if [[ "$sha256_source" =~ ^[[:xdigit:]]{64}$ ]]; then
+    expected_sha256="$sha256_source"
+  else
+    sha256_path="$sha256_source"
+    if is_url "$sha256_source"; then
+      need_cmd curl
+      sha256_name="${sha256_source##*/}"
+      sha256_name="${sha256_name%%\?*}"
+      [[ -n "$sha256_name" ]] || sha256_name="${file_name:-$(basename "$image_path")}.sha256"
+      sha256_path="$download_dir/$sha256_name"
+      if [[ "$force" == true || ! -f "$sha256_path" ]]; then
+        info "Downloading OpenPhone emulator image checksum"
+        curl --fail --location --show-error --output "$sha256_path" "$sha256_source"
+      fi
+    fi
+    [[ -f "$sha256_path" ]] || die "checksum file not found: $sha256_source"
+    expected_sha256="$(extract_sha256_digest "$sha256_path")"
+    [[ -n "$expected_sha256" ]] || die "checksum file does not contain a SHA-256 digest: $sha256_source"
+  fi
+
+  actual_sha256="$(compute_sha256 "$image_path")"
+  if [[ "$(lowercase "$actual_sha256")" != "$(lowercase "$expected_sha256")" ]]; then
+    die "checksum mismatch for $image_path: expected $expected_sha256, got $actual_sha256"
+  fi
+  info "Verified OpenPhone emulator image SHA-256"
+elif is_url "$image_zip"; then
+  die "remote emulator image requires a SHA-256 checksum: pass --sha256 or publish ${image_zip%%\?*}.sha256"
+else
+  info "No SHA-256 checksum supplied for local emulator image"
+fi
 
 if command -v bsdtar >/dev/null 2>&1; then
   extractor="bsdtar"

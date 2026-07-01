@@ -28,6 +28,8 @@ Options:
   --no-clone-bundle          Pass repo sync --no-clone-bundle during preparation.
   --emulator-image <path>    Install this portable SDK system image zip or URL
                              and boot it through a slot-owned AVD.
+  --emulator-image-sha256 <digest|path|url>
+                             Expected SHA-256 for --emulator-image.
   --prebuilt                 Boot an already installed SDK system image/AVD
                              without syncing/building Android locally.
   --sdk-root <path>          Android SDK root for --emulator-image/--prebuilt.
@@ -49,6 +51,7 @@ no_clone_bundle=false
 skip_build=false
 timeout_seconds=""
 emulator_image=""
+emulator_image_sha256=""
 prebuilt=false
 sdk_root=""
 runtimes=()
@@ -106,6 +109,11 @@ while [[ $# -gt 0 ]]; do
       prebuilt=true
       skip_build=true
       prepare_mode="never"
+      shift 2
+      ;;
+    --emulator-image-sha256)
+      [[ $# -ge 2 ]] || die "--emulator-image-sha256 requires a value"
+      emulator_image_sha256="$2"
       shift 2
       ;;
     --prebuilt)
@@ -183,6 +191,9 @@ if [[ -n "$emulator_image" ]]; then
   fi
   if [[ -n "$sdk_root" ]]; then
     install_args+=(--sdk-root "$sdk_root")
+  fi
+  if [[ -n "$emulator_image_sha256" ]]; then
+    install_args+=(--sha256 "$emulator_image_sha256")
   fi
   "$root/scripts/lab/install-emulator-image.sh" "${install_args[@]}"
 fi

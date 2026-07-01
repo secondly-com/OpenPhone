@@ -76,13 +76,15 @@ AVD, and boot it with the steps in [EMULATOR.md](EMULATOR.md). For local Codex
 labs on a Mac Studio, prefer the slot-safe prebuilt path. When exporting an
 ARM64 zip from GCP for Apple Silicon, dispatch `GCP Lab` with
 `export_emulator_image=true` and `run_smoke=false`; the local slot boot is the
-ARM64 smoke proof.
+ARM64 smoke proof. Keep the exported `.zip.sha256` sidecar next to the zip, or
+pass it explicitly with `--emulator-image-sha256`.
 
 ```bash
 scripts/lab/up.sh \
   --slot codex-local-main \
   --arch arm64 \
   --emulator-image /path/to/openphone-sdk-phone-arm64-eng.zip \
+  --emulator-image-sha256 /path/to/openphone-sdk-phone-arm64-eng.zip.sha256 \
   --runtime local \
   --timeout 900
 ```
