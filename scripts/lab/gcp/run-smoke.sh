@@ -29,6 +29,8 @@ Options:
                                Per-run disk name for snapshot mode.
   --cache-source-snapshot <s> Snapshot to clone for snapshot mode.
   --cache-mount <path>        Mount path for cache disk. Default: /mnt/openphone-cache.
+                              The Android tree is bind-mounted back to
+                              $HOME/openphone-android for stable build paths.
   --arch arm64|x86_64         Emulator arch. Default: x86_64.
   --variant eng|userdebug     Emulator variant. Default: eng.
   --runtime <name>            Runtime intent: local, openclaw, or hermes.
@@ -287,8 +289,9 @@ cache_mount="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
 export OPENPHONE_RELEASE="${OPENPHONE_RELEASE:-bp4a}"
 
 prepare_android_workspace() {
+  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
+
   if [[ "$cache_mode" == "scratch" ]]; then
-    export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
     mkdir -p "$OPENPHONE_ANDROID_DIR"
     return 0
   fi
@@ -313,8 +316,13 @@ prepare_android_workspace() {
   fi
   sudo chown "$USER:$USER" "$cache_mount"
 
-  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$cache_mount/android}"
+  local cache_android_dir="$cache_mount/android"
+  mkdir -p "$cache_android_dir"
   mkdir -p "$OPENPHONE_ANDROID_DIR"
+  if ! findmnt --mountpoint "$OPENPHONE_ANDROID_DIR" >/dev/null 2>&1; then
+    sudo mount --bind "$cache_android_dir" "$OPENPHONE_ANDROID_DIR"
+  fi
+  sudo chown "$USER:$USER" "$cache_mount" "$cache_android_dir" "$OPENPHONE_ANDROID_DIR"
 }
 
 prepare_android_workspace
@@ -344,9 +352,16 @@ if [[ "$skip_build" != "1" ]]; then
   else
     sync_args+=(-j"$(nproc)")
   fi
-  sync_args+=(--detach --force-sync --force-checkout)
+  sync_args+=(--detach)
+  if [[ "$cache_mode" == "scratch" ]]; then
+    sync_args+=(--force-sync --force-checkout)
+  fi
   ./scripts/sync.sh "${sync_args[@]}"
-  ./scripts/apply-patches.sh
+  if [[ "$cache_mode" == "scratch" ]]; then
+    ./scripts/apply-patches.sh
+  else
+    OPENPHONE_RESET_PATCH_TARGETS=1 ./scripts/apply-patches.sh
+  fi
   ./scripts/check.sh
 fi
 
