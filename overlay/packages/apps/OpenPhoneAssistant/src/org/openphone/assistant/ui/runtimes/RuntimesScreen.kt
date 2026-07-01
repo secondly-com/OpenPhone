@@ -364,12 +364,216 @@ private fun ageText(updatedAtMillis: Long): String {
     }
 }
 
+private fun fakeRuntimesState(
+    status: String,
+    managerStatus: String,
+    chatRuntime: String = "builtin",
+    effectiveChatRuntime: String = "builtin",
+    volumeRuntime: String = "builtin",
+    backgroundRuntime: String = "builtin",
+    lastAction: String = "",
+    adapters: List<RuntimeAdapterUiState> = emptyList(),
+): RuntimesUiState {
+    return RuntimesUiState(
+        status = status,
+        managerStatus = managerStatus,
+        chatRuntime = chatRuntime,
+        effectiveChatRuntime = effectiveChatRuntime,
+        volumeRuntime = volumeRuntime,
+        backgroundRuntime = backgroundRuntime,
+        updatedAtMillis = System.currentTimeMillis() - 2000L,
+        lastAction = lastAction,
+        adapters = adapters,
+    )
+}
+
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
-private fun RuntimesScreenPreview() {
+private fun RuntimesScreenPreview_Connected() {
     OpenPhoneTheme {
         RuntimesScreen(
-            state = AssistantViewModel.previewState().runtimes,
+            state = fakeRuntimesState(
+                status = "connected",
+                managerStatus = "connected",
+                chatRuntime = "openclaw",
+                effectiveChatRuntime = "openclaw",
+                lastAction = "Connected to OpenClaw",
+                adapters = listOf(
+                    RuntimeAdapterUiState(
+                        name = "openclaw",
+                        label = "OpenClaw",
+                        status = "connected",
+                        enabled = true,
+                        configured = true,
+                        url = "ws://127.0.0.1:18789",
+                        deviceId = "openphone-preview-openclaw",
+                    )
+                ),
+            ),
+            onBack = {},
+            onRefresh = {},
+            onReconnect = {},
+            onSelectChatRuntime = {},
+            onSelectVolumeRuntime = {},
+            onSelectBackgroundRuntime = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RuntimesScreenPreview_Connecting() {
+    OpenPhoneTheme {
+        RuntimesScreen(
+            state = fakeRuntimesState(
+                status = "connecting",
+                managerStatus = "connecting",
+                chatRuntime = "openclaw",
+                effectiveChatRuntime = "builtin",
+                lastAction = "Connecting to OpenClaw...",
+                adapters = listOf(
+                    RuntimeAdapterUiState(
+                        name = "openclaw",
+                        label = "OpenClaw",
+                        status = "connecting",
+                        enabled = true,
+                        configured = true,
+                        url = "ws://127.0.0.1:18789",
+                        deviceId = "openphone-preview-openclaw",
+                    )
+                ),
+            ),
+            onBack = {},
+            onRefresh = {},
+            onReconnect = {},
+            onSelectChatRuntime = {},
+            onSelectVolumeRuntime = {},
+            onSelectBackgroundRuntime = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RuntimesScreenPreview_AuthFailed() {
+    OpenPhoneTheme {
+        RuntimesScreen(
+            state = fakeRuntimesState(
+                status = "auth_failed",
+                managerStatus = "auth_failed",
+                chatRuntime = "openclaw",
+                effectiveChatRuntime = "builtin",
+                lastAction = "Authentication failed: invalid session key",
+                adapters = listOf(
+                    RuntimeAdapterUiState(
+                        name = "openclaw",
+                        label = "OpenClaw",
+                        status = "auth_failed",
+                        enabled = true,
+                        configured = true,
+                        url = "ws://127.0.0.1:18789",
+                        deviceId = "openphone-preview-openclaw",
+                    )
+                ),
+            ),
+            onBack = {},
+            onRefresh = {},
+            onReconnect = {},
+            onSelectChatRuntime = {},
+            onSelectVolumeRuntime = {},
+            onSelectBackgroundRuntime = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RuntimesScreenPreview_DisabledManager() {
+    OpenPhoneTheme {
+        RuntimesScreen(
+            state = fakeRuntimesState(
+                status = "disabled",
+                managerStatus = "not_created",
+                chatRuntime = "builtin",
+                effectiveChatRuntime = "builtin",
+                lastAction = "Runtime manager disabled",
+                adapters = listOf(
+                    RuntimeAdapterUiState(
+                        name = "openclaw",
+                        label = "OpenClaw",
+                        status = "disabled",
+                        enabled = false,
+                        configured = true,
+                        url = "ws://127.0.0.1:18789",
+                        deviceId = "openphone-preview-openclaw",
+                    )
+                ),
+            ),
+            onBack = {},
+            onRefresh = {},
+            onReconnect = {},
+            onSelectChatRuntime = {},
+            onSelectVolumeRuntime = {},
+            onSelectBackgroundRuntime = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RuntimesScreenPreview_NoRuntime() {
+    OpenPhoneTheme {
+        RuntimesScreen(
+            state = fakeRuntimesState(
+                status = "connected",
+                managerStatus = "connected",
+                chatRuntime = "builtin",
+                effectiveChatRuntime = "builtin",
+                lastAction = "No adapters configured",
+                adapters = emptyList(),
+            ),
+            onBack = {},
+            onRefresh = {},
+            onReconnect = {},
+            onSelectChatRuntime = {},
+            onSelectVolumeRuntime = {},
+            onSelectBackgroundRuntime = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RuntimesScreenPreview_Degraded() {
+    OpenPhoneTheme {
+        RuntimesScreen(
+            state = fakeRuntimesState(
+                status = "degraded",
+                managerStatus = "degraded",
+                chatRuntime = "openclaw",
+                effectiveChatRuntime = "openclaw",
+                lastAction = "Hermes runtime is offline",
+                adapters = listOf(
+                    RuntimeAdapterUiState(
+                        name = "openclaw",
+                        label = "OpenClaw",
+                        status = "connected",
+                        enabled = true,
+                        configured = true,
+                        url = "ws://127.0.0.1:18789",
+                        deviceId = "openphone-preview-openclaw",
+                    ),
+                    RuntimeAdapterUiState(
+                        name = "hermes",
+                        label = "Hermes",
+                        status = "offline",
+                        enabled = true,
+                        configured = true,
+                        url = "ws://127.0.0.1:18790",
+                        deviceId = "openphone-preview-hermes",
+                    )
+                ),
+            ),
             onBack = {},
             onRefresh = {},
             onReconnect = {},
