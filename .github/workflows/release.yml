@@ -35,6 +35,14 @@ on:
           - "false"
           - "true"
           - "legacy"
+      dry_run:
+        description: "Validate release gates without building OTA or publishing"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
       run_emulator_smoke:
         description: "Require GCP lab emulator smoke before publishing"
         required: true
@@ -140,10 +148,56 @@ jobs:
           path: .worktree/gcp-lab/
           if-no-files-found: warn
 
+  release-dry-run:
+    name: Release dry run
+    needs: gcp-lab-smoke
+    if: ${{ always() && inputs.dry_run == 'true' && (inputs.run_emulator_smoke != 'true' || needs.gcp-lab-smoke.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Validate release metadata
+        run: |
+          set -euxo pipefail
+          ./scripts/check.sh
+          git diff --check
+          test -f "${{ inputs.release_notes }}"
+
+      - name: Summarize dry run
+        run: |
+          {
+            echo "## Release dry run passed"
+            echo
+            echo "- Version: \`${{ inputs.version }}\`"
+            echo "- Device: \`${{ inputs.device }}\`"
+            echo "- Release notes: \`${{ inputs.release_notes }}\`"
+            echo "- GCP lab smoke required: \`${{ inputs.run_emulator_smoke }}\`"
+            echo "- OTA build skipped: \`true\`"
+            echo "- GitHub Release publish skipped: \`true\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-device-preview:
     name: Build device preview
     needs: gcp-lab-smoke
-    if: ${{ always() && (inputs.run_emulator_smoke != 'true' || needs.gcp-lab-smoke.result == 'success') }}
+    if: ${{ always() && inputs.dry_run != 'true' && (inputs.run_emulator_smoke != 'true' || needs.gcp-lab-smoke.result == 'success') }}
     runs-on: [self-hosted, openphone-build]
     timeout-minutes: 180
     env:
