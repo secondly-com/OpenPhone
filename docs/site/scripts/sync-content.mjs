@@ -10,6 +10,7 @@ const targetRoot = join(appRoot, 'content', 'docs');
 const includedExtensions = new Set(['.md']);
 const includedNames = new Set(['meta.json']);
 const skippedDirectories = new Set(['local-temp', 'site']);
+const skippedFiles = new Set(['LOCAL_AGENT_NOTES.md', 'README.md']);
 
 const titleOverrides = {
   'index.md': 'OpenPhone',
@@ -26,7 +27,6 @@ const titleOverrides = {
   'TESTING.md': 'Testing',
   'RELEASE_PROCESS.md': 'Release Process',
   'LICENSING.md': 'Licensing',
-  'LOCAL_AGENT_NOTES.md': 'Local Agent Notes',
   'contribution-guide.md': 'Contributing',
   'devices/MATRIX.md': 'Device Matrix',
   'devices/tegu.md': 'Pixel 9a (tegu)',
@@ -58,6 +58,7 @@ async function copyDocs(sourceDir) {
     }
 
     if (!entry.isFile()) continue;
+    if (skippedFiles.has(entry.name)) continue;
     if (!includedNames.has(entry.name) && !includedExtensions.has(extname(entry.name))) continue;
 
     await mkdir(dirname(targetPath), { recursive: true });

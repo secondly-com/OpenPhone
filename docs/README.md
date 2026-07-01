@@ -1,7 +1,11 @@
 # OpenPhone Documentation
 
-This is the topic index for OpenPhone docs. For the narrative landing, see
-[index.md](index.md) (also served at `/docs` on the docs site).
+The rendered docs site lives at
+**[docs.openphone.secondly.com](https://docs.openphone.secondly.com)**.
+
+This file is the topic index for the markdown sources in this directory.
+For the narrative landing, see [index.md](index.md) (also served at `/docs`
+on the docs site).
 
 The static docs site uses Fumadocs with a Next.js app in `docs/site`. Build
 it locally with:
