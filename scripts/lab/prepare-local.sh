@@ -27,6 +27,8 @@ Options:
   --reset-patch-targets      Reset patched Android repos to manifest revisions
                              before applying OpenPhone patches.
   --from-scratch             Force repo sync/checkout when syncing.
+  --no-clone-bundle          Pass repo sync --no-clone-bundle. Useful for
+                             resumable local cold syncs on flaky networks.
   --build-emulator           Build the emulator image after sync/patch.
   --no-macos-volume          Do not auto-create/mount the macOS sparsebundle.
   -h, --help                 Show this help.
@@ -66,6 +68,7 @@ run_sync=true
 run_patches=true
 reset_patch_targets=false
 from_scratch=false
+no_clone_bundle=false
 build_emulator=false
 auto_macos_volume=true
 
@@ -110,6 +113,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --from-scratch)
       from_scratch=true
+      shift
+      ;;
+    --no-clone-bundle)
+      no_clone_bundle=true
       shift
       ;;
     --build-emulator)
@@ -172,6 +179,9 @@ if [[ "$run_sync" == true ]]; then
   sync_args=(-j"$repo_sync_jobs")
   if [[ "$from_scratch" == true ]]; then
     sync_args+=(--force-sync --force-checkout)
+  fi
+  if [[ "$no_clone_bundle" == true ]]; then
+    sync_args+=(--no-clone-bundle)
   fi
   "$root/scripts/sync.sh" "${sync_args[@]}"
 else

@@ -34,6 +34,12 @@ mkdir -p .repo/local_manifests
 cp "$OPENPHONE_ROOT/manifests/openphone.xml" .repo/local_manifests/openphone.xml
 
 info "syncing upstream sources"
-repo sync --current-branch --no-tags --optimized-fetch --prune "$@"
+sync_args=(--current-branch --no-tags --optimized-fetch --prune)
+case "${OPENPHONE_REPO_SYNC_NO_CLONE_BUNDLE:-0}" in
+  1|true|TRUE|yes|YES)
+    sync_args+=(--no-clone-bundle)
+    ;;
+esac
+repo sync "${sync_args[@]}" "$@"
 
 info "sync complete"

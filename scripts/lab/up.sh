@@ -25,6 +25,7 @@ Options:
   --repo-sync-jobs <n>       repo sync jobs when preparation runs.
   --from-scratch             Force repo sync/checkout when preparation runs.
   --reset-patch-targets      Reset patched Android repos before applying patches.
+  --no-clone-bundle          Pass repo sync --no-clone-bundle during preparation.
   --skip-build               Reuse an already-built emulator image.
   --timeout <seconds>        Boot timeout. Default: run-emulator-smoke default.
   -h, --help                 Show this help.
@@ -39,6 +40,7 @@ prepare_mode="auto"
 repo_sync_jobs=""
 from_scratch=false
 reset_patch_targets=false
+no_clone_bundle=false
 skip_build=false
 timeout_seconds=""
 runtimes=()
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --reset-patch-targets)
       reset_patch_targets=true
+      shift
+      ;;
+    --no-clone-bundle)
+      no_clone_bundle=true
       shift
       ;;
     --runtime)
@@ -171,6 +177,9 @@ if [[ "$should_prepare" == true ]]; then
   fi
   if [[ "$reset_patch_targets" == true ]]; then
     prepare_args+=(--reset-patch-targets)
+  fi
+  if [[ "$no_clone_bundle" == true ]]; then
+    prepare_args+=(--no-clone-bundle)
   fi
   "$root/scripts/lab/prepare-local.sh" "${prepare_args[@]}"
   # Refresh the env file because prepare-local may choose/create the macOS
