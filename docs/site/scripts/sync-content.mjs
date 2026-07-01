@@ -11,6 +11,39 @@ const includedExtensions = new Set(['.md']);
 const includedNames = new Set(['meta.json']);
 const skippedDirectories = new Set(['local-temp', 'site']);
 
+const titleOverrides = {
+  'index.md': 'OpenPhone',
+  'quickstart.md': 'Quickstart',
+  'BUILD.md': 'Build',
+  'EMULATOR.md': 'Emulator',
+  'ARCHITECTURE.md': 'Architecture',
+  'CAPABILITIES.md': 'Capabilities',
+  'AGENT_RUNTIME_V1.md': 'Agent Runtime',
+  'AI_FIRST_ENGINEERING.md': 'AI-First Engineering',
+  'DEVICE_SUPPORT.md': 'Device Support',
+  'TEGU_BOOTCHAIN.md': 'Pixel 9a Boot Chain',
+  'GMS.md': 'Google Mobile Services',
+  'TESTING.md': 'Testing',
+  'RELEASE_PROCESS.md': 'Release Process',
+  'LICENSING.md': 'Licensing',
+  'LOCAL_AGENT_NOTES.md': 'Local Agent Notes',
+  'contribution-guide.md': 'Contributing',
+  'devices/MATRIX.md': 'Device Matrix',
+  'devices/tegu.md': 'Pixel 9a (tegu)',
+  'devices/index.md': 'Devices',
+  'legal/index.md': 'Legal',
+  'legal/COMMERCIAL.md': 'Commercial Licensing',
+  'legal/THIRD_PARTY_NOTICES.md': 'Third-Party Notices',
+  'releases/index.md': 'Releases',
+  'releases/history.md': 'Release History',
+  'releases/0.0.1.md': 'v0.0.1 Release Notes',
+  'runtime/runtime-agent-protocol.md': 'Runtime Agent Protocol',
+  'runtime/security-model.md': 'Runtime Security Model',
+  'runtime/mcp-bridge.md': 'MCP Bridge',
+  'runtime/openclaw-integration.md': 'OpenClaw Integration',
+  'runtime/hermes-integration.md': 'Hermes Integration',
+};
+
 async function copyDocs(sourceDir) {
   const entries = await readdir(sourceDir, { withFileTypes: true });
 
@@ -41,17 +74,17 @@ async function withFrontmatter(sourcePath) {
   const markdown = await readFile(sourcePath, 'utf8');
   if (markdown.startsWith('---\n')) return markdown;
 
+  const relPath = relative(sourceRoot, sourcePath);
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
-  const title = titleMatch?.[1]?.replace(/\s*#+\s*$/, '').trim();
-  const fallback = relative(sourceRoot, sourcePath)
-    .replace(/\.md$/, '')
-    .split('/')
-    .at(-1);
+  const override = titleOverrides[relPath];
+  const fromHeading = titleMatch?.[1]?.replace(/\s*#+\s*$/, '').trim();
+  const fallback = relPath.replace(/\.md$/, '').split('/').at(-1);
+  const title = override || fromHeading || fallback || 'Untitled';
   const body = titleMatch
     ? markdown.replace(/^#\s+.+\n+/, '')
     : markdown;
 
-  return `---\ntitle: ${JSON.stringify(title || fallback || 'Untitled')}\n---\n\n${body}`;
+  return `---\ntitle: ${JSON.stringify(title)}\n---\n\n${body}`;
 }
 
 await rm(targetRoot, { recursive: true, force: true });
