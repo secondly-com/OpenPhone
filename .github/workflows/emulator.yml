@@ -1,20 +1,6 @@
 name: Emulator
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/emulator.yml"
-      - "integrations/adb/**"
-      - "integrations/cli/**"
-      - "integrations/mcp-server/**"
-      - "overlay/**"
-      - "patches/**"
-      - "runtime/**"
-      - "scripts/build.sh"
-      - "scripts/build-emulator.sh"
-      - "scripts/lab/**"
-      - "scripts/run-emulator*.sh"
-      - "scripts/run-assistant-task.sh"
   push:
     branches:
       - main
