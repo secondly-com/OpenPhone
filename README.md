@@ -4,8 +4,11 @@
 
 [![CI](https://github.com/secondly-com/OpenPhone/actions/workflows/ci.yml/badge.svg)](https://github.com/secondly-com/OpenPhone/actions/workflows/ci.yml)
 [![Release](https://github.com/secondly-com/OpenPhone/actions/workflows/release.yml/badge.svg)](https://github.com/secondly-com/OpenPhone/actions/workflows/release.yml)
+[![Docs](https://img.shields.io/badge/docs-openphone.secondly.com-black)](https://docs.openphone.secondly.com)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
 ![Status](https://img.shields.io/badge/status-developer%20preview-orange)
+
+**Docs: [docs.openphone.secondly.com](https://docs.openphone.secondly.com)**
 
 OpenPhone is an AI-native Android OS that turns the phone into an agentic
 device: a system-level AI agent that can see the screen, operate apps, remember

@@ -90,14 +90,24 @@ bsdtar -xf sdk-repo-linux-system-images.zip \
   -C "$ANDROID_HOME/system-images/android-36.1/lineage"
 ```
 
-The ARM64 image expands to ~8 GiB. Keep 15-20 GiB free before first boot.
+The image expands to ~8 GiB. Keep 15-20 GiB free before first boot.
 
 ## 4. Create the AVD
 
+Pick the ABI variables that match the image you built:
+
 ```bash
+# Apple Silicon
+avd_name=OpenPhone_Emu_ARM64
+abi=arm64-v8a
+
+# Intel / x86_64
+# avd_name=OpenPhone_Emu_X86_64
+# abi=x86_64
+
 "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
-  -n OpenPhone_Emu_ARM64 \
-  -k "system-images;android-36.1;lineage;arm64-v8a" \
+  -n "$avd_name" \
+  -k "system-images;android-36.1;lineage;$abi" \
   -d medium_phone
 ```
 
@@ -109,7 +119,7 @@ happens, the manual `config.ini` template is in
 
 ```bash
 "$ANDROID_HOME/emulator/emulator" \
-  -avd OpenPhone_Emu_ARM64 \
+  -avd "$avd_name" \
   -port 5584 \
   -no-snapshot \
   -wipe-data \
