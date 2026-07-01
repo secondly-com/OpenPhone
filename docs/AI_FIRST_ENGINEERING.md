@@ -119,6 +119,9 @@ See `docs/LOCAL_AGENT_NOTES.md`.
 ### Current Baseline
 
 - `ci.yml` runs repository checks and whitespace checks on GitHub-hosted Linux.
+- `emulator.yml` boots an OpenPhone SDK phone emulator on the
+  `openphone-emulator` self-hosted runner for PRs that touch runtime,
+  assistant, overlay, patch, integration, or emulator code.
 - `eval.yml` runs physical trajectory smokes on the `openphone-device`
   self-hosted runner.
 - `release.yml` runs release work on the `openphone-build` self-hosted runner.
@@ -131,10 +134,10 @@ See `docs/LOCAL_AGENT_NOTES.md`.
      regressions.
 
 2. **Emulator runtime smoke**
-   - Build or install an emulator image with the OpenPhone assistant.
-   - Boot it headlessly on a self-hosted runner.
-   - Run ADB-backed UI/context checks.
-   - Exercise local runtime actions without depending on provider keys.
+   - Build or reuse an emulator image with the OpenPhone assistant.
+   - Boot it headlessly on the `openphone-emulator` runner.
+   - Verify OpenPhone services, assistant install, ADB runtime status, screen
+     context, and a local assistant task without provider keys.
 
 3. **Remote runtime smoke**
    - Start or connect to an OpenClaw gateway.

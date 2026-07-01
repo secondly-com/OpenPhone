@@ -1,24 +1,27 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From fd469fa99a49abf46be15ce6bcc8323bdd2700b1 Mon Sep 17 00:00:00 2001
 From: OpenPhone <openphone@example.invalid>
-Date: Sun, 28 Jun 2026 21:12:00 +0000
+Date: Tue, 30 Jun 2026 14:40:52 -0700
 Subject: [PATCH] OpenPhone: expand ARM64 emulator super partition
 
-OpenPhone's privileged app and runtime assets exceed Lineage's default
-ARM64 SDK phone 2 GiB dynamic partition budget. Match the x86_64 SDK
-phone super partition sizing so openphone_sdk_phone_arm64 can package
-the emulator system image zip.
+OpenPhone's privileged app and runtime assets exceed Lineage's default ARM64 SDK phone 2 GiB dynamic partition budget. Match the x86_64 SDK phone super partition sizing so openphone_sdk_phone_arm64 can package the emulator system image zip.
 ---
  build/target/product/lineage_sdk_phone_arm64_board.mk | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/build/target/product/lineage_sdk_phone_arm64_board.mk b/build/target/product/lineage_sdk_phone_arm64_board.mk
-index 23f9b416..73661ef5 100644
+index 5f2c436..116408f 100644
 --- a/build/target/product/lineage_sdk_phone_arm64_board.mk
 +++ b/build/target/product/lineage_sdk_phone_arm64_board.mk
-@@ -15,3 +15,3 @@
+@@ -12,9 +12,9 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
 -# 2.0G + 8M
 -BOARD_SUPER_PARTITION_SIZE := 2155872256
 -BOARD_EMULATOR_DYNAMIC_PARTITIONS_SIZE := 2147483648
 +# 8.0G + 8M
 +BOARD_SUPER_PARTITION_SIZE := 8598323200
 +BOARD_EMULATOR_DYNAMIC_PARTITIONS_SIZE := 8589934592
+ 
+ PRODUCT_SDK_ADDON_COPY_FILES += \
+     device/generic/goldfish/data/etc/advancedFeatures.ini.arm:images/arm64-v8a/advancedFeatures.ini \

@@ -5,6 +5,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 need_cmd git
+if [[ "${OPENPHONE_RESET_PATCH_TARGETS:-0}" == "1" ]]; then
+  need_cmd repo
+fi
 
 [[ -d "$OPENPHONE_ANDROID_DIR/.repo" ]] || die "Android tree not initialized: $OPENPHONE_ANDROID_DIR"
 
@@ -29,9 +32,23 @@ for patch_dir in "$OPENPHONE_ROOT"/patches/*; do
 
   [[ -d "$target_dir/.git" ]] || die "patch target is not a git repo: $repo_path"
 
+  if [[ "${OPENPHONE_RESET_PATCH_TARGETS:-0}" == "1" ]]; then
+    info "resetting patch target $repo_path to manifest revision"
+    (
+      cd "$OPENPHONE_ANDROID_DIR"
+      repo forall "$repo_path" -c '
+        git am --abort >/dev/null 2>&1 || true
+        git reset --hard "${REPO_LREV:-HEAD}" >/dev/null
+        git clean -ffd >/dev/null
+      '
+    )
+  fi
+
   info "applying patches for $repo_path"
   (
     cd "$target_dir"
+    git config user.name "${OPENPHONE_PATCH_GIT_NAME:-OpenPhone}"
+    git config user.email "${OPENPHONE_PATCH_GIT_EMAIL:-openphone@example.invalid}"
     applied_patch_ids="$(mktemp)"
     git log --format=email --patch --no-ext-diff -n 400 \
       | git patch-id --stable \

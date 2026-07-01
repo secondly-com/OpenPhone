@@ -4,6 +4,11 @@ set -euo pipefail
 
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="/opt/homebrew/opt/coreutils/libexec/gnubin:/usr/local/opt/coreutils/libexec/gnubin:$PATH"
+if [[ "$(uname -s)" == "Darwin" && -x /opt/homebrew/opt/openjdk@17/bin/java ]] \
+  && { [[ -z "${JAVA_HOME:-}" ]] || [[ "${JAVA_HOME:-}" == /opt/homebrew/opt/openjdk/* ]]; }; then
+  export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+  export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+fi
 
 OPENPHONE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$OPENPHONE_ROOT/.worktree/android}"

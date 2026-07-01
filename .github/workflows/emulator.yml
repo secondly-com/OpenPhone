@@ -1,0 +1,97 @@
+name: Emulator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/emulator.yml"
+      - "integrations/adb/**"
+      - "integrations/cli/**"
+      - "integrations/mcp-server/**"
+      - "overlay/**"
+      - "patches/**"
+      - "runtime/**"
+      - "scripts/build.sh"
+      - "scripts/build-emulator.sh"
+      - "scripts/lab/**"
+      - "scripts/run-emulator*.sh"
+      - "scripts/run-assistant-task.sh"
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Emulator architecture"
+        required: true
+        default: "x86_64"
+        type: choice
+        options:
+          - x86_64
+          - arm64
+      skip_build:
+        description: "Reuse the runner's existing emulator image"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      assistant_smoke:
+        description: "Run local assistant task smoke"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator-smoke:
+    name: Boot emulator and run OpenPhone smoke
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, openphone-emulator]
+    timeout-minutes: 180
+    env:
+      OPENPHONE_ANDROID_DIR: ${{ vars.OPENPHONE_ANDROID_DIR || '.worktree/android' }}
+      OPENPHONE_RELEASE: bp4a
+      OPENPHONE_EMULATOR_ASSISTANT_SMOKE: ${{ inputs.assistant_smoke == 'false' && '0' || '1' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Validate repository scaffold
+        run: |
+          set -euxo pipefail
+          ./scripts/check.sh
+          git diff --check
+
+      - name: Run emulator smoke
+        env:
+          OPENPHONE_EMULATOR_BUILD: ${{ inputs.skip_build == 'true' && '0' || '1' }}
+        run: |
+          set -euxo pipefail
+          arch="${{ inputs.arch || vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
+          slot="ci-${{ github.run_id }}-${{ github.run_attempt }}"
+          ./scripts/lab/allocate-slot.sh --slot "$slot"
+          # shellcheck disable=SC1090
+          source ".worktree/lab/$slot/env"
+          ./scripts/lab/smoke.sh \
+            --slot "$OPENPHONE_LAB_SLOT" \
+            --arch "$arch" \
+            --ci
+
+      - name: Upload emulator smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openphone-emulator-smoke
+          path: .worktree/lab/*/artifacts/emulator-smoke/
+          if-no-files-found: warn

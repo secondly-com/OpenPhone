@@ -1,0 +1,236 @@
+name: GCP Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref/SHA to test. Defaults to this workflow SHA."
+        required: false
+        default: ""
+      repo_url:
+        description: "Git repo URL to clone on the lab VM"
+        required: true
+        default: "https://github.com/secondly-com/OpenPhone.git"
+      pr_number:
+        description: "Optional PR number for labels/naming"
+        required: false
+        default: ""
+      runtime:
+        description: "Comma-separated runtime intents"
+        required: true
+        default: "local"
+      arch:
+        description: "Emulator architecture"
+        required: true
+        default: "x86_64"
+        type: choice
+        options:
+          - x86_64
+          - arm64
+      machine_type:
+        description: "GCP machine type"
+        required: true
+        default: "c3-standard-22"
+      boot_disk_size:
+        description: "GCP boot disk size"
+        required: true
+        default: "1000GB"
+      boot_disk_type:
+        description: "GCP boot disk type"
+        required: true
+        default: "pd-ssd"
+      cache_mode:
+        description: "Android tree/cache strategy"
+        required: true
+        default: "scratch"
+        type: choice
+        options:
+          - scratch
+          - attach-disk
+          - snapshot
+      cache_disk:
+        description: "Existing cache disk name for attach-disk, or per-run disk name for snapshot"
+        required: false
+        default: ""
+      cache_source_snapshot:
+        description: "Warm cache snapshot name when cache_mode=snapshot"
+        required: false
+        default: ""
+      keep_vm:
+        description: "Leave the lab VM running for debugging"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+concurrency:
+  group: gcp-lab-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gcp-lab-smoke:
+    name: GCP emulator lab smoke
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.review.state == 'approved' &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    env:
+      OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
+      OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
+      OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
+      OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
+      OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
+      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
+    steps:
+      - name: Check out trusted workflow repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.base.sha || github.sha }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Validate repository scaffold
+        run: |
+          set -euxo pipefail
+          ./scripts/check.sh
+          git diff --check
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.OPENPHONE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.OPENPHONE_GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Select target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            pr_number="${{ github.event.pull_request.number }}"
+            ref="${{ github.event.pull_request.head.sha }}"
+            repo_url="${{ github.event.pull_request.head.repo.clone_url }}"
+            name="openphone-lab-pr-${pr_number}-${{ github.run_id }}-${{ github.run_attempt }}"
+            runtime="local"
+            arch="${{ vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
+            machine_type="${OPENPHONE_GCP_MACHINE_TYPE}"
+            boot_disk_size="${OPENPHONE_GCP_BOOT_DISK_SIZE}"
+            boot_disk_type="${OPENPHONE_GCP_BOOT_DISK_TYPE}"
+            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            if [[ -n "$cache_source_snapshot" ]]; then
+              cache_mode="snapshot"
+            else
+              cache_mode="scratch"
+            fi
+            cache_disk=""
+            keep_vm="false"
+          else
+            pr_number="${{ inputs.pr_number }}"
+            ref="${{ inputs.ref }}"
+            if [[ -z "$ref" ]]; then
+              ref="${GITHUB_SHA}"
+            fi
+            repo_url="${{ inputs.repo_url }}"
+            if [[ -z "$repo_url" ]]; then
+              repo_url="https://github.com/secondly-com/OpenPhone.git"
+            fi
+            name="openphone-lab-manual-${pr_number:-${{ github.run_id }}}-${{ github.run_attempt }}"
+            runtime="${{ inputs.runtime }}"
+            arch="${{ inputs.arch }}"
+            machine_type="${{ inputs.machine_type }}"
+            boot_disk_size="${{ inputs.boot_disk_size }}"
+            boot_disk_type="${{ inputs.boot_disk_type }}"
+            cache_mode="${{ inputs.cache_mode }}"
+            cache_disk="${{ inputs.cache_disk }}"
+            cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
+            keep_vm="${{ inputs.keep_vm }}"
+          fi
+
+          {
+            echo "name=$name"
+            echo "ref=$ref"
+            echo "repo_url=$repo_url"
+            echo "runtime=$runtime"
+            echo "arch=$arch"
+            echo "machine_type=$machine_type"
+            echo "boot_disk_size=$boot_disk_size"
+            echo "boot_disk_type=$boot_disk_type"
+            echo "cache_mode=$cache_mode"
+            echo "cache_disk=$cache_disk"
+            echo "cache_source_snapshot=$cache_source_snapshot"
+            echo "keep_vm=$keep_vm"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run GCP lab smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          args=(
+            --name "${{ steps.target.outputs.name }}"
+            --repo-url "${{ steps.target.outputs.repo_url }}"
+            --ref "${{ steps.target.outputs.ref }}"
+            --project "${OPENPHONE_GCP_PROJECT}"
+            --zone "${OPENPHONE_GCP_ZONE}"
+            --machine-type "${{ steps.target.outputs.machine_type }}"
+            --boot-disk-size "${{ steps.target.outputs.boot_disk_size }}"
+            --boot-disk-type "${{ steps.target.outputs.boot_disk_type }}"
+            --cache-mode "${{ steps.target.outputs.cache_mode }}"
+            --arch "${{ steps.target.outputs.arch }}"
+          )
+          if [[ -n "${{ steps.target.outputs.cache_disk }}" ]]; then
+            args+=(--cache-disk "${{ steps.target.outputs.cache_disk }}")
+          fi
+          if [[ -n "${{ steps.target.outputs.cache_source_snapshot }}" ]]; then
+            args+=(--cache-source-snapshot "${{ steps.target.outputs.cache_source_snapshot }}")
+          fi
+          if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
+            args+=(--keep-vm)
+          fi
+          IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
+          for runtime in "${runtimes[@]}"; do
+            [[ -n "$runtime" ]] || continue
+            args+=(--runtime "$runtime")
+          done
+          ./scripts/lab/gcp/run-smoke.sh "${args[@]}"
+
+      - name: Upload GCP lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openphone-gcp-lab
+          path: .worktree/gcp-lab/
+          if-no-files-found: warn

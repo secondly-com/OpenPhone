@@ -14,7 +14,7 @@ on macOS.
 Environment:
   OPENPHONE_MACOS_IMAGE        Sparsebundle path.
   OPENPHONE_MACOS_VOLUME_NAME  Mounted volume directory name.
-  OPENPHONE_MACOS_IMAGE_SIZE   Sparsebundle size, default 300g.
+  OPENPHONE_MACOS_IMAGE_SIZE   Sparsebundle max size, default 700g.
 USAGE
 }
 
@@ -39,7 +39,7 @@ need_cmd hdiutil
 
 image_path="${OPENPHONE_MACOS_IMAGE:-$OPENPHONE_ROOT/.worktree/OpenPhoneAndroid.sparsebundle}"
 volume_name="${OPENPHONE_MACOS_VOLUME_NAME:-OpenPhoneAndroid}"
-size="${OPENPHONE_MACOS_IMAGE_SIZE:-300g}"
+size="${OPENPHONE_MACOS_IMAGE_SIZE:-700g}"
 
 mkdir -p "$(dirname "$image_path")"
 
@@ -55,14 +55,18 @@ else
   info "sparsebundle already exists: $image_path"
 fi
 
-info "mounting $image_path"
-mount_output="$(hdiutil attach "$image_path" -mountpoint "$OPENPHONE_ROOT/.worktree/$volume_name" -nobrowse 2>&1)" || {
-  printf '%s\n' "$mount_output" >&2
-  die "failed to mount sparsebundle: $image_path"
-}
-printf '%s\n' "$mount_output"
-
 mount_path="$OPENPHONE_ROOT/.worktree/$volume_name"
+if mount | grep -F " on $mount_path (" >/dev/null 2>&1; then
+  info "sparsebundle already mounted: $mount_path"
+else
+  info "mounting $image_path"
+  mount_output="$(hdiutil attach "$image_path" -mountpoint "$mount_path" -nobrowse 2>&1)" || {
+    printf '%s\n' "$mount_output" >&2
+    die "failed to mount sparsebundle: $image_path"
+  }
+  printf '%s\n' "$mount_output"
+fi
+
 mkdir -p "$mount_path/android"
 
 cat <<MSG

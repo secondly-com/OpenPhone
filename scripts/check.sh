@@ -17,6 +17,7 @@ required=(
   docs/BUILD.md
   docs/CAPABILITIES.md
   docs/DEVICE_SUPPORT.md
+  docs/EMULATOR.md
   docs/GMS.md
   docs/LOCAL_AGENT_NOTES.md
   docs/LICENSING.md
@@ -52,7 +53,9 @@ required=(
   schemas/screen-context.schema.json
   schemas/trajectory-event.schema.json
   .github/workflows/ci.yml
+  .github/workflows/emulator.yml
   .github/workflows/eval.yml
+  .github/workflows/gcp-lab.yml
   .github/workflows/release.yml
   .github/RUNNERS.md
   .github/ISSUE_TEMPLATE/bug_report.md
@@ -138,7 +141,24 @@ required=(
   overlay/vendor/openphone/products/openphone_tegu.mk
   scripts/bootstrap-android-build-host.sh
   scripts/build-emulator.sh
+  scripts/run-emulator-smoke.sh
   scripts/run-emulator.sh
+  scripts/lab/allocate-slot.sh
+  scripts/lab/up.sh
+  scripts/lab/down.sh
+  scripts/lab/local-up.sh
+  scripts/lab/local-down.sh
+  scripts/lab/smoke.sh
+  scripts/lab/prepare-local.sh
+  scripts/lab/install-android-sdk-tools.sh
+  scripts/lab/gcp/common.sh
+  scripts/lab/gcp/setup-wif.sh
+  scripts/lab/gcp/create-vm.sh
+  scripts/lab/gcp/delete-vm.sh
+  scripts/lab/gcp/bootstrap-vm.sh
+  scripts/lab/gcp/prewarm-cache.sh
+  scripts/lab/gcp/run-smoke.sh
+  scripts/lab/gcp/seed-cache-from-boot-disk.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp
   overlay/packages/apps/OpenPhoneAssistant/AndroidManifest.xml
   overlay/packages/apps/OpenPhoneAssistant/LICENSE
@@ -184,7 +204,8 @@ for file in "${required[@]}"; do
   }
 done
 
-for script in "$root"/scripts/*.sh; do
+for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/gcp/*.sh; do
+  [[ -e "$script" ]] || continue
   bash -n "$script"
 done
 
