@@ -26,6 +26,11 @@ Options:
   --from-scratch             Force repo sync/checkout when preparation runs.
   --reset-patch-targets      Reset patched Android repos before applying patches.
   --no-clone-bundle          Pass repo sync --no-clone-bundle during preparation.
+  --emulator-image <path>    Install this portable SDK system image zip or URL
+                             and boot it through a slot-owned AVD.
+  --prebuilt                 Boot an already installed SDK system image/AVD
+                             without syncing/building Android locally.
+  --sdk-root <path>          Android SDK root for --emulator-image/--prebuilt.
   --skip-build               Reuse an already-built emulator image.
   --timeout <seconds>        Boot timeout. Default: run-emulator-smoke default.
   -h, --help                 Show this help.
@@ -43,6 +48,9 @@ reset_patch_targets=false
 no_clone_bundle=false
 skip_build=false
 timeout_seconds=""
+emulator_image=""
+prebuilt=false
+sdk_root=""
 runtimes=()
 
 while [[ $# -gt 0 ]]; do
@@ -91,6 +99,25 @@ while [[ $# -gt 0 ]]; do
     --no-clone-bundle)
       no_clone_bundle=true
       shift
+      ;;
+    --emulator-image)
+      [[ $# -ge 2 ]] || die "--emulator-image requires a value"
+      emulator_image="$2"
+      prebuilt=true
+      skip_build=true
+      prepare_mode="never"
+      shift 2
+      ;;
+    --prebuilt)
+      prebuilt=true
+      skip_build=true
+      prepare_mode="never"
+      shift
+      ;;
+    --sdk-root)
+      [[ $# -ge 2 ]] || die "--sdk-root requires a value"
+      sdk_root="$2"
+      shift 2
       ;;
     --runtime)
       [[ $# -ge 2 ]] || die "--runtime requires a value"
@@ -143,6 +170,22 @@ env_file="$root/.worktree/lab/$slot/env"
 [[ -f "$env_file" ]] || die "missing lab env file: $env_file"
 # shellcheck disable=SC1090
 source "$env_file"
+
+if [[ -n "$sdk_root" ]]; then
+  export ANDROID_SDK_ROOT="$sdk_root"
+  export ANDROID_HOME="$sdk_root"
+fi
+
+if [[ -n "$emulator_image" ]]; then
+  install_args=(--zip "$emulator_image")
+  if [[ -n "$arch" ]]; then
+    install_args+=(--arch "$arch")
+  fi
+  if [[ -n "$sdk_root" ]]; then
+    install_args+=(--sdk-root "$sdk_root")
+  fi
+  "$root/scripts/lab/install-emulator-image.sh" "${install_args[@]}"
+fi
 
 should_prepare=false
 case "$prepare_mode" in
@@ -197,6 +240,9 @@ if [[ -n "$variant" ]]; then
 fi
 if [[ "$skip_build" == true ]]; then
   args+=(--skip-build)
+fi
+if [[ "$prebuilt" == true ]]; then
+  args+=(--prebuilt)
 fi
 if [[ -n "$timeout_seconds" ]]; then
   args+=(--timeout "$timeout_seconds")

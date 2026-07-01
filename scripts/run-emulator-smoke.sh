@@ -19,6 +19,9 @@ Options:
   --slot <name>            Lab slot name for isolated data/artifacts.
   --port <port>            Emulator console port. Default: 5584.
   --serial <serial>        ADB serial. Default: emulator-<port>.
+  --avd <name>             Boot an installed Android SDK AVD instead of the
+                           Android source-tree emulator launcher.
+  --avd-home <path>        ANDROID_AVD_HOME for --avd.
   --timeout <seconds>      Boot timeout. Default: 600.
   --skip-build             Reuse an already-built image.
   --keep-running           Do not stop the emulator on exit.
@@ -30,9 +33,11 @@ Environment:
   OPENPHONE_LAB_DIR                     Lab slot directory.
   OPENPHONE_EMULATOR_PORT               Emulator console port.
   OPENPHONE_EMULATOR_SERIAL             Emulator ADB serial.
+  OPENPHONE_EMULATOR_AVD                Installed AVD name for prebuilt images.
   OPENPHONE_EMULATOR_BUILD              Set to 0 to skip build.
   OPENPHONE_EMULATOR_ASSISTANT_SMOKE    Set to 0 to skip local assistant task.
   OPENPHONE_EMULATOR_ARGS               Extra emulator arguments.
+  ANDROID_AVD_HOME                      AVD home for installed SDK images.
 
 Artifacts are written under .worktree/emulator-smoke/<timestamp>/.
 EOF
@@ -81,6 +86,8 @@ serial=""
 timeout_seconds="600"
 build="${OPENPHONE_EMULATOR_BUILD:-1}"
 keep_running=false
+avd_name="${OPENPHONE_EMULATOR_AVD:-}"
+avd_home="${ANDROID_AVD_HOME:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -107,6 +114,16 @@ while [[ $# -gt 0 ]]; do
     --serial)
       [[ $# -ge 2 ]] || die "--serial requires a value"
       serial="$2"
+      shift 2
+      ;;
+    --avd)
+      [[ $# -ge 2 ]] || die "--avd requires a value"
+      avd_name="$2"
+      shift 2
+      ;;
+    --avd-home)
+      [[ $# -ge 2 ]] || die "--avd-home requires a value"
+      avd_home="$2"
       shift 2
       ;;
     --timeout)
@@ -147,6 +164,13 @@ esac
 
 [[ "$port" =~ ^[0-9]+$ ]] || die "--port must be numeric"
 [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || die "--timeout must be numeric"
+
+if [[ -n "$avd_name" ]]; then
+  build=0
+fi
+if [[ -n "$avd_home" ]]; then
+  export ANDROID_AVD_HOME="$avd_home"
+fi
 
 need_cmd adb
 need_cmd node
@@ -210,9 +234,14 @@ emulator_args=(
 )
 emulator_args+=("${extra_emulator_args[@]}")
 
-info "Launching emulator $serial"
-"$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
-  "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
+if [[ -n "$avd_name" ]]; then
+  info "Launching emulator $serial from AVD $avd_name"
+  emulator -avd "$avd_name" "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
+else
+  info "Launching emulator $serial"
+  "$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
+    "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
+fi
 emulator_pid="$!"
 
 info "Waiting for ADB device"

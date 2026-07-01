@@ -64,6 +64,50 @@ bsdtar -xf sdk-repo-linux-system-images.zip \
 The ARM64 image expands to roughly 8 GiB before AVD userdata. Keep at least
 15-20 GiB free before first boot.
 
+## Mac Studio Codex Lab Slots
+
+For local agent work, do not sync/build Android on macOS. Use a portable image
+zip produced by Linux/GCP, then let the lab scripts create an isolated AVD and
+userdata directory per Codex slot.
+
+First run for a slot, with a local zip path or URL:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-main \
+  --arch arm64 \
+  --emulator-image /path/to/sdk-repo-linux-system-images.zip \
+  --runtime local \
+  --timeout 900
+```
+
+After the image is installed in the Android SDK, new or repeated slots can use
+the prebuilt path directly:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-second \
+  --arch arm64 \
+  --prebuilt \
+  --runtime local \
+  --timeout 900
+```
+
+Each slot writes its own environment under `.worktree/lab/<slot>/env`, including
+the emulator serial, AVD home, runtime ports, userdata directory, and artifact
+directory. Source it before running CLI/MCP commands manually:
+
+```bash
+source .worktree/lab/codex-local-main/env
+node integrations/cli/src/index.mjs --serial "$ANDROID_SERIAL" --json runtime status
+```
+
+Stop a slot with:
+
+```bash
+scripts/lab/down.sh --slot codex-local-main
+```
+
 ## Create An AVD
 
 Try the normal Android SDK path first:

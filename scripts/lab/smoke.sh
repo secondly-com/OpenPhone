@@ -19,6 +19,10 @@ Options:
   --runtime <name>           Runtime intent: local, openclaw, or hermes.
                              May be repeated. Default: local.
   --openclaw                 Alias for --runtime openclaw.
+  --prebuilt                 Use an installed SDK system image/AVD instead of
+                             the Android source-tree emulator launcher.
+  --avd <name>               Installed AVD name to boot.
+  --avd-home <path>          ANDROID_AVD_HOME for --avd.
   --skip-build               Reuse an already-built emulator image.
   --keep-running             Leave the emulator running on exit.
   --timeout <seconds>        Boot timeout. Default: run-emulator-smoke default.
@@ -38,6 +42,9 @@ variant=""
 skip_build=false
 keep_running=false
 timeout_seconds=""
+prebuilt=false
+avd_name="${OPENPHONE_EMULATOR_AVD:-}"
+avd_home="${ANDROID_AVD_HOME:-}"
 runtimes=()
 
 while [[ $# -gt 0 ]]; do
@@ -78,6 +85,22 @@ while [[ $# -gt 0 ]]; do
     --openclaw)
       runtimes+=(openclaw)
       shift
+      ;;
+    --prebuilt)
+      prebuilt=true
+      skip_build=true
+      shift
+      ;;
+    --avd)
+      [[ $# -ge 2 ]] || die "--avd requires a value"
+      avd_name="$2"
+      skip_build=true
+      shift 2
+      ;;
+    --avd-home)
+      [[ $# -ge 2 ]] || die "--avd-home requires a value"
+      avd_home="$2"
+      shift 2
       ;;
     --ci)
       shift
@@ -134,6 +157,22 @@ env_file="$root/.worktree/lab/$slot/env"
 # shellcheck disable=SC1090
 source "$env_file"
 
+avd_name="${avd_name:-${OPENPHONE_EMULATOR_AVD:-}}"
+avd_home="${avd_home:-${ANDROID_AVD_HOME:-}}"
+
+if [[ "$prebuilt" == true ]]; then
+  ensure_args=(--slot "$OPENPHONE_LAB_SLOT")
+  if [[ -n "$arch" ]]; then
+    ensure_args+=(--arch "$arch")
+  fi
+  "$root/scripts/lab/ensure-avd.sh" "${ensure_args[@]}"
+  # Refresh because ensure-avd appends Android SDK/AVD exports to the slot env.
+  # shellcheck disable=SC1090
+  source "$env_file"
+  avd_name="$OPENPHONE_EMULATOR_AVD"
+  avd_home="$ANDROID_AVD_HOME"
+fi
+
 runtime_pids=()
 cleanup_runtimes() {
   set +e
@@ -186,6 +225,13 @@ if [[ -n "$arch" ]]; then
 fi
 if [[ -n "$variant" ]]; then
   args+=(--variant "$variant")
+fi
+if [[ -n "$avd_name" ]]; then
+  args+=(--avd "$avd_name")
+  skip_build=true
+fi
+if [[ -n "$avd_home" ]]; then
+  args+=(--avd-home "$avd_home")
 fi
 if [[ "$skip_build" == true ]]; then
   args+=(--skip-build)

@@ -72,8 +72,31 @@ ls -lh "$OPENPHONE_ANDROID_DIR/out/target/product/emu64a/sdk-repo-linux-system-i
 ```
 
 Copy that zip to the workstation, install it into the Android SDK, create an
-AVD, and boot it with the steps in [EMULATOR.md](EMULATOR.md). After boot,
-verify the OpenPhone OS surface:
+AVD, and boot it with the steps in [EMULATOR.md](EMULATOR.md). For local Codex
+labs on a Mac Studio, prefer the slot-safe prebuilt path:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-main \
+  --arch arm64 \
+  --emulator-image /path/to/sdk-repo-linux-system-images.zip \
+  --runtime local \
+  --timeout 900
+```
+
+After the first install, additional isolated slots can reuse the installed
+image:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-second \
+  --arch arm64 \
+  --prebuilt \
+  --runtime local \
+  --timeout 900
+```
+
+After boot, verify the OpenPhone OS surface:
 
 ```bash
 adb -s emulator-5584 shell 'getprop sys.boot_completed'
