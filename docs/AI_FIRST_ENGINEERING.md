@@ -112,7 +112,6 @@ Long-term, the docs should be published as a static site, for example at
 site should render curated docs, not become a second place where truth drifts.
 
 Local-only agent notes belong in ignored `docs/local-temp/`, not in public docs.
-See `docs/LOCAL_AGENT_NOTES.md`.
 
 ## CI And CD Target State
 
