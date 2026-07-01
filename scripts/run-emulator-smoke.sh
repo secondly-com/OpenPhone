@@ -241,6 +241,41 @@ mkdir -p "$out_dir"
 export ANDROID_SERIAL="$serial"
 
 emulator_pid=""
+launch_emulator() {
+  if [[ "$keep_running" == true ]]; then
+    local pid_file="$out_dir/emulator.pid"
+    python3 - "$pid_file" "$out_dir/emulator.log" "$@" <<'PY'
+import os
+import subprocess
+import sys
+
+pid_file = sys.argv[1]
+log_path = sys.argv[2]
+cmd = sys.argv[3:]
+
+with open(os.devnull, "rb") as devnull, open(log_path, "ab", buffering=0) as log:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=devnull,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+with open(pid_file, "w", encoding="utf-8") as handle:
+    handle.write(f"{proc.pid}\n")
+PY
+    read -r emulator_pid < "$pid_file"
+  else
+    "$@" > "$out_dir/emulator.log" 2>&1 &
+    emulator_pid="$!"
+  fi
+  if [[ -n "$lab_dir" ]]; then
+    mkdir -p "$lab_dir/run"
+    printf '%s\n' "$emulator_pid" > "$lab_dir/run/emulator.pid"
+  fi
+}
+
 cleanup() {
   set +e
   adb -s "$serial" logcat -d > "$out_dir/logcat.txt" 2>/dev/null
@@ -251,7 +286,7 @@ cleanup() {
   if [[ "$keep_running" != true ]]; then
     adb -s "$serial" emu kill >/dev/null 2>&1
   fi
-  if [[ -n "$emulator_pid" ]]; then
+  if [[ -n "$emulator_pid" && "$keep_running" != true ]]; then
     wait "$emulator_pid" >/dev/null 2>&1
   fi
 }
@@ -280,17 +315,18 @@ emulator_args=(
   -no-boot-anim
   -no-audio
 )
-emulator_args+=("${extra_emulator_args[@]}")
+if [[ ${#extra_emulator_args[@]} -gt 0 ]]; then
+  emulator_args+=("${extra_emulator_args[@]}")
+fi
 
 if [[ -n "$avd_name" ]]; then
   info "Launching emulator $serial from AVD $avd_name"
-  emulator -avd "$avd_name" "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
+  launch_emulator emulator -avd "$avd_name" "${emulator_args[@]}"
 else
   info "Launching emulator $serial"
-  "$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
-    "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
+  launch_emulator "$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
+    "${emulator_args[@]}"
 fi
-emulator_pid="$!"
 
 info "Waiting for ADB device"
 deadline=$((SECONDS + timeout_seconds))
