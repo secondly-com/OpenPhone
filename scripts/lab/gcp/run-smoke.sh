@@ -295,12 +295,13 @@ cache_mount="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
 export OPENPHONE_RELEASE="${OPENPHONE_RELEASE:-bp4a}"
 
 prepare_android_workspace() {
-  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
-
   if [[ "$cache_mode" == "scratch" ]]; then
+    export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
     mkdir -p "$OPENPHONE_ANDROID_DIR"
     return 0
   fi
+
+  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-${OPENPHONE_GCP_CACHE_ANDROID_DIR:-/home/adamcohenhillel/openphone-android}}"
 
   local device="/dev/disk/by-id/google-openphone-cache"
   local deadline=$((SECONDS + 300))
@@ -323,6 +324,10 @@ prepare_android_workspace() {
   sudo chown "$USER:$USER" "$cache_mount"
 
   local cache_android_dir="$cache_mount/android"
+  local android_parent
+  android_parent="$(dirname "$OPENPHONE_ANDROID_DIR")"
+  sudo mkdir -p "$android_parent"
+  sudo chown "$USER:$USER" "$android_parent"
   mkdir -p "$cache_android_dir"
   mkdir -p "$OPENPHONE_ANDROID_DIR"
   if ! findmnt --mountpoint "$OPENPHONE_ANDROID_DIR" >/dev/null 2>&1; then
@@ -332,6 +337,8 @@ prepare_android_workspace() {
 }
 
 prepare_android_workspace
+
+printf '==> Android workspace path: %s\n' "$OPENPHONE_ANDROID_DIR"
 
 ensure_android_workspace_writable() {
   local probe_dir="$OPENPHONE_ANDROID_DIR"
