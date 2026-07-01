@@ -69,6 +69,7 @@ jobs:
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
+      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -121,6 +122,11 @@ jobs:
             --arch "$arch"
             --runtime local
           )
+          if [[ -n "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}" ]]; then
+            args+=(--cache-mode snapshot --cache-source-snapshot "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}")
+          else
+            args+=(--cache-mode scratch)
+          fi
           if [[ "${{ inputs.keep_gcp_lab_vm }}" == "true" ]]; then
             args+=(--keep-vm)
           fi

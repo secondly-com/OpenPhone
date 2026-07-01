@@ -47,8 +47,13 @@ on:
         options:
           - scratch
           - attach-disk
+          - snapshot
       cache_disk:
-        description: "Existing cache disk name when cache_mode=attach-disk"
+        description: "Existing cache disk name for attach-disk, or per-run disk name for snapshot"
+        required: false
+        default: ""
+      cache_source_snapshot:
+        description: "Warm cache snapshot name when cache_mode=snapshot"
         required: false
         default: ""
       keep_vm:
@@ -92,6 +97,7 @@ jobs:
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
+      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
     steps:
       - name: Check out trusted workflow repository
         uses: actions/checkout@v4
@@ -144,7 +150,12 @@ jobs:
             machine_type="${OPENPHONE_GCP_MACHINE_TYPE}"
             boot_disk_size="${OPENPHONE_GCP_BOOT_DISK_SIZE}"
             boot_disk_type="${OPENPHONE_GCP_BOOT_DISK_TYPE}"
-            cache_mode="scratch"
+            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            if [[ -n "$cache_source_snapshot" ]]; then
+              cache_mode="snapshot"
+            else
+              cache_mode="scratch"
+            fi
             cache_disk=""
             keep_vm="false"
           else
@@ -165,6 +176,7 @@ jobs:
             boot_disk_type="${{ inputs.boot_disk_type }}"
             cache_mode="${{ inputs.cache_mode }}"
             cache_disk="${{ inputs.cache_disk }}"
+            cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
             keep_vm="${{ inputs.keep_vm }}"
           fi
 
@@ -179,6 +191,7 @@ jobs:
             echo "boot_disk_type=$boot_disk_type"
             echo "cache_mode=$cache_mode"
             echo "cache_disk=$cache_disk"
+            echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
           } >> "$GITHUB_OUTPUT"
 
@@ -200,6 +213,9 @@ jobs:
           )
           if [[ -n "${{ steps.target.outputs.cache_disk }}" ]]; then
             args+=(--cache-disk "${{ steps.target.outputs.cache_disk }}")
+          fi
+          if [[ -n "${{ steps.target.outputs.cache_source_snapshot }}" ]]; then
+            args+=(--cache-source-snapshot "${{ steps.target.outputs.cache_source_snapshot }}")
           fi
           if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
             args+=(--keep-vm)

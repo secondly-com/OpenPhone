@@ -24,8 +24,11 @@ Options:
   --machine-type <type>       Machine type. Default: c3-standard-22.
   --boot-disk-size <size>     Boot disk size. Default: 1000GB.
   --boot-disk-type <type>     Boot disk type. Default: pd-ssd.
-  --cache-mode <mode>         scratch or attach-disk. Default: scratch.
+  --cache-mode <mode>         scratch, attach-disk, or snapshot. Default: scratch.
   --cache-disk <name>         Existing disk to attach for attach-disk mode.
+                               Per-run disk name for snapshot mode.
+  --cache-source-snapshot <s> Snapshot to clone for snapshot mode.
+  --cache-mount <path>        Mount path for cache disk. Default: /mnt/openphone-cache.
   --arch arm64|x86_64         Emulator arch. Default: x86_64.
   --variant eng|userdebug     Emulator variant. Default: eng.
   --runtime <name>            Runtime intent: local, openclaw, or hermes.
@@ -57,6 +60,8 @@ boot_disk_size="$OPENPHONE_GCP_BOOT_DISK_SIZE"
 boot_disk_type="$OPENPHONE_GCP_BOOT_DISK_TYPE"
 cache_mode="$OPENPHONE_GCP_CACHE_MODE"
 cache_disk="${OPENPHONE_GCP_CACHE_DISK:-}"
+cache_source_snapshot="$OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT"
+cache_mount="$OPENPHONE_GCP_CACHE_MOUNT"
 arch="x86_64"
 variant="eng"
 timeout_seconds=900
@@ -122,6 +127,16 @@ while [[ $# -gt 0 ]]; do
       cache_disk="$2"
       shift 2
       ;;
+    --cache-source-snapshot)
+      [[ $# -ge 2 ]] || die "--cache-source-snapshot requires a value"
+      cache_source_snapshot="$2"
+      shift 2
+      ;;
+    --cache-mount)
+      [[ $# -ge 2 ]] || die "--cache-mount requires a value"
+      cache_mount="$2"
+      shift 2
+      ;;
     --arch)
       [[ $# -ge 2 ]] || die "--arch requires a value"
       arch="$2"
@@ -178,9 +193,13 @@ case "$variant" in
 esac
 
 case "$cache_mode" in
-  scratch|attach-disk) ;;
+  scratch|attach-disk|snapshot) ;;
   *) die "unsupported cache mode: $cache_mode" ;;
 esac
+
+if [[ "$cache_mode" == "snapshot" && -z "$cache_source_snapshot" ]]; then
+  die "--cache-source-snapshot is required when --cache-mode snapshot"
+fi
 
 if [[ ${#runtimes[@]} -eq 0 ]]; then
   runtimes=(local)
@@ -199,18 +218,27 @@ artifact_dir="$artifact_root/artifacts"
 mkdir -p "$artifact_dir"
 
 vm_created=false
+artifacts_copied=false
 remote_script="$(mktemp "${TMPDIR:-/tmp}/openphone-gcp-remote.XXXXXX")"
+copy_remote_artifacts() {
+  mkdir -p "$artifact_dir"
+  if gcloud compute scp --recurse \
+    "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
+    "$artifact_dir/" \
+    --project "$project" \
+    --zone "$zone" >/dev/null; then
+    artifacts_copied=true
+    return 0
+  fi
+  return 1
+}
+
 cleanup() {
   local status=$?
   set +e
   rm -f "$remote_script"
-  if [[ "$vm_created" == true ]]; then
-    mkdir -p "$artifact_dir"
-    gcloud compute scp --recurse \
-      "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
-      "$artifact_dir/" \
-      --project "$project" \
-      --zone "$zone" >/dev/null 2>&1 || true
+  if [[ "$vm_created" == true && "$artifacts_copied" != true ]]; then
+    copy_remote_artifacts >/dev/null 2>&1 || true
   fi
   if [[ "$vm_created" == true && "$keep_vm" != true ]]; then
     "$script_dir/delete-vm.sh" --name "$name" --project "$project" --zone "$zone" || true
@@ -231,6 +259,9 @@ create_args=(
 if [[ -n "$cache_disk" ]]; then
   create_args+=(--cache-disk "$cache_disk")
 fi
+if [[ -n "$cache_source_snapshot" ]]; then
+  create_args+=(--cache-source-snapshot "$cache_source_snapshot")
+fi
 
 "$script_dir/create-vm.sh" "${create_args[@]}"
 vm_created=true
@@ -250,9 +281,43 @@ timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
 repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
 skip_build="${OPENPHONE_SKIP_BUILD:-0}"
 runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
+cache_mode="${OPENPHONE_GCP_CACHE_MODE:-scratch}"
+cache_mount="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
 
 export OPENPHONE_RELEASE="${OPENPHONE_RELEASE:-bp4a}"
-export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
+
+prepare_android_workspace() {
+  if [[ "$cache_mode" == "scratch" ]]; then
+    export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$HOME/openphone-android}"
+    mkdir -p "$OPENPHONE_ANDROID_DIR"
+    return 0
+  fi
+
+  local device="/dev/disk/by-id/google-openphone-cache"
+  local deadline=$((SECONDS + 300))
+  while [[ ! -e "$device" ]]; do
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      printf 'error: cache disk device did not appear: %s\n' "$device" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+
+  if ! sudo blkid "$device" >/dev/null 2>&1; then
+    sudo mkfs.ext4 -F -L openphone-cache "$device"
+  fi
+
+  sudo mkdir -p "$cache_mount"
+  if ! findmnt --mountpoint "$cache_mount" >/dev/null 2>&1; then
+    sudo mount -o defaults,discard "$device" "$cache_mount"
+  fi
+  sudo chown "$USER:$USER" "$cache_mount"
+
+  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-$cache_mount/android}"
+  mkdir -p "$OPENPHONE_ANDROID_DIR"
+}
+
+prepare_android_workspace
 
 if [[ ! -d "$HOME/openphone-src/.git" ]]; then
   rm -rf "$HOME/openphone-src"
@@ -273,12 +338,14 @@ export PATH="$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$ANDROI
 OPENPHONE_SKIP_JAVA_CHECK=1 ./scripts/check.sh
 
 if [[ "$skip_build" != "1" ]]; then
-  mkdir -p "$OPENPHONE_ANDROID_DIR"
+  sync_args=()
   if [[ -n "$repo_sync_jobs" ]]; then
-    ./scripts/sync.sh -j"$repo_sync_jobs"
+    sync_args+=(-j"$repo_sync_jobs")
   else
-    ./scripts/sync.sh -j"$(nproc)"
+    sync_args+=(-j"$(nproc)")
   fi
+  sync_args+=(--detach --force-sync --force-checkout)
+  ./scripts/sync.sh "${sync_args[@]}"
   ./scripts/apply-patches.sh
   ./scripts/check.sh
 fi
@@ -315,6 +382,8 @@ remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
 remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
 remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
 remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"
+remote_command+=" OPENPHONE_GCP_CACHE_MODE=$(shell_quote "$cache_mode")"
+remote_command+=" OPENPHONE_GCP_CACHE_MOUNT=$(shell_quote "$cache_mount")"
 remote_command+=" bash /tmp/openphone-gcp-run-smoke.sh"
 
 info "Running GCP lab smoke on $name"
@@ -324,4 +393,5 @@ gcloud compute ssh "$name" \
   --command "$remote_command" \
   | tee "$artifact_root/gcp-run-smoke.log"
 
+copy_remote_artifacts
 info "GCP lab smoke passed; artifacts copied to $artifact_dir"

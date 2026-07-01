@@ -155,7 +155,9 @@ required=(
   scripts/lab/gcp/create-vm.sh
   scripts/lab/gcp/delete-vm.sh
   scripts/lab/gcp/bootstrap-vm.sh
+  scripts/lab/gcp/prewarm-cache.sh
   scripts/lab/gcp/run-smoke.sh
+  scripts/lab/gcp/seed-cache-from-boot-disk.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp
   overlay/packages/apps/OpenPhoneAssistant/AndroidManifest.xml
   overlay/packages/apps/OpenPhoneAssistant/LICENSE

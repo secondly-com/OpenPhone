@@ -19,8 +19,10 @@ Options:
   --machine-type <type>       Machine type. Default: c3-standard-22.
   --boot-disk-size <size>     Boot disk size. Default: 1000GB.
   --boot-disk-type <type>     Boot disk type. Default: pd-ssd.
-  --cache-mode <mode>         scratch or attach-disk. Default: scratch.
+  --cache-mode <mode>         scratch, attach-disk, or snapshot. Default: scratch.
   --cache-disk <name>         Existing disk to attach for attach-disk mode.
+                               Per-run disk name for snapshot mode.
+  --cache-source-snapshot <s> Snapshot to clone for snapshot mode.
   --network <name>            Network. Default: default.
   --labels <labels>           Extra comma-separated labels.
   -h, --help                  Show this help.
@@ -35,6 +37,9 @@ boot_disk_size="$OPENPHONE_GCP_BOOT_DISK_SIZE"
 boot_disk_type="$OPENPHONE_GCP_BOOT_DISK_TYPE"
 cache_mode="$OPENPHONE_GCP_CACHE_MODE"
 cache_disk="${OPENPHONE_GCP_CACHE_DISK:-}"
+cache_source_snapshot="$OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT"
+cache_disk_size="$OPENPHONE_GCP_CACHE_DISK_SIZE"
+cache_disk_type="$OPENPHONE_GCP_CACHE_DISK_TYPE"
 network="$OPENPHONE_GCP_NETWORK"
 extra_labels=""
 
@@ -80,6 +85,11 @@ while [[ $# -gt 0 ]]; do
       cache_disk="$2"
       shift 2
       ;;
+    --cache-source-snapshot)
+      [[ $# -ge 2 ]] || die "--cache-source-snapshot requires a value"
+      cache_source_snapshot="$2"
+      shift 2
+      ;;
     --network)
       [[ $# -ge 2 ]] || die "--network requires a value"
       network="$2"
@@ -109,7 +119,7 @@ else
 fi
 
 case "$cache_mode" in
-  scratch|attach-disk) ;;
+  scratch|attach-disk|snapshot) ;;
   *) die "unsupported cache mode: $cache_mode" ;;
 esac
 
@@ -126,9 +136,48 @@ if [[ "$cache_mode" == "attach-disk" ]]; then
     --zone "$zone" >/dev/null
 fi
 
+if [[ "$cache_mode" == "snapshot" ]]; then
+  [[ -n "$cache_source_snapshot" ]] || die "--cache-source-snapshot is required when --cache-mode snapshot"
+  if [[ -z "$cache_disk" ]]; then
+    cache_disk="$(sanitize_gcp_name "${name}-cache")"
+  else
+    cache_disk="$(sanitize_gcp_name "$cache_disk")"
+  fi
+  if gcloud compute disks describe "$cache_disk" \
+    --project "$project" \
+    --zone "$zone" >/dev/null 2>&1; then
+    die "cache disk already exists for snapshot mode: $cache_disk"
+  fi
+fi
+
 labels="app=openphone,purpose=lab,managed-by=codex"
 if [[ -n "$extra_labels" ]]; then
   labels="${labels},${extra_labels}"
+fi
+
+created_cache_disk=false
+cleanup_cache_disk() {
+  local status=$?
+  if [[ "$created_cache_disk" == true ]]; then
+    gcloud compute disks delete "$cache_disk" \
+      --project "$project" \
+      --zone "$zone" \
+      --quiet >/dev/null 2>&1 || true
+  fi
+  exit "$status"
+}
+trap cleanup_cache_disk EXIT
+
+if [[ "$cache_mode" == "snapshot" ]]; then
+  info "Creating per-run cache disk from snapshot: $cache_disk"
+  gcloud compute disks create "$cache_disk" \
+    --project "$project" \
+    --zone "$zone" \
+    --type "$cache_disk_type" \
+    --size "$cache_disk_size" \
+    --source-snapshot "$cache_source_snapshot" \
+    --labels "$labels"
+  created_cache_disk=true
 fi
 
 args=(
@@ -154,10 +203,15 @@ if [[ -n "$network" ]]; then
   args+=(--network "$network")
 fi
 
-if [[ "$cache_mode" == "attach-disk" ]]; then
-  args+=(--disk "name=$cache_disk,device-name=openphone-cache,mode=rw,boot=no,auto-delete=no")
+if [[ "$cache_mode" == "attach-disk" || "$cache_mode" == "snapshot" ]]; then
+  cache_auto_delete="no"
+  if [[ "$cache_mode" == "snapshot" ]]; then
+    cache_auto_delete="yes"
+  fi
+  args+=(--disk "name=$cache_disk,device-name=openphone-cache,mode=rw,boot=no,auto-delete=$cache_auto_delete")
 fi
 
 info "Creating GCP lab VM: $name"
 gcloud "${args[@]}"
+created_cache_disk=false
 printf '%s\n' "$name"
