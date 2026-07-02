@@ -118,12 +118,14 @@ Local-only agent notes belong in ignored `docs/local-temp/`, not in public docs.
 ### Current Baseline
 
 - `ci.yml` runs repository checks and whitespace checks on GitHub-hosted Linux.
-- `emulator.yml` boots an OpenPhone SDK phone emulator on the
-  `openphone-emulator` self-hosted runner for PRs that touch runtime,
-  assistant, overlay, patch, integration, or emulator code.
+- `gcp-lab.yml` runs trusted or maintainer-approved emulator lab checks on
+  disposable GCP VMs with warm Android cache state.
+- `emulator.yml` remains available for a local self-hosted emulator runner, but
+  it is not the release build path.
 - `eval.yml` runs physical trajectory smokes on the `openphone-device`
   self-hosted runner.
-- `release.yml` runs release work on the `openphone-build` self-hosted runner.
+- `release.yml` runs release build, emulator gate, artifact validation, and
+  GitHub Release publishing through a GCP lab VM.
 
 ### Next CI Layers
 

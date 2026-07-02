@@ -94,8 +94,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gcp-lab-smoke:
-    name: GCP emulator lab smoke
+  gcp-emulator-lab:
+    name: GCP emulator lab
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -212,7 +212,7 @@ jobs:
             echo "keep_vm=$keep_vm"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Run GCP lab smoke
+      - name: Run GCP emulator lab
         shell: bash
         run: |
           set -euxo pipefail
@@ -249,6 +249,30 @@ jobs:
             args+=(--runtime "$runtime")
           done
           ./scripts/lab/gcp/run-smoke.sh "${args[@]}"
+
+      - name: Summarize GCP emulator lab
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## GCP emulator lab"
+            echo
+            echo "- Cloud provider: \`GCP\`"
+            echo "- Project: \`${OPENPHONE_GCP_PROJECT}\`"
+            echo "- Zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- VM: \`${{ steps.target.outputs.name }}\`"
+            echo "- Source ref: \`${{ steps.target.outputs.ref }}\`"
+            echo "- Source repo: \`${{ steps.target.outputs.repo_url }}\`"
+            echo "- Runtime intents: \`${{ steps.target.outputs.runtime }}\`"
+            echo "- Emulator arch: \`${{ steps.target.outputs.arch }}\`"
+            echo "- Machine type: \`${{ steps.target.outputs.machine_type }}\`"
+            echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
+            echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
+            echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
+            echo "- VM service account: \`disabled\`"
+            echo "- VM OAuth scopes: \`disabled\`"
+            echo "- Keep VM: \`${{ steps.target.outputs.keep_vm }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload GCP lab artifacts
         if: always()

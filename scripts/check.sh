@@ -68,6 +68,7 @@ required=(
   scripts/prepare-tegu-device-repos.sh
   scripts/prepare-tegu-dtb.sh
   scripts/generate-release-manifest.sh
+  scripts/stage-release-ota.sh
   scripts/check-release-notes.sh
   scripts/generate-ota-feed.sh
   scripts/prepare-github-release.sh
@@ -159,6 +160,7 @@ required=(
   scripts/lab/gcp/delete-vm.sh
   scripts/lab/gcp/bootstrap-vm.sh
   scripts/lab/gcp/prewarm-cache.sh
+  scripts/lab/gcp/run-release.sh
   scripts/lab/gcp/run-smoke.sh
   scripts/lab/gcp/seed-cache-from-boot-disk.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp

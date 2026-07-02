@@ -134,10 +134,10 @@ openphone_sdk_phone_arm64-bp4a-eng
 ```
 
 Choose the image architecture for the workstation that will run the emulator
-UI: `arm64` for Apple Silicon and `x86_64` for Intel/x86_64 workstations. A
-Linux Android build host, including EC2, can be used to produce the portable
-image zip. The `eng` variant is the default because ADB is enabled without
-first completing emulator-side developer settings.
+UI: `arm64` for Apple Silicon and `x86_64` for Intel/x86_64 workstations. The
+GCP lab workflow can produce portable image zips from warm Android cache state.
+The `eng` variant is the default because ADB is enabled without first
+completing emulator-side developer settings.
 
 Build the ARM64 emulator image:
 
@@ -183,31 +183,30 @@ On LineageOS 21 and newer, `emu_img_zip` writes
 `sdk-repo-linux-system-images.zip` under `out/target/product/<device>/` for
 use with Android Studio/AVD system image installs.
 
-### EC2 Build Host
+### GCP Lab Build Host
 
-For remote builds, launch an Ubuntu x86_64 EC2 host with at least 64 GB RAM and
-roughly 700 GB of fast gp3 storage, then bootstrap Android build dependencies:
-
-```bash
-sudo ./scripts/bootstrap-android-build-host.sh
-```
-
-Copy the OpenPhone repo to the host and build the x86_64 emulator target:
+For remote builds, use the GCP lab scripts or workflow. They create a
+disposable VM, attach or restore warm Android cache state, run the build, copy
+artifacts back, and delete the VM unless debugging keeps it.
 
 ```bash
-OPENPHONE_SKIP_JAVA_CHECK=1 ./scripts/check.sh
-./scripts/sync.sh -j16
-./scripts/apply-patches.sh
-./scripts/build-emulator.sh --arch x86_64
+scripts/lab/gcp/run-smoke.sh \
+  --cache-mode snapshot \
+  --cache-source-snapshot "$OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT" \
+  --arch x86_64 \
+  --runtime local
 ```
 
-The pre-sync scaffold check skips the standalone Java check because the full
+To refresh the warm GCP cache intentionally:
+
+```bash
+scripts/lab/gcp/prewarm-cache.sh \
+  --cache-disk openphone-cache-x86-64-bp4a \
+  --arch x86_64
+```
+
+The pre-sync scaffold check may skip the standalone Java check when the full
 Android build provides the authoritative compiler/toolchain validation.
-The EC2 host is primarily a build host; it may not have the Android SDK
-Emulator binary or `/dev/kvm`. Copy
-`.worktree/android/out/target/product/emu64x/sdk-repo-linux-system-images.zip`
-back to a workstation with Android Studio/SDK Emulator to create and boot the
-AVD.
 
 Current generic-target status:
 
@@ -229,7 +228,7 @@ Device-specific OpenPhone Pixel 9a build on Linux:
 ```bash
 OPENPHONE_ANDROID_DIR=/path/to/android/tree \
 OPENPHONE_RELEASE=bp4a \
-OPENPHONE_BUILD_GOAL="droid target-files-package otapackage" \
+OPENPHONE_BUILD_GOAL="target-files-package ota_from_target_files" \
 ./scripts/build.sh openphone_tegu
 ```
 
