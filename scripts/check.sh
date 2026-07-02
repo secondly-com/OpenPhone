@@ -222,6 +222,22 @@ grep -q 'git config --global user.email' "$gcp_bootstrap" || {
   printf 'GCP VM bootstrap must configure a lab git user.email for vendor extraction\n' >&2
   exit 1
 }
+for apt_bootstrap in \
+  "$root/scripts/lab/gcp/bootstrap-vm.sh" \
+  "$root/scripts/bootstrap-android-build-host.sh"; do
+  grep -q 'Acquire::Retries' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure Acquire::Retries: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'Acquire::http::Timeout' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure an HTTP timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'DPkg::Lock::Timeout' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure a dpkg lock timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+done
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"

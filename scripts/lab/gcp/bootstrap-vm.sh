@@ -76,8 +76,18 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-sudo apt-get update
-sudo apt-get install -y \
+apt_get() {
+  sudo env DEBIAN_FRONTEND=noninteractive timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-600}" \
+    apt-get \
+      -o "Acquire::Retries=${OPENPHONE_APT_RETRIES:-5}" \
+      -o "Acquire::http::Timeout=${OPENPHONE_APT_HTTP_TIMEOUT_SECONDS:-30}" \
+      -o "Acquire::https::Timeout=${OPENPHONE_APT_HTTPS_TIMEOUT_SECONDS:-30}" \
+      -o "DPkg::Lock::Timeout=${OPENPHONE_APT_LOCK_TIMEOUT_SECONDS:-120}" \
+      "$@"
+}
+
+apt_get update
+apt_get install -y \
   acl \
   ca-certificates \
   curl \
