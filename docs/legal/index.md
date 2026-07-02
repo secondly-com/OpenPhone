@@ -2,6 +2,6 @@
 
 OpenPhone legal and licensing docs live here.
 
-- [Licensing Notes](/LICENSING)
-- [Commercial Licensing](/legal/COMMERCIAL)
-- [Third-Party Notices](/legal/THIRD_PARTY_NOTICES)
+- [Licensing Notes](/docs/LICENSING)
+- [Commercial Licensing](/docs/legal/COMMERCIAL)
+- [Third-Party Notices](/docs/legal/THIRD_PARTY_NOTICES)
