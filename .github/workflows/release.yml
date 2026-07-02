@@ -123,6 +123,7 @@ jobs:
       OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
       OPENPHONE_RELEASE_BUILD_GOAL: ${{ vars.OPENPHONE_RELEASE_BUILD_GOAL || 'target-files-package ota_from_target_files' }}
+      OPENPHONE_EMULATOR_BUILD_GOAL: ${{ vars.OPENPHONE_EMULATOR_BUILD_GOAL || 'droid emu_img_zip' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -213,6 +214,7 @@ jobs:
             --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
             --build-goal "${OPENPHONE_RELEASE_BUILD_GOAL}"
             --emulator-arch "$arch"
+            --emulator-build-goal "${OPENPHONE_EMULATOR_BUILD_GOAL}"
           )
           if [[ "$cache_mode" == "snapshot" ]]; then
             args+=(--cache-mode snapshot --cache-source-snapshot "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}")
