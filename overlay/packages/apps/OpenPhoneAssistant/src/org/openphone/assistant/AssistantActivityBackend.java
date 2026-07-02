@@ -47,6 +47,7 @@ import org.openphone.assistant.watchers.OpenPhoneWatcherScheduler;
 
 import java.io.IOException;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class AssistantActivityBackend extends ComponentActivity {
     public interface ComposeStateCallbacks {
@@ -213,7 +214,7 @@ public class AssistantActivityBackend extends ComponentActivity {
     private volatile boolean mAgentRunCancelled;
     private boolean mIslandVoiceLaunch;
     private boolean mSuppressNextUserAppend;
-    private int mAgentRunGeneration;
+    private final AtomicInteger mAgentRunGeneration = new AtomicInteger();
     private int mAuditRefreshGeneration;
     private int mVoiceRunGeneration;
     private int mChatRunGeneration;
@@ -1403,7 +1404,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         clearVoicePipelineProtection();
         mAgentRunCancelled = false;
         final int voiceGeneration = ++mVoiceRunGeneration;
-        final int runGeneration = ++mAgentRunGeneration;
+        final int runGeneration = mAgentRunGeneration.incrementAndGet();
         final OpenAiRealtimeVoiceSession session = new OpenAiRealtimeVoiceSession(endpointConfig,
                 liveVoiceContinuityContextJson(), "yolo".equals(mAutonomyMode));
         mRunningRealtimeVoiceSession = session;
@@ -1482,7 +1483,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                         @Override
                         public boolean isCancelled() {
                             return mAgentRunCancelled
-                                    || runGeneration != mAgentRunGeneration
+                                    || runGeneration != mAgentRunGeneration.get()
                                     || voiceGeneration != mVoiceRunGeneration
                                     || Thread.currentThread().isInterrupted();
                         }
@@ -1567,7 +1568,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         clearVoicePipelineProtection();
         mAgentRunCancelled = false;
         final int voiceGeneration = ++mVoiceRunGeneration;
-        final int runGeneration = ++mAgentRunGeneration;
+        final int runGeneration = mAgentRunGeneration.incrementAndGet();
         final GeminiLiveVoiceSession session = new GeminiLiveVoiceSession(apiKey,
                 liveVoiceContinuityContextJson(), "yolo".equals(mAutonomyMode));
         mRunningGeminiLiveVoiceSession = session;
@@ -1646,7 +1647,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                         @Override
                         public boolean isCancelled() {
                             return mAgentRunCancelled
-                                    || runGeneration != mAgentRunGeneration
+                                    || runGeneration != mAgentRunGeneration.get()
                                     || voiceGeneration != mVoiceRunGeneration
                                     || Thread.currentThread().isInterrupted();
                         }
@@ -2387,7 +2388,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         reloadAutonomyMode();
         cancelAgentRun();
         mAgentRunCancelled = false;
-        final int runGeneration = ++mAgentRunGeneration;
+        final int runGeneration = mAgentRunGeneration.incrementAndGet();
         final JSONArray proposedActions = decision.proposedActions();
         final ModelAdapter adapter = selectedModelAdapter(modelEndpointConfig());
         final FrameworkToolExecutor toolExecutor = new FrameworkToolExecutor(this, agentManager);
@@ -2413,7 +2414,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                             adapter.usesCloud(), adapter.privacyDisclosure());
                     JSONArray results = new JSONArray();
                     for (int i = 0; i < proposedActions.length(); i++) {
-                        if (mAgentRunCancelled || runGeneration != mAgentRunGeneration) {
+                        if (mAgentRunCancelled || runGeneration != mAgentRunGeneration.get()) {
                             return;
                         }
                         JSONObject action = proposedActions.optJSONObject(i);
@@ -2481,7 +2482,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (runGeneration != mAgentRunGeneration) {
+                if (runGeneration != mAgentRunGeneration.get()) {
                     return;
                 }
                 mAgentThread = null;
@@ -2505,7 +2506,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (runGeneration != mAgentRunGeneration) {
+                if (runGeneration != mAgentRunGeneration.get()) {
                     try {
                         mAgentManager.stopTask(taskId, "{\"reason\":\"one_shot_cancelled\"}");
                     } catch (RuntimeException ignored) {
@@ -3156,7 +3157,7 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     private void cancelAgentRun() {
         mAgentRunCancelled = true;
-        mAgentRunGeneration++;
+        mAgentRunGeneration.incrementAndGet();
         ModelAdapter adapter = mRunningModelAdapter;
         if (adapter != null) {
             adapter.cancel();
@@ -3226,7 +3227,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         reloadAutonomyMode();
         cancelAgentRun();
         mAgentRunCancelled = false;
-        final int runGeneration = ++mAgentRunGeneration;
+        final int runGeneration = mAgentRunGeneration.incrementAndGet();
         final String taskId = mActiveTaskId;
         final ModelEndpointConfig endpointConfig = modelEndpointConfig();
         setTaskText("Working on: " + goal);
@@ -3288,7 +3289,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                     @Override
                     public boolean isCancelled() {
                         return mAgentRunCancelled
-                                || runGeneration != mAgentRunGeneration
+                                || runGeneration != mAgentRunGeneration.get()
                                 || Thread.currentThread().isInterrupted();
                     }
                 });
@@ -3296,7 +3297,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (runGeneration != mAgentRunGeneration) {
+                        if (runGeneration != mAgentRunGeneration.get()) {
                             return;
                         }
                         mAgentThread = null;

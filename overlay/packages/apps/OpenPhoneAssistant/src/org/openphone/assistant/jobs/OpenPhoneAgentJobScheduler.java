@@ -24,6 +24,8 @@ import org.openphone.assistant.model.ModelEndpointConfig;
 import org.openphone.assistant.model.OpenAiResponsesAgentAdapter;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class OpenPhoneAgentJobScheduler {
     private static final String TAG = "OpenPhoneAgentJobs";
@@ -32,8 +34,18 @@ public final class OpenPhoneAgentJobScheduler {
     private static final long MIN_DELAY_MILLIS = 15_000L;
     private static final long STUCK_TIMEOUT_MILLIS = 10L * 60L * 1000L;
     private static final int MAX_DUE_PER_CHECK = 3;
+    private static final ConcurrentHashMap<String, AtomicBoolean> sCancelFlags =
+            new ConcurrentHashMap<>();
 
     private OpenPhoneAgentJobScheduler() {}
+
+    /** Signals a running background job to stop at its next isCancelled() check. */
+    public static void cancelJob(String jobId) {
+        AtomicBoolean flag = jobId == null ? null : sCancelFlags.get(jobId);
+        if (flag != null) {
+            flag.set(true);
+        }
+    }
 
     public static void checkNow(Context context) {
         if (context == null) {
@@ -111,6 +123,8 @@ public final class OpenPhoneAgentJobScheduler {
             return;
         }
         String taskId = null;
+        AtomicBoolean cancelFlag = sCancelFlags.computeIfAbsent(job.id,
+                id -> new AtomicBoolean(false));
         try {
             String response = agentManager.startTask(taskRequestJson(job));
             taskId = parseString(response, "task_id");
@@ -140,7 +154,7 @@ public final class OpenPhoneAgentJobScheduler {
 
                 @Override
                 public boolean isCancelled() {
-                    return false;
+                    return cancelFlag.get() || Thread.currentThread().isInterrupted();
                 }
             });
             store.markCompleted(job.id, result, System.currentTimeMillis());
@@ -150,6 +164,7 @@ public final class OpenPhoneAgentJobScheduler {
         } catch (RuntimeException e) {
             failJob(context, store, job, "job_error:" + e.getClass().getSimpleName());
         } finally {
+            sCancelFlags.remove(job.id);
             if (agentManager != null && taskId != null && !taskId.isEmpty()) {
                 try {
                     agentManager.stopTask(taskId, "{\"reason\":\"background_job_finished\"}");
