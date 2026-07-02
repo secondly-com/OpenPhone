@@ -203,7 +203,7 @@ jobs:
     runs-on: [self-hosted, openphone-build]
     timeout-minutes: 180
     env:
-      OPENPHONE_ANDROID_DIR: ${{ vars.OPENPHONE_ANDROID_DIR || '.worktree/android' }}
+      OPENPHONE_ANDROID_DIR: ${{ vars.OPENPHONE_BUILD_ANDROID_DIR || vars.OPENPHONE_ANDROID_DIR || '/opt/openphone-build/android' }}
       OPENPHONE_RELEASE: bp4a
       OPENPHONE_BUILD_GOAL: otapackage
     steps:
@@ -228,6 +228,45 @@ jobs:
           ./scripts/check-release-notes.sh "${{ inputs.version }}" "${{ inputs.release_notes }}"
           git diff --check
           test -f "${{ inputs.release_notes }}"
+
+      - name: Prepare Android tree
+        run: |
+          set -euxo pipefail
+
+          candidates=()
+          add_candidate() {
+            local path="$1"
+            [[ -n "$path" ]] || return 0
+            candidates+=("$path")
+          }
+
+          add_candidate "$OPENPHONE_ANDROID_DIR"
+          add_candidate "${OPENPHONE_BUILD_ANDROID_DIR:-}"
+          add_candidate "${HOME}/openphone-android"
+          add_candidate "${RUNNER_WORKSPACE}/OpenPhoneAndroid/android"
+
+          selected=""
+          for candidate in "${candidates[@]}"; do
+            if [[ -f "$candidate/build/envsetup.sh" ]]; then
+              selected="$candidate"
+              break
+            fi
+          done
+          selected="${selected:-$OPENPHONE_ANDROID_DIR}"
+          if ! mkdir -p "$selected"; then
+            selected="${HOME}/openphone-android"
+            mkdir -p "$selected"
+          fi
+
+          echo "OPENPHONE_ANDROID_DIR=$selected" >> "$GITHUB_ENV"
+          export OPENPHONE_ANDROID_DIR="$selected"
+
+          ./scripts/sync.sh -j"$(nproc)" --detach
+          if [[ -d "$OPENPHONE_ANDROID_DIR/.repo" ]]; then
+            OPENPHONE_RESET_PATCH_TARGETS=1 ./scripts/apply-patches.sh
+          else
+            ./scripts/apply-patches.sh
+          fi
 
       - name: Build OTA
         run: |
