@@ -256,11 +256,9 @@ remote_script="$(mktemp "${TMPDIR:-/tmp}/openphone-gcp-release.XXXXXX")"
 
 copy_release_artifacts() {
   mkdir -p "$release_artifact_parent"
-  if gcloud compute scp --recurse \
+  if gcp_compute_scp "$project" "$zone" --recurse \
     "$name:~/openphone-src/.worktree/releases/$version" \
-    "$release_artifact_parent/" \
-    --project "$project" \
-    --zone "$zone" >/dev/null; then
+    "$release_artifact_parent/" >/dev/null; then
     release_copied=true
     return 0
   fi
@@ -269,11 +267,9 @@ copy_release_artifacts() {
 
 copy_emulator_artifacts() {
   mkdir -p "$emulator_artifact_parent"
-  if gcloud compute scp --recurse \
+  if gcp_compute_scp "$project" "$zone" --recurse \
     "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
-    "$emulator_artifact_parent/" \
-    --project "$project" \
-    --zone "$zone" >/dev/null; then
+    "$emulator_artifact_parent/" >/dev/null; then
     emulator_copied=true
     return 0
   fi
@@ -480,9 +476,8 @@ fi
 REMOTE
 
 info "Copying remote release script to $name"
-gcloud compute scp "$remote_script" "$name:/tmp/openphone-gcp-run-release.sh" \
-  --project "$project" \
-  --zone "$zone" >/dev/null
+gcp_compute_scp "$project" "$zone" \
+  "$remote_script" "$name:/tmp/openphone-gcp-run-release.sh" >/dev/null
 
 skip_emulator_value=0
 if [[ "$skip_emulator_smoke" == true ]]; then
@@ -510,9 +505,7 @@ remote_command+=" OPENPHONE_BUILD_CACHE_DIR=$(shell_quote "${OPENPHONE_BUILD_CAC
 remote_command+=" bash /tmp/openphone-gcp-run-release.sh"
 
 info "Running GCP release build on $name"
-gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
+gcp_compute_ssh "$name" "$project" "$zone" \
   --command "$remote_command" \
   | tee "$artifact_root/gcp-run-release.log"
 

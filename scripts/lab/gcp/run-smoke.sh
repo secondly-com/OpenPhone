@@ -244,11 +244,9 @@ artifacts_copied=false
 remote_script="$(mktemp "${TMPDIR:-/tmp}/openphone-gcp-remote.XXXXXX")"
 copy_remote_artifacts() {
   mkdir -p "$artifact_dir"
-  if gcloud compute scp --recurse \
+  if gcp_compute_scp "$project" "$zone" --recurse \
     "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
-    "$artifact_dir/" \
-    --project "$project" \
-    --zone "$zone" >/dev/null; then
+    "$artifact_dir/" >/dev/null; then
     artifacts_copied=true
     return 0
   fi
@@ -465,9 +463,8 @@ done
 REMOTE
 
 info "Copying remote smoke script to $name"
-gcloud compute scp "$remote_script" "$name:/tmp/openphone-gcp-run-smoke.sh" \
-  --project "$project" \
-  --zone "$zone" >/dev/null
+gcp_compute_scp "$project" "$zone" \
+  "$remote_script" "$name:/tmp/openphone-gcp-run-smoke.sh" >/dev/null
 
 runtime_csv="$(IFS=,; printf '%s' "${runtimes[*]}")"
 skip_build_value=0
@@ -498,9 +495,7 @@ remote_command+=" OPENPHONE_GCP_CACHE_MOUNT=$(shell_quote "$cache_mount")"
 remote_command+=" bash /tmp/openphone-gcp-run-smoke.sh"
 
 info "Running GCP emulator lab on $name"
-gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
+gcp_compute_ssh "$name" "$project" "$zone" \
   --command "$remote_command" \
   | tee "$artifact_root/gcp-run-smoke.log"
 

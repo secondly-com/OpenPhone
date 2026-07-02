@@ -178,6 +178,8 @@ gcloud compute instances create "$name" \
   --no-service-account \
   --no-scopes \
   --labels "app=openphone,purpose=lab-cache-seed,managed-by=codex" \
+  --tags openphone-lab \
+  --metadata "openphone-lab=true" \
   --disk "name=$source_disk,device-name=openphone-source,mode=ro,boot=no,auto-delete=no" \
   --disk "name=$cache_disk,device-name=openphone-cache,mode=rw,boot=no,auto-delete=no"
 vm_created=true
@@ -248,10 +250,7 @@ sudo umount "$source_root"
 REMOTE
 
 deadline=$((SECONDS + 600))
-until gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
-  --command "true" >/dev/null 2>&1; do
+until gcp_compute_ssh "$name" "$project" "$zone" --command "true" >/dev/null 2>&1; do
   if [[ "$SECONDS" -ge "$deadline" ]]; then
     die "SSH was not ready for $name within 600s"
   fi
@@ -259,14 +258,11 @@ until gcloud compute ssh "$name" \
 done
 
 info "Copying cache seed script to $name"
-gcloud compute scp "$tmp_script" "$name:/tmp/openphone-cache-seed.sh" \
-  --project "$project" \
-  --zone "$zone" >/dev/null
+gcp_compute_scp "$project" "$zone" \
+  "$tmp_script" "$name:/tmp/openphone-cache-seed.sh" >/dev/null
 
 info "Copying Android tree from $source_disk to $cache_disk"
-gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
+gcp_compute_ssh "$name" "$project" "$zone" \
   --command "OPENPHONE_SOURCE_ANDROID_DIR=$(shell_quote "$source_android_dir") bash /tmp/openphone-cache-seed.sh"
 
 if [[ "$keep_vm" == true ]]; then

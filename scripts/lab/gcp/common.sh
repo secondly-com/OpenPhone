@@ -21,6 +21,7 @@ OPENPHONE_GCP_CACHE_DISK_TYPE="${OPENPHONE_GCP_CACHE_DISK_TYPE:-$OPENPHONE_GCP_B
 OPENPHONE_GCP_CACHE_DISK_SIZE="${OPENPHONE_GCP_CACHE_DISK_SIZE:-1000GB}"
 OPENPHONE_GCP_CACHE_MOUNT="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
 OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT:-}"
+OPENPHONE_GCP_TUNNEL_THROUGH_IAP="${OPENPHONE_GCP_TUNNEL_THROUGH_IAP:-1}"
 
 need_gcloud() {
   need_cmd gcloud
@@ -52,4 +53,34 @@ gcp_instance_exists() {
   gcloud compute instances describe "$name" \
     --project "$project" \
     --zone "$zone" >/dev/null 2>&1
+}
+
+gcp_use_iap_tunnel() {
+  case "${OPENPHONE_GCP_TUNNEL_THROUGH_IAP,,}" in
+    1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
+    *) die "OPENPHONE_GCP_TUNNEL_THROUGH_IAP must be 1/true or 0/false" ;;
+  esac
+}
+
+gcp_compute_ssh() {
+  local name="$1" project="$2" zone="$3"
+  shift 3
+
+  local args=(compute ssh "$name" --project "$project" --zone "$zone")
+  if gcp_use_iap_tunnel; then
+    args+=(--tunnel-through-iap)
+  fi
+  gcloud "${args[@]}" "$@"
+}
+
+gcp_compute_scp() {
+  local project="$1" zone="$2"
+  shift 2
+
+  local args=(compute scp)
+  if gcp_use_iap_tunnel; then
+    args+=(--tunnel-through-iap)
+  fi
+  gcloud "${args[@]}" "$@" --project "$project" --zone "$zone"
 }

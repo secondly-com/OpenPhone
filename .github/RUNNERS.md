@@ -24,6 +24,20 @@ disposable GCP VM, attaches or restores warm Android cache state, runs the
 build/test commands inside that VM, copies artifacts back to GitHub Actions,
 and deletes the VM unless debugging explicitly keeps it.
 
+GCP lab SSH/SCP uses Identity-Aware Proxy by default
+(`OPENPHONE_GCP_TUNNEL_THROUGH_IAP=1`). Lab setup scopes Workload Identity
+Federation to the `release.yml` and `gcp-lab.yml` workflow refs on `main`,
+grants the GitHub lab service account `roles/iap.tunnelResourceAccessor`,
+creates an `openphone-lab-allow-iap-ssh` firewall rule for `35.235.240.0/20`
+and VMs tagged `openphone-lab`, and disables the broad `default-allow-ssh` and
+`default-allow-rdp` ingress rules. Do not expose disposable lab VMs directly to
+the public internet.
+
+For speed, manual GCP lab dispatches can set `skip_build=true` to boot and
+smoke-test already-built outputs from a warm cache image. Automatic PR lab runs
+must rebuild from the PR ref and should use the warm snapshot cache instead of
+`skip_build`.
+
 Do not use a generic self-hosted runner label for official release builds. The
 release workflow must show the GCP project, zone, VM name, source SHA, cache
 mode, and artifact directory in the workflow summary.

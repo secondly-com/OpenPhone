@@ -116,10 +116,7 @@ printf 'OpenPhone GCP VM bootstrap complete.\n'
 REMOTE
 
 deadline=$((SECONDS + timeout_seconds))
-until gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
-  --command "true" >/dev/null 2>&1; do
+until gcp_compute_ssh "$name" "$project" "$zone" --command "true" >/dev/null 2>&1; do
   if [[ "$SECONDS" -ge "$deadline" ]]; then
     die "SSH was not ready for $name within ${timeout_seconds}s"
   fi
@@ -127,12 +124,9 @@ until gcloud compute ssh "$name" \
 done
 
 info "Copying bootstrap script to $name"
-gcloud compute scp "$tmp_script" "$name:/tmp/openphone-bootstrap-vm.sh" \
-  --project "$project" \
-  --zone "$zone" >/dev/null
+gcp_compute_scp "$project" "$zone" \
+  "$tmp_script" "$name:/tmp/openphone-bootstrap-vm.sh" >/dev/null
 
 info "Bootstrapping $name"
-gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
+gcp_compute_ssh "$name" "$project" "$zone" \
   --command "bash /tmp/openphone-bootstrap-vm.sh"
