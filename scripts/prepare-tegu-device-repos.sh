@@ -20,6 +20,7 @@ vendor_zip_sha256="${OPENPHONE_TEGU_VENDOR_ZIP_SHA256:-}"
 [[ -f "$OPENPHONE_ANDROID_DIR/build/envsetup.sh" ]] || die "missing build/envsetup.sh; run scripts/sync.sh first"
 
 tegu_kernel_module_lists=(
+  vendor_kernel_boot.modules.load
   system_dlkm.modules.load
   vendor_dlkm.modules.load
 )
@@ -96,11 +97,31 @@ extract_tegu_ota_partition() {
   [[ -s "$target" ]] || die "Pixel 9a $partition image not created: $target"
 }
 
+copy_tegu_modules_from_dump() {
+  local dump_root="$1"
+  local modules_list="$2"
+  local source_label="$3"
+  local module module_name source
+
+  [[ -d "$dump_root" ]] || die "missing Pixel 9a kernel module dump: $dump_root"
+
+  while IFS= read -r module || [[ -n "$module" ]]; do
+    module="${module%%#*}"
+    module="${module//[[:space:]]/}"
+    [[ -n "$module" ]] || continue
+    module_name="${module##*/}"
+    [[ -s "$tegu_kernel_dir/$module_name" ]] && continue
+
+    source="$(find "$dump_root" \( -type f -o -type l \) -name "$module_name" -print -quit)"
+    [[ -n "$source" ]] || die "missing $module_name in $source_label"
+    cp -L "$source" "$tegu_kernel_dir/$module_name"
+  done <"$modules_list"
+}
+
 copy_tegu_modules_from_dlkm_image() {
   local image="$1"
   local modules_list="$2"
   local dump_root="$3"
-  local module module_name source
 
   [[ -s "$image" ]] || die "missing Pixel 9a DLKM image: $image"
 
@@ -114,17 +135,74 @@ copy_tegu_modules_from_dlkm_image() {
     touch "$dump_root/.openphone-extracted"
   fi
 
-  while IFS= read -r module || [[ -n "$module" ]]; do
-    module="${module%%#*}"
-    module="${module//[[:space:]]/}"
-    [[ -n "$module" ]] || continue
-    module_name="${module##*/}"
-    [[ -s "$tegu_kernel_dir/$module_name" ]] && continue
+  copy_tegu_modules_from_dump "$dump_root" "$modules_list" "$image"
+}
 
-    source="$(find "$dump_root" -type f -name "$module_name" -print -quit)"
-    [[ -n "$source" ]] || die "missing $module_name in $image"
-    cp "$source" "$tegu_kernel_dir/$module_name"
-  done <"$modules_list"
+extract_tegu_ramdisk_file() {
+  local ramdisk="$1"
+  local out_dir="$2"
+  local head_hex
+
+  [[ -s "$ramdisk" ]] || return 1
+
+  head_hex="$(xxd -p -l 6 "$ramdisk" | tr -d '\n')"
+  mkdir -p "$out_dir"
+
+  case "$head_hex" in
+    070701*|070702*)
+      (cd "$out_dir" && cpio -id --no-absolute-filenames <"$ramdisk") >/dev/null 2>&1
+      ;;
+    1f8b*)
+      gzip -dc "$ramdisk" | (cd "$out_dir" && cpio -id --no-absolute-filenames) >/dev/null 2>&1
+      ;;
+    04224d18*|02214c18*)
+      lz4 -dc "$ramdisk" | (cd "$out_dir" && cpio -id --no-absolute-filenames) >/dev/null 2>&1
+      ;;
+    *)
+      rm -rf "$out_dir"
+      return 1
+      ;;
+  esac
+}
+
+copy_tegu_modules_from_vendor_kernel_boot_image() {
+  local image="$1"
+  local modules_list="$2"
+  local dump_root="$3"
+  local unpack_tool unpack_dir ramdisk_root candidate candidate_out found
+
+  [[ -s "$image" ]] || die "missing Pixel 9a vendor_kernel_boot image: $image"
+
+  if [[ ! -e "$dump_root/.openphone-extracted" ]]; then
+    need_cmd cpio
+    need_cmd gzip
+    need_cmd lz4
+    need_cmd xxd
+
+    unpack_tool="$(tegu_unpack_bootimg)"
+    [[ -x "$unpack_tool" ]] || die "missing unpack_bootimg tool: $unpack_tool"
+
+    rm -rf "$dump_root"
+    mkdir -p "$dump_root"
+    unpack_dir="$dump_root/unpacked"
+    ramdisk_root="$dump_root/ramdisks"
+
+    info "Extracting kernel modules from ${image##*/}"
+    "$unpack_tool" --boot_img "$image" --out "$unpack_dir" --format mkbootimg >/dev/null
+
+    found=0
+    while IFS= read -r candidate; do
+      candidate_out="$ramdisk_root/${candidate#$unpack_dir/}"
+      if extract_tegu_ramdisk_file "$candidate" "$candidate_out"; then
+        found=1
+      fi
+    done < <(find "$unpack_dir" -type f -print)
+
+    ((found == 1)) || die "failed to extract any vendor ramdisk from $image"
+    touch "$dump_root/.openphone-extracted"
+  fi
+
+  copy_tegu_modules_from_dump "$dump_root" "$modules_list" "$image"
 }
 
 ensure_tegu_kernel_modules() {
@@ -139,6 +217,13 @@ ensure_tegu_kernel_modules() {
 
   need_cmd debugfs
   mkdir -p "$cache_root/tegu" "$tegu_kernel_dir"
+
+  dump_root="$cache_root/tegu/${source_zip##*/}"
+  dump_root="${dump_root%.zip}-vendor_kernel_boot-modules"
+  copy_tegu_modules_from_vendor_kernel_boot_image \
+    "$tegu_kernel_image" \
+    "$tegu_kernel_dir/vendor_kernel_boot.modules.load" \
+    "$dump_root"
 
   for partition in system_dlkm vendor_dlkm; do
     image_cache="$cache_root/tegu/${source_zip##*/}"
