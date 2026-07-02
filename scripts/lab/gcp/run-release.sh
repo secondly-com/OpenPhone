@@ -36,6 +36,8 @@ Options:
                               Emulator arch for the release smoke. Default: x86_64.
   --emulator-variant <v>      Emulator variant. Default: eng.
   --emulator-timeout <sec>    Emulator boot timeout. Default: 900.
+  --emulator-build-goal <g>   Build goals for the emulator smoke image.
+                              Default: droid emu_img_zip.
   --skip-emulator-smoke       Build/stage release artifacts without emulator smoke.
   --keep-vm                   Leave VM running for debug.
   -h, --help                  Show this help.
@@ -70,6 +72,7 @@ build_goal="${OPENPHONE_RELEASE_BUILD_GOAL:-target-files-package ota_from_target
 emulator_arch="x86_64"
 emulator_variant="eng"
 emulator_timeout="900"
+emulator_build_goal="${OPENPHONE_EMULATOR_BUILD_GOAL:-droid emu_img_zip}"
 skip_emulator_smoke=false
 keep_vm=false
 
@@ -173,6 +176,11 @@ while [[ $# -gt 0 ]]; do
     --emulator-timeout)
       [[ $# -ge 2 ]] || die "--emulator-timeout requires a value"
       emulator_timeout="$2"
+      shift 2
+      ;;
+    --emulator-build-goal)
+      [[ $# -ge 2 ]] || die "--emulator-build-goal requires a value"
+      emulator_build_goal="$2"
       shift 2
       ;;
     --skip-emulator-smoke)
@@ -328,6 +336,7 @@ skip_emulator_smoke="${OPENPHONE_SKIP_EMULATOR_SMOKE:-0}"
 emulator_arch="${OPENPHONE_EMULATOR_ARCH:-x86_64}"
 emulator_variant="${OPENPHONE_EMULATOR_VARIANT:-eng}"
 emulator_timeout="${OPENPHONE_EMULATOR_TIMEOUT:-900}"
+emulator_build_goal="${OPENPHONE_EMULATOR_BUILD_GOAL:-droid emu_img_zip}"
 
 export OPENPHONE_RELEASE="${OPENPHONE_RELEASE:-bp4a}"
 
@@ -461,7 +470,7 @@ mkdir -p "$release_dir"
 ./scripts/validate-release-artifacts.sh "$release_dir"
 
 if [[ "$skip_emulator_smoke" != "1" ]]; then
-  ./scripts/lab/smoke.sh \
+  OPENPHONE_BUILD_GOAL="$emulator_build_goal" ./scripts/lab/smoke.sh \
     --slot "$slot" \
     --arch "$emulator_arch" \
     --variant "$emulator_variant" \
@@ -494,6 +503,7 @@ remote_command+=" OPENPHONE_SKIP_EMULATOR_SMOKE=$(shell_quote "$skip_emulator_va
 remote_command+=" OPENPHONE_EMULATOR_ARCH=$(shell_quote "$emulator_arch")"
 remote_command+=" OPENPHONE_EMULATOR_VARIANT=$(shell_quote "$emulator_variant")"
 remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$emulator_timeout")"
+remote_command+=" OPENPHONE_EMULATOR_BUILD_GOAL=$(shell_quote "$emulator_build_goal")"
 remote_command+=" OPENPHONE_TEGU_VENDOR_ZIP_URL=$(shell_quote "${OPENPHONE_TEGU_VENDOR_ZIP_URL:-}")"
 remote_command+=" OPENPHONE_TEGU_VENDOR_ZIP_SHA256=$(shell_quote "${OPENPHONE_TEGU_VENDOR_ZIP_SHA256:-}")"
 remote_command+=" OPENPHONE_BUILD_CACHE_DIR=$(shell_quote "${OPENPHONE_BUILD_CACHE_DIR:-}")"

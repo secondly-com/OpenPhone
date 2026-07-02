@@ -56,6 +56,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-${{ inputs.version }}-${{ inputs.device }}
+  cancel-in-progress: false
+
 jobs:
   release-dry-run:
     name: Release dry run
@@ -119,6 +123,7 @@ jobs:
       OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
       OPENPHONE_RELEASE_BUILD_GOAL: ${{ vars.OPENPHONE_RELEASE_BUILD_GOAL || 'target-files-package ota_from_target_files' }}
+      OPENPHONE_EMULATOR_BUILD_GOAL: ${{ vars.OPENPHONE_EMULATOR_BUILD_GOAL || 'droid emu_img_zip' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -147,6 +152,16 @@ jobs:
           git diff --check
           test -f "${{ inputs.release_notes }}"
 
+      - name: Reject duplicate GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          if gh release view "${{ inputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::GitHub Release ${{ inputs.version }} already exists; refusing to rebuild or overwrite it."
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -156,8 +171,8 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Run GCP release build and stage artifacts
-        id: stage
+      - name: Plan GCP release lab
+        id: target
         run: |
           set -euxo pipefail
           version="${{ inputs.version }}"
@@ -169,6 +184,21 @@ jobs:
           lab_name="openphone-release-${safe_version}-${{ github.run_id }}-${{ github.run_attempt }}"
           arch="${{ vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
           cache_mode="scratch"
+          if [[ -n "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}" ]]; then
+            cache_mode="snapshot"
+          fi
+          echo "lab_name=$lab_name" >> "$GITHUB_OUTPUT"
+          echo "emulator_arch=$arch" >> "$GITHUB_OUTPUT"
+          echo "cache_mode=$cache_mode" >> "$GITHUB_OUTPUT"
+
+      - name: Run GCP release build and stage artifacts
+        id: stage
+        run: |
+          set -euxo pipefail
+          version="${{ inputs.version }}"
+          lab_name="${{ steps.target.outputs.lab_name }}"
+          arch="${{ steps.target.outputs.emulator_arch }}"
+          cache_mode="${{ steps.target.outputs.cache_mode }}"
           cleanup_behavior="delete-vm"
           args=(
             --name "$lab_name"
@@ -184,9 +214,9 @@ jobs:
             --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
             --build-goal "${OPENPHONE_RELEASE_BUILD_GOAL}"
             --emulator-arch "$arch"
+            --emulator-build-goal "${OPENPHONE_EMULATOR_BUILD_GOAL}"
           )
-          if [[ -n "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}" ]]; then
-            cache_mode="snapshot"
+          if [[ "$cache_mode" == "snapshot" ]]; then
             args+=(--cache-mode snapshot --cache-source-snapshot "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}")
           else
             args+=(--cache-mode scratch)
@@ -229,6 +259,35 @@ jobs:
           name: openphone-release-gcp-lab
           path: .worktree/gcp-lab/
           if-no-files-found: warn
+
+      - name: Cleanup GCP release lab
+        if: ${{ always() && inputs.keep_gcp_lab_vm != 'true' && steps.target.outputs.lab_name != '' }}
+        run: |
+          set -euxo pipefail
+          lab_name="${{ steps.target.outputs.lab_name }}"
+          scripts/lab/gcp/delete-vm.sh \
+            --name "$lab_name" \
+            --project "${OPENPHONE_GCP_PROJECT}" \
+            --zone "${OPENPHONE_GCP_ZONE}" || true
+          cache_disk="${lab_name}-cache"
+          if gcloud compute disks describe "$cache_disk" \
+            --project "${OPENPHONE_GCP_PROJECT}" \
+            --zone "${OPENPHONE_GCP_ZONE}" >/dev/null 2>&1; then
+            users="$(
+              gcloud compute disks describe "$cache_disk" \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --zone "${OPENPHONE_GCP_ZONE}" \
+                --format='value(users)'
+            )"
+            if [[ -z "$users" ]]; then
+              gcloud compute disks delete "$cache_disk" \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --zone "${OPENPHONE_GCP_ZONE}" \
+                --quiet || true
+            else
+              echo "::warning::GCP cache disk $cache_disk is still attached; leaving it for inspection."
+            fi
+          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
