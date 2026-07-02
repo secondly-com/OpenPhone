@@ -6,4 +6,5 @@ The source changelog remains in
 Use it with the release process and versioned release notes:
 
 - [Release Process](/RELEASE_PROCESS)
+- [0.0.2 Release Notes](/releases/0.0.2)
 - [0.0.1 Release Notes](/releases/0.0.1)
