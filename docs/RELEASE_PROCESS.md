@@ -216,9 +216,10 @@ workflow requires:
   become the repository's Latest release.
 
 The workflow validates the repository, confirms the release-notes file exists,
-builds the OTA on the `openphone-build` runner, stages the OTA, generates
-`SHA256SUMS` and `ARTIFACTS.md`, validates the staged directory, and publishes
-the GitHub Release with those assets.
+authenticates to GCP with Workload Identity Federation, creates a disposable GCP
+release lab VM, builds and stages the OTA there, runs the required emulator
+gate, generates `SHA256SUMS` and `ARTIFACTS.md`, validates the staged directory,
+and publishes the GitHub Release with those assets.
 
 Before dispatching a release:
 

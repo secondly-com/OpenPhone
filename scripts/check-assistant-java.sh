@@ -8,7 +8,7 @@
 # This is a syntax/reference gate, not a real build: it catches unresolved
 # symbols (e.g. a helper method referenced but never implemented) that the
 # JSON/config checks in check.sh cannot see. The authoritative build is
-# still the Android tree on the EC2 build host.
+# still a full Android tree build.
 #
 # Set OPENPHONE_SKIP_JAVA_CHECK=1 to skip (e.g. environments without an
 # Android SDK).

@@ -497,7 +497,7 @@ remote_command+=" OPENPHONE_GCP_CACHE_MODE=$(shell_quote "$cache_mode")"
 remote_command+=" OPENPHONE_GCP_CACHE_MOUNT=$(shell_quote "$cache_mount")"
 remote_command+=" bash /tmp/openphone-gcp-run-smoke.sh"
 
-info "Running GCP lab smoke on $name"
+info "Running GCP emulator lab on $name"
 gcloud compute ssh "$name" \
   --project "$project" \
   --zone "$zone" \
@@ -505,4 +505,4 @@ gcloud compute ssh "$name" \
   | tee "$artifact_root/gcp-run-smoke.log"
 
 copy_remote_artifacts
-info "GCP lab smoke passed; artifacts copied to $artifact_dir"
+info "GCP emulator lab passed; artifacts copied to $artifact_dir"
