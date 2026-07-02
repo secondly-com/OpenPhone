@@ -219,6 +219,10 @@ fi
 if [[ -n "$avd_home" ]]; then
   export ANDROID_AVD_HOME="$avd_home"
 fi
+sdk_root_for_tools="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+if [[ -n "$sdk_root_for_tools" ]]; then
+  export PATH="$sdk_root_for_tools/platform-tools:$sdk_root_for_tools/emulator:$sdk_root_for_tools/cmdline-tools/latest/bin:$PATH"
+fi
 
 need_cmd adb
 need_cmd node

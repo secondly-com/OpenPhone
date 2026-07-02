@@ -77,7 +77,10 @@ labs on a Mac Studio, prefer the slot-safe prebuilt path. When exporting an
 ARM64 zip from GCP for Apple Silicon, dispatch `GCP Lab` with
 `export_emulator_image=true` and `run_smoke=false`; the local slot boot is the
 ARM64 smoke proof. Keep the exported `.zip.sha256` sidecar next to the zip, or
-pass it explicitly with `--emulator-image-sha256`.
+pass it explicitly with `--emulator-image-sha256`. Existing SDK installs are
+reused only when their recorded SHA-256 matches the requested zip; use
+`--force-emulator-image` when intentionally replacing an older or untracked
+install.
 
 ```bash
 scripts/lab/up.sh \
