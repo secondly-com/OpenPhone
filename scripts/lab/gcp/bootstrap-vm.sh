@@ -100,6 +100,8 @@ if [[ -e /dev/kvm ]]; then
 fi
 
 git lfs install --skip-repo
+git config --global user.name "${OPENPHONE_LAB_GIT_NAME:-OpenPhone Lab}"
+git config --global user.email "${OPENPHONE_LAB_GIT_EMAIL:-openphone-lab@example.invalid}"
 mkdir -p "$HOME/openphone-lab" "$HOME/openphone-android"
 printf 'OpenPhone GCP VM bootstrap complete.\n'
 REMOTE
