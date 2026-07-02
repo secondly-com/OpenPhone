@@ -80,6 +80,14 @@ on:
         options:
           - "true"
           - "false"
+      skip_build:
+        description: "Manual only: reuse existing build outputs from a warm cache image"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   pull_request_target:
     types:
       - labeled
@@ -175,6 +183,7 @@ jobs:
             fi
             cache_disk=""
             keep_vm="false"
+            skip_build="false"
           else
             pr_number="${{ inputs.pr_number }}"
             ref="${{ inputs.ref }}"
@@ -195,6 +204,7 @@ jobs:
             cache_disk="${{ inputs.cache_disk }}"
             cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
             keep_vm="${{ inputs.keep_vm }}"
+            skip_build="${{ inputs.skip_build }}"
           fi
 
           {
@@ -210,6 +220,7 @@ jobs:
             echo "cache_disk=$cache_disk"
             echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
+            echo "skip_build=$skip_build"
           } >> "$GITHUB_OUTPUT"
 
       - name: Run GCP emulator lab
@@ -243,6 +254,9 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.run_smoke }}" != "true" ]]; then
             args+=(--skip-smoke)
           fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ steps.target.outputs.skip_build }}" == "true" ]]; then
+            args+=(--skip-build)
+          fi
           IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
           for runtime in "${runtimes[@]}"; do
             [[ -n "$runtime" ]] || continue
@@ -269,6 +283,7 @@ jobs:
             echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
             echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
             echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
+            echo "- Skip build: \`${{ steps.target.outputs.skip_build }}\`"
             echo "- VM service account: \`disabled\`"
             echo "- VM OAuth scopes: \`disabled\`"
             echo "- Keep VM: \`${{ steps.target.outputs.keep_vm }}\`"

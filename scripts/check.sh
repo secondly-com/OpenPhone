@@ -272,6 +272,41 @@ if grep -q 'qemu-kvm' "$gcp_bootstrap"; then
   printf 'GCP VM bootstrap must not install Ubuntu qemu-kvm; Android SDK emulator provides its own QEMU\n' >&2
   exit 1
 fi
+gcp_common="$root/scripts/lab/gcp/common.sh"
+grep -q 'OPENPHONE_GCP_TUNNEL_THROUGH_IAP' "$gcp_common" || {
+  printf 'GCP lab helpers must default to IAP tunneling for SSH/SCP\n' >&2
+  exit 1
+}
+grep -q -- '--tunnel-through-iap' "$gcp_common" || {
+  printf 'GCP lab SSH/SCP helpers must pass --tunnel-through-iap\n' >&2
+  exit 1
+}
+for gcp_script in \
+  "$root/scripts/lab/gcp/bootstrap-vm.sh" \
+  "$root/scripts/lab/gcp/run-release.sh" \
+  "$root/scripts/lab/gcp/run-smoke.sh" \
+  "$root/scripts/lab/gcp/seed-cache-from-boot-disk.sh"; do
+  if grep -qE 'gcloud compute (ssh|scp)' "$gcp_script"; then
+    printf 'GCP lab script must use IAP-aware SSH/SCP helpers: %s\n' "$gcp_script" >&2
+    exit 1
+  fi
+done
+grep -q 'roles/iap.tunnelResourceAccessor' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must grant IAP tunnel access to the lab service account\n' >&2
+  exit 1
+}
+grep -q 'assertion.workflow_ref' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must scope federation to trusted lab/release workflow refs\n' >&2
+  exit 1
+}
+grep -q '.github/workflows/gcp-lab.yml@refs/heads/main' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must include the trusted GCP lab workflow ref\n' >&2
+  exit 1
+}
+grep -q 'openphone-lab-allow-iap-ssh' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must create the IAP-only SSH firewall rule\n' >&2
+  exit 1
+}
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"
