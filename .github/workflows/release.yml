@@ -208,7 +208,7 @@ jobs:
       OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
       OPENPHONE_RELEASE: bp4a
-      OPENPHONE_BUILD_GOAL: otapackage
+      OPENPHONE_BUILD_GOAL: bacon
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -285,8 +285,29 @@ jobs:
           set -euxo pipefail
           staging=".worktree/releases/${{ inputs.version }}"
           product_dir="${OPENPHONE_ANDROID_DIR}/out/target/product/${{ inputs.device }}"
-          src="${product_dir}/openphone_${{ inputs.device }}-ota.zip"
           dst="${staging}/openphone_${{ inputs.device }}-${{ inputs.version }}-ota.zip"
+          src=""
+
+          if [[ -f "${product_dir}/openphone_${{ inputs.device }}-ota.zip" ]]; then
+            src="${product_dir}/openphone_${{ inputs.device }}-ota.zip"
+          else
+            mapfile -t release_zips < <(
+              find "$product_dir" -maxdepth 1 -type f \
+                -name "lineage-*-UNOFFICIAL-${{ inputs.device }}.zip" \
+                -printf '%T@ %p\n' \
+                | sort -nr \
+                | awk '{sub(/^[^ ]+ /, ""); print}'
+            )
+            if [[ ${#release_zips[@]} -gt 0 ]]; then
+              src="${release_zips[0]}"
+            fi
+          fi
+
+          [[ -n "$src" ]] || {
+            echo "No OTA zip found in ${product_dir}" >&2
+            find "$product_dir" -maxdepth 1 -type f -name "*.zip" -print >&2
+            exit 1
+          }
 
           mkdir -p "$staging"
           cp "$src" "$dst"
