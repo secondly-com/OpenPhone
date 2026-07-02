@@ -65,6 +65,7 @@ required=(
   docs/devices/README.md
   docs/devices/tegu.md
   manifests/openphone.xml
+  scripts/prepare-tegu-device-repos.sh
   scripts/prepare-tegu-dtb.sh
   scripts/generate-release-manifest.sh
   scripts/check-release-notes.sh

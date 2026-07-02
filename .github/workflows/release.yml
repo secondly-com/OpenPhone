@@ -204,6 +204,9 @@ jobs:
     timeout-minutes: 180
     env:
       OPENPHONE_ANDROID_DIR: ${{ vars.OPENPHONE_BUILD_ANDROID_DIR || vars.OPENPHONE_ANDROID_DIR || '/opt/openphone-build/android' }}
+      OPENPHONE_BUILD_CACHE_DIR: ${{ vars.OPENPHONE_BUILD_CACHE_DIR || '/opt/openphone-build/cache' }}
+      OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
+      OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
       OPENPHONE_RELEASE: bp4a
       OPENPHONE_BUILD_GOAL: otapackage
     steps:
@@ -266,6 +269,9 @@ jobs:
             OPENPHONE_RESET_PATCH_TARGETS=1 ./scripts/apply-patches.sh
           else
             ./scripts/apply-patches.sh
+          fi
+          if [[ "${{ inputs.device }}" == "tegu" ]]; then
+            ./scripts/prepare-tegu-device-repos.sh
           fi
 
       - name: Build OTA
