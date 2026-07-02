@@ -30,6 +30,8 @@ Options:
                              and boot it through a slot-owned AVD.
   --emulator-image-sha256 <digest|path|url>
                              Expected SHA-256 for --emulator-image.
+  --force-emulator-image     Replace an existing installed SDK system image
+                             when --emulator-image is used.
   --prebuilt                 Boot an already installed SDK system image/AVD
                              without syncing/building Android locally.
   --sdk-root <path>          Android SDK root for --emulator-image/--prebuilt.
@@ -52,6 +54,7 @@ skip_build=false
 timeout_seconds=""
 emulator_image=""
 emulator_image_sha256=""
+force_emulator_image=false
 prebuilt=false
 sdk_root=""
 runtimes=()
@@ -115,6 +118,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die "--emulator-image-sha256 requires a value"
       emulator_image_sha256="$2"
       shift 2
+      ;;
+    --force-emulator-image|--emulator-image-force)
+      force_emulator_image=true
+      shift
       ;;
     --prebuilt)
       prebuilt=true
@@ -182,6 +189,7 @@ source "$env_file"
 if [[ -n "$sdk_root" ]]; then
   export ANDROID_SDK_ROOT="$sdk_root"
   export ANDROID_HOME="$sdk_root"
+  export PATH="$sdk_root/platform-tools:$sdk_root/emulator:$sdk_root/cmdline-tools/latest/bin:$PATH"
 fi
 
 if [[ -n "$emulator_image" ]]; then
@@ -194,6 +202,9 @@ if [[ -n "$emulator_image" ]]; then
   fi
   if [[ -n "$emulator_image_sha256" ]]; then
     install_args+=(--sha256 "$emulator_image_sha256")
+  fi
+  if [[ "$force_emulator_image" == true ]]; then
+    install_args+=(--force)
   fi
   "$root/scripts/lab/install-emulator-image.sh" "${install_args[@]}"
 fi

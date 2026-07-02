@@ -209,15 +209,48 @@ fi
 
 install_root="$sdk_root/system-images/android-36.1/lineage"
 target_dir="$install_root/$abi"
+digest_file=".openphone-image-sha256"
+requested_sha256="$(compute_sha256 "$image_path")"
+
+mkdir -p "$install_root"
+
+tmp=""
+staging_dir=""
+lock_dir="$install_root/.${abi}.install.lock"
+lock_acquired=false
+cleanup() {
+  rm -rf "$tmp" "$staging_dir"
+  if [[ "$lock_acquired" == true ]]; then
+    rmdir "$lock_dir" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+info "Acquiring OpenPhone emulator image install lock"
+deadline=$((SECONDS + 300))
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  if [[ "$SECONDS" -ge "$deadline" ]]; then
+    die "timed out waiting for install lock: $lock_dir"
+  fi
+  sleep 1
+done
+lock_acquired=true
 
 if [[ -d "$target_dir" && "$force" != true ]]; then
-  info "OpenPhone emulator image already installed: $target_dir"
+  installed_sha256=""
+  if [[ -f "$target_dir/$digest_file" ]]; then
+    installed_sha256="$(extract_sha256_digest "$target_dir/$digest_file")"
+  fi
+
+  if [[ -n "$installed_sha256" && "$(lowercase "$installed_sha256")" == "$(lowercase "$requested_sha256")" ]]; then
+    info "OpenPhone emulator image already installed with matching SHA-256: $target_dir"
+  elif [[ -z "$installed_sha256" ]]; then
+    die "OpenPhone emulator image already exists without a recorded SHA-256: $target_dir; rerun with --force to replace it"
+  else
+    die "OpenPhone emulator image already exists with different SHA-256: $target_dir; rerun with --force to replace it"
+  fi
 else
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/openphone-emulator-image.XXXXXX")"
-  cleanup_tmp() {
-    rm -rf "$tmp"
-  }
-  trap cleanup_tmp EXIT
 
   info "Extracting OpenPhone emulator image zip"
   case "$extractor" in
@@ -228,16 +261,20 @@ else
 
   candidate="$tmp/$abi"
   if [[ ! -d "$candidate" ]]; then
-    candidate="$(find "$tmp" -type d -name "$abi" -print -quit)"
+    candidate="$(find "$tmp" -type d -name "$abi" -print | sed -n '1p')"
   fi
   [[ -n "$candidate" && -d "$candidate" ]] \
     || die "image zip did not contain expected ABI directory: $abi"
 
-  mkdir -p "$install_root"
+  staging_dir="$(mktemp -d "$install_root/.${abi}.install.XXXXXX")"
+  rm -rf "$staging_dir"
+  cp -R "$candidate" "$staging_dir"
+  printf '%s  %s\n' "$requested_sha256" "$(basename "$image_path")" \
+    > "$staging_dir/$digest_file"
+
   rm -rf "$target_dir"
-  cp -R "$candidate" "$target_dir"
-  rm -rf "$tmp"
-  trap - EXIT
+  mv "$staging_dir" "$target_dir"
+  staging_dir=""
 fi
 
 [[ -d "$target_dir" ]] || die "failed to install emulator image: $target_dir"

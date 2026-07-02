@@ -45,6 +45,7 @@ timeout_seconds=""
 prebuilt=false
 avd_name="${OPENPHONE_EMULATOR_AVD:-}"
 avd_home="${ANDROID_AVD_HOME:-}"
+avd_explicit=false
 runtimes=()
 
 while [[ $# -gt 0 ]]; do
@@ -94,6 +95,7 @@ while [[ $# -gt 0 ]]; do
     --avd)
       [[ $# -ge 2 ]] || die "--avd requires a value"
       avd_name="$2"
+      avd_explicit=true
       skip_build=true
       shift 2
       ;;
@@ -160,7 +162,7 @@ source "$env_file"
 avd_name="${avd_name:-${OPENPHONE_EMULATOR_AVD:-}}"
 avd_home="${avd_home:-${ANDROID_AVD_HOME:-}}"
 
-if [[ "$prebuilt" == true ]]; then
+if [[ "$prebuilt" == true && "$avd_explicit" != true ]]; then
   ensure_args=(--slot "$OPENPHONE_LAB_SLOT")
   if [[ -n "$arch" ]]; then
     ensure_args+=(--arch "$arch")

@@ -84,6 +84,10 @@ artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip.sha256
 Keep the `.zip` and `.zip.sha256` sidecar together. The installer verifies a
 local sibling sidecar automatically. For a remote zip URL, pass
 `--emulator-image-sha256` or publish a sibling `<zip-url>.sha256`.
+If the SDK already has an OpenPhone image for the requested ABI, the installer
+reuses it only when its recorded SHA-256 matches the requested zip. To replace
+an older or untracked install intentionally, pass `--force-emulator-image` to
+`scripts/lab/up.sh`.
 
 First run for a slot, with a local zip path or URL:
 
