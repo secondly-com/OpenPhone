@@ -77,7 +77,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt_get() {
-  sudo env DEBIAN_FRONTEND=noninteractive timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-600}" \
+  sudo env DEBIAN_FRONTEND=noninteractive timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-1800}" \
     apt-get \
       -o "Acquire::Retries=${OPENPHONE_APT_RETRIES:-5}" \
       -o "Acquire::http::Timeout=${OPENPHONE_APT_HTTP_TIMEOUT_SECONDS:-30}" \
@@ -87,7 +87,7 @@ apt_get() {
 }
 
 apt_get update
-apt_get install -y \
+apt_get install --no-install-recommends -y \
   acl \
   ca-certificates \
   curl \
@@ -96,7 +96,6 @@ apt_get install -y \
   jq \
   kmod \
   lsof \
-  qemu-kvm \
   rsync \
   unzip \
   zip

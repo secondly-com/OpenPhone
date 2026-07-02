@@ -213,6 +213,28 @@ for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/
   bash -n "$script"
 done
 
+tegu_prep="$root/scripts/prepare-tegu-device-repos.sh"
+grep -q 'tegu_boot_image=.*boot[.]img' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must track the prebuilt boot.img path\n' >&2
+  exit 1
+}
+grep -q 'extract_tegu_boot' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must extract boot.img for target-files\n' >&2
+  exit 1
+}
+grep -q 'Pixel 9a boot image ready' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must report boot.img readiness\n' >&2
+  exit 1
+}
+grep -q 'ensure_tegu_boot_prebuilt' "$root/scripts/common.sh" || {
+  printf 'Pixel 9a build helpers must provide a boot.img prebuilt guard\n' >&2
+  exit 1
+}
+grep -q 'ensure_tegu_boot_prebuilt' "$root/scripts/build.sh" || {
+  printf 'Pixel 9a target-files builds must fail fast when boot.img is missing\n' >&2
+  exit 1
+}
+
 gcp_bootstrap="$root/scripts/lab/gcp/bootstrap-vm.sh"
 grep -q 'git config --global user.name' "$gcp_bootstrap" || {
   printf 'GCP VM bootstrap must configure a lab git user.name for vendor extraction\n' >&2
@@ -225,6 +247,14 @@ grep -q 'git config --global user.email' "$gcp_bootstrap" || {
 for apt_bootstrap in \
   "$root/scripts/lab/gcp/bootstrap-vm.sh" \
   "$root/scripts/bootstrap-android-build-host.sh"; do
+  grep -q -- '--no-install-recommends' "$apt_bootstrap" || {
+    printf 'bootstrap apt install commands must avoid recommended package bloat: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'OPENPHONE_APT_TIMEOUT_SECONDS:-1800' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must default to an 1800s timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
   grep -q 'Acquire::Retries' "$apt_bootstrap" || {
     printf 'bootstrap apt commands must configure Acquire::Retries: %s\n' "$apt_bootstrap" >&2
     exit 1
@@ -238,6 +268,10 @@ for apt_bootstrap in \
     exit 1
   }
 done
+if grep -q 'qemu-kvm' "$gcp_bootstrap"; then
+  printf 'GCP VM bootstrap must not install Ubuntu qemu-kvm; Android SDK emulator provides its own QEMU\n' >&2
+  exit 1
+fi
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"
