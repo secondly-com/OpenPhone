@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: eval-device-runner
+  cancel-in-progress: false
+
 jobs:
   trajectory-smokes:
     name: Trajectory smokes
@@ -29,7 +33,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Validate repository
         run: |
@@ -70,7 +74,7 @@ jobs:
 
       - name: Upload trajectories
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openphone-trajectories
           path: .worktree/eval-trajectories/
@@ -78,7 +82,7 @@ jobs:
 
       - name: Upload benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openphone-benchmark-results
           path: .worktree/evals/

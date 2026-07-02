@@ -54,7 +54,6 @@ concurrency:
 jobs:
   emulator-smoke:
     name: Boot emulator and run OpenPhone smoke
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, openphone-emulator]
     timeout-minutes: 180
     env:
@@ -63,7 +62,7 @@ jobs:
       OPENPHONE_EMULATOR_ASSISTANT_SMOKE: ${{ inputs.assistant_smoke == 'false' && '0' || '1' }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           clean: false
 
@@ -90,7 +89,7 @@ jobs:
 
       - name: Upload emulator smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openphone-emulator-smoke
           path: .worktree/lab/*/artifacts/emulator-smoke/
