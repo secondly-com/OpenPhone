@@ -19,6 +19,146 @@ vendor_zip_sha256="${OPENPHONE_TEGU_VENDOR_ZIP_SHA256:-}"
 
 [[ -f "$OPENPHONE_ANDROID_DIR/build/envsetup.sh" ]] || die "missing build/envsetup.sh; run scripts/sync.sh first"
 
+tegu_kernel_module_lists=(
+  system_dlkm.modules.load
+  vendor_dlkm.modules.load
+)
+
+tegu_missing_kernel_modules=()
+
+collect_tegu_missing_kernel_modules() {
+  local list_file module module_name
+
+  tegu_missing_kernel_modules=()
+  for list_file in "${tegu_kernel_module_lists[@]}"; do
+    [[ -f "$tegu_kernel_dir/$list_file" ]] || die "missing Pixel 9a kernel module list: $tegu_kernel_dir/$list_file"
+    while IFS= read -r module || [[ -n "$module" ]]; do
+      module="${module%%#*}"
+      module="${module//[[:space:]]/}"
+      [[ -n "$module" ]] || continue
+      module_name="${module##*/}"
+      [[ -s "$tegu_kernel_dir/$module_name" ]] || tegu_missing_kernel_modules+=("$module_name")
+    done <"$tegu_kernel_dir/$list_file"
+  done
+}
+
+tegu_kernel_modules_ready() {
+  collect_tegu_missing_kernel_modules
+  ((${#tegu_missing_kernel_modules[@]} == 0))
+}
+
+extract_tegu_ota_partition() {
+  local source_zip="$1"
+  local partition="$2"
+  local target="$3"
+  local extractor raw_image_path tmp payload image_tmp
+
+  mkdir -p "$(dirname "$target")"
+  if [[ -s "$target" ]]; then
+    return 0
+  fi
+
+  raw_image_path="$(unzip -Z1 "$source_zip" | grep -E "(^|/)${partition}[.]img$" | head -n 1 || true)"
+  if [[ -n "$raw_image_path" ]]; then
+    info "Extracting Pixel 9a $partition image from $raw_image_path"
+    if ! unzip -p "$source_zip" "$raw_image_path" >"$target"; then
+      rm -f "$target"
+      die "failed to extract $raw_image_path from $source_zip"
+    fi
+  else
+    extractor="$OPENPHONE_ANDROID_DIR/prebuilts/extract-tools/linux-x86/bin/ota_extractor"
+    [[ -x "$extractor" ]] || die "missing OTA payload extractor: $extractor"
+
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/openphone-tegu-${partition}.XXXXXX")"
+    payload="$tmp/payload.bin"
+    image_tmp="$tmp/${partition}.img"
+
+    info "Extracting Pixel 9a $partition image from OTA payload"
+    if ! unzip -p "$source_zip" payload.bin >"$payload"; then
+      rm -rf "$tmp"
+      die "failed to extract payload.bin from $source_zip"
+    fi
+    if ! "$extractor" \
+      --payload "$payload" \
+      --output-dir "$tmp" \
+      --partitions "$partition"; then
+      rm -rf "$tmp"
+      die "failed to extract $partition from OTA payload"
+    fi
+    [[ -s "$image_tmp" ]] || {
+      rm -rf "$tmp"
+      die "Pixel 9a $partition extraction produced no image"
+    }
+    mv "$image_tmp" "$target"
+    rm -rf "$tmp"
+  fi
+
+  [[ -s "$target" ]] || die "Pixel 9a $partition image not created: $target"
+}
+
+copy_tegu_modules_from_dlkm_image() {
+  local image="$1"
+  local modules_list="$2"
+  local dump_root="$3"
+  local module module_name source
+
+  [[ -s "$image" ]] || die "missing Pixel 9a DLKM image: $image"
+
+  mkdir -p "$dump_root"
+  if [[ ! -e "$dump_root/.openphone-extracted" ]]; then
+    info "Extracting kernel modules from ${image##*/}"
+    if ! debugfs -R "rdump /lib/modules $dump_root" "$image" >/dev/null 2>&1; then
+      rm -rf "$dump_root"
+      die "failed to extract /lib/modules from $image"
+    fi
+    touch "$dump_root/.openphone-extracted"
+  fi
+
+  while IFS= read -r module || [[ -n "$module" ]]; do
+    module="${module%%#*}"
+    module="${module//[[:space:]]/}"
+    [[ -n "$module" ]] || continue
+    module_name="${module##*/}"
+    [[ -s "$tegu_kernel_dir/$module_name" ]] && continue
+
+    source="$(find "$dump_root" -type f -name "$module_name" -print -quit)"
+    [[ -n "$source" ]] || die "missing $module_name in $image"
+    cp "$source" "$tegu_kernel_dir/$module_name"
+  done <"$modules_list"
+}
+
+ensure_tegu_kernel_modules() {
+  local source_zip="$1"
+  local partition image_cache dump_root
+
+  collect_tegu_missing_kernel_modules
+  if ((${#tegu_missing_kernel_modules[@]} == 0)); then
+    info "Pixel 9a kernel modules already present"
+    return 0
+  fi
+
+  need_cmd debugfs
+  mkdir -p "$cache_root/tegu" "$tegu_kernel_dir"
+
+  for partition in system_dlkm vendor_dlkm; do
+    image_cache="$cache_root/tegu/${source_zip##*/}"
+    image_cache="${image_cache%.zip}-${partition}.img"
+    extract_tegu_ota_partition "$source_zip" "$partition" "$image_cache"
+    dump_root="$cache_root/tegu/${source_zip##*/}"
+    dump_root="${dump_root%.zip}-${partition}-modules"
+    copy_tegu_modules_from_dlkm_image "$image_cache" "$tegu_kernel_dir/${partition}.modules.load" "$dump_root"
+  done
+
+  collect_tegu_missing_kernel_modules
+  ((${#tegu_missing_kernel_modules[@]} == 0)) || {
+    printf 'error: missing Pixel 9a kernel modules after OTA extraction:\n' >&2
+    printf '  %s\n' "${tegu_missing_kernel_modules[@]}" >&2
+    exit 1
+  }
+
+  info "Pixel 9a kernel modules ready: $tegu_kernel_dir"
+}
+
 extract_tegu_vendor_kernel_boot() {
   local source_zip="$1"
   local target="$2"
@@ -96,9 +236,10 @@ if [[ ! -f "$tegu_product" || ! -d "$tegu_kernel_dir" ]]; then
   }
 fi
 
-if [[ -f "$tegu_vendor" && -f "$tegu_kernel_image" ]]; then
+if [[ -f "$tegu_vendor" && -f "$tegu_kernel_image" ]] && tegu_kernel_modules_ready; then
   info "Pixel 9a vendor tree already present: $tegu_vendor"
   info "Pixel 9a vendor_kernel_boot image already present: $tegu_kernel_image"
+  info "Pixel 9a kernel modules already present: $tegu_kernel_dir"
   exit 0
 fi
 
@@ -143,6 +284,8 @@ if [[ ! -f "$tegu_kernel_image" ]]; then
 else
   info "Pixel 9a vendor_kernel_boot image already present: $tegu_kernel_image"
 fi
+
+ensure_tegu_kernel_modules "$vendor_zip"
 
 [[ -f "$tegu_vendor" ]] || die "Pixel 9a vendor extraction did not create $tegu_vendor"
 [[ -f "$tegu_kernel_image" ]] || die "Pixel 9a vendor_kernel_boot extraction did not create $tegu_kernel_image"
