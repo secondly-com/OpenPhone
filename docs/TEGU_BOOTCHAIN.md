@@ -59,16 +59,23 @@ $(wildcard $(BOARD_PREBUILT_DTBIMAGE_DIR)/*.dtb)
 For the `tegu` prebuilts observed during bringup,
 `device/google/tegu-kernels/6.1/` did not contain any standalone `*.dtb`
 files. It did contain a prebuilt `vendor_kernel_boot.img` with the DTB embedded.
+The target-files build also requires a prebuilt `boot.img` in the same kernel
+directory because upstream zumapro board config adds `boot` to
+`AB_OTA_PARTITIONS` and points `BOARD_PREBUILT_BOOTIMAGE` at
+`$(TARGET_KERNEL_DIR)/boot.img`.
 
 Result: target-files generated `VENDOR_KERNEL_BOOT/dtb` as a zero-byte file,
 then built a `vendor_kernel_boot.img` with DTB size `0`.
 
 ## Build Fix
 
-`scripts/build.sh` now handles this automatically for `openphone_tegu` and
-`openphone_tegu_smoke` when the build goal produces target-files or an OTA. It
-builds `unpack_bootimg` if needed, extracts the DTB from the prebuilt image,
-and verifies the generated `vendor_kernel_boot.img` after the Android build.
+`scripts/prepare-tegu-device-repos.sh` extracts the required `boot.img`,
+`vendor_kernel_boot.img`, `dtbo.img`, and kernel modules from the Lineage OTA.
+`scripts/build.sh` then handles the DTB flow automatically for
+`openphone_tegu` and `openphone_tegu_smoke` when the build goal produces
+target-files or an OTA. It fails fast if `boot.img` is missing, builds
+`unpack_bootimg` if needed, extracts the DTB from the prebuilt image, and
+verifies the generated `vendor_kernel_boot.img` after the Android build.
 
 The manual equivalent is:
 

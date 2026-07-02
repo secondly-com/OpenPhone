@@ -62,6 +62,7 @@ read -r -a openphone_build_goals <<< "$OPENPHONE_BUILD_GOAL"
 soong_args+=("${openphone_build_goals[@]}")
 
 if is_tegu_product "$OPENPHONE_LUNCH_PRODUCT" && build_goals_need_target_files "${openphone_build_goals[@]}"; then
+  ensure_tegu_boot_prebuilt
   if [[ ! -x "$(tegu_unpack_bootimg)" ]]; then
     info "Building unpack_bootimg for Pixel 9a DTB preparation"
     build/soong/soong_ui.bash "${soong_base_args[@]}" unpack_bootimg

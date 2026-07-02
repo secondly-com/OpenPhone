@@ -11,6 +11,7 @@ need_cmd unzip
 tegu_product="$OPENPHONE_ANDROID_DIR/device/google/tegu/lineage_tegu.mk"
 tegu_vendor="$OPENPHONE_ANDROID_DIR/vendor/google/tegu/tegu-vendor.mk"
 tegu_kernel_dir="$OPENPHONE_ANDROID_DIR/device/google/tegu-kernels/6.1"
+tegu_boot_image="$tegu_kernel_dir/boot.img"
 tegu_kernel_image="$tegu_kernel_dir/vendor_kernel_boot.img"
 tegu_dtbo_image="$tegu_kernel_dir/dtbo.img"
 cache_root="${OPENPHONE_BUILD_CACHE_DIR:-$OPENPHONE_ROOT/.worktree/cache}"
@@ -206,6 +207,20 @@ copy_tegu_modules_from_vendor_kernel_boot_image() {
   copy_tegu_modules_from_dump "$dump_root" "$modules_list" "$image"
 }
 
+extract_tegu_boot() {
+  local source_zip="$1"
+  local target="$2"
+  local image_cache
+
+  mkdir -p "$cache_root/tegu" "$(dirname "$target")"
+  image_cache="$cache_root/tegu/${source_zip##*/}"
+  image_cache="${image_cache%.zip}-boot.img"
+
+  extract_tegu_ota_partition "$source_zip" boot "$image_cache"
+  cp "$image_cache" "$target"
+  [[ -s "$target" ]] || die "Pixel 9a boot image not created: $target"
+}
+
 ensure_tegu_kernel_modules() {
   local source_zip="$1"
   local partition image_cache dump_root
@@ -336,8 +351,9 @@ if [[ ! -f "$tegu_product" || ! -d "$tegu_kernel_dir" ]]; then
   }
 fi
 
-if [[ -f "$tegu_vendor" && -s "$tegu_kernel_image" && -s "$tegu_dtbo_image" ]] && tegu_kernel_modules_ready; then
+if [[ -f "$tegu_vendor" && -s "$tegu_boot_image" && -s "$tegu_kernel_image" && -s "$tegu_dtbo_image" ]] && tegu_kernel_modules_ready; then
   info "Pixel 9a vendor tree already present: $tegu_vendor"
+  info "Pixel 9a boot image already present: $tegu_boot_image"
   info "Pixel 9a vendor_kernel_boot image already present: $tegu_kernel_image"
   info "Pixel 9a dtbo image already present: $tegu_dtbo_image"
   info "Pixel 9a kernel modules already present: $tegu_kernel_dir"
@@ -380,6 +396,12 @@ else
   info "Pixel 9a vendor tree already present: $tegu_vendor"
 fi
 
+if [[ ! -s "$tegu_boot_image" ]]; then
+  extract_tegu_boot "$vendor_zip" "$tegu_boot_image"
+else
+  info "Pixel 9a boot image already present: $tegu_boot_image"
+fi
+
 if [[ ! -s "$tegu_kernel_image" ]]; then
   extract_tegu_vendor_kernel_boot "$vendor_zip" "$tegu_kernel_image"
 else
@@ -395,8 +417,10 @@ fi
 ensure_tegu_kernel_modules "$vendor_zip"
 
 [[ -f "$tegu_vendor" ]] || die "Pixel 9a vendor extraction did not create $tegu_vendor"
+[[ -s "$tegu_boot_image" ]] || die "Pixel 9a boot extraction did not create $tegu_boot_image"
 [[ -s "$tegu_kernel_image" ]] || die "Pixel 9a vendor_kernel_boot extraction did not create $tegu_kernel_image"
 [[ -s "$tegu_dtbo_image" ]] || die "Pixel 9a dtbo extraction did not create $tegu_dtbo_image"
 info "Pixel 9a vendor tree ready: $tegu_vendor"
+info "Pixel 9a boot image ready: $tegu_boot_image"
 info "Pixel 9a vendor_kernel_boot image ready: $tegu_kernel_image"
 info "Pixel 9a dtbo image ready: $tegu_dtbo_image"

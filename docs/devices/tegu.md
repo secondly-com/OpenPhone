@@ -79,10 +79,13 @@ OPENPHONE_BUILD_GOAL="target-files-package ota_from_target_files" \
 ./scripts/build.sh openphone_tegu
 ```
 
-For Pixel 9a OTA-producing build goals, `scripts/build.sh` automatically
-prepares `device/google/tegu-kernels/6.1/tegu.dtb` from the upstream prebuilt
-`vendor_kernel_boot.img` and verifies the generated `vendor_kernel_boot.img`
-contains the known-good DTB. The same checks can be run manually with:
+For Pixel 9a OTA-producing build goals,
+`scripts/prepare-tegu-device-repos.sh` prepares the required kernel prebuilts
+including `device/google/tegu-kernels/6.1/boot.img`, and `scripts/build.sh`
+automatically prepares `tegu.dtb` from the upstream prebuilt
+`vendor_kernel_boot.img`. The build fails fast if `boot.img` is missing and
+verifies the generated `vendor_kernel_boot.img` contains the known-good DTB.
+The same checks can be run manually with:
 
 ```bash
 OPENPHONE_ANDROID_DIR="$PWD/.worktree/OpenPhoneAndroid/android" \
@@ -101,6 +104,7 @@ Expected output directory:
 Expected release artifacts after a successful device build:
 
 ```text
+boot.img
 vendor_boot.img
 obj/PACKAGING/target_files_intermediates/openphone_tegu-target_files.zip
 ```
