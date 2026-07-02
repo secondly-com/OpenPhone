@@ -31,7 +31,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 apt_get() {
-  timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-900}" \
+  timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-1800}" \
     apt-get \
       -o "Acquire::Retries=${OPENPHONE_APT_RETRIES:-5}" \
       -o "Acquire::http::Timeout=${OPENPHONE_APT_HTTP_TIMEOUT_SECONDS:-30}" \
@@ -41,10 +41,10 @@ apt_get() {
 }
 
 apt_get update
-apt_get install -y software-properties-common
+apt_get install --no-install-recommends -y software-properties-common
 add-apt-repository -y universe || true
 apt_get update
-apt_get install -y \
+apt_get install --no-install-recommends -y \
   bc \
   bison \
   build-essential \
@@ -90,7 +90,7 @@ chmod 0644 /etc/apt/keyrings/nodesource.gpg
 printf 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main\n' \
   > /etc/apt/sources.list.d/nodesource.list
 apt_get update
-apt_get install -y nodejs
+apt_get install --no-install-recommends -y nodejs
 
 install -d -m 0755 /usr/local/bin
 curl -L --fail --silent --show-error \

@@ -247,6 +247,14 @@ grep -q 'git config --global user.email' "$gcp_bootstrap" || {
 for apt_bootstrap in \
   "$root/scripts/lab/gcp/bootstrap-vm.sh" \
   "$root/scripts/bootstrap-android-build-host.sh"; do
+  grep -q -- '--no-install-recommends' "$apt_bootstrap" || {
+    printf 'bootstrap apt install commands must avoid recommended package bloat: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'OPENPHONE_APT_TIMEOUT_SECONDS:-1800' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must default to an 1800s timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
   grep -q 'Acquire::Retries' "$apt_bootstrap" || {
     printf 'bootstrap apt commands must configure Acquire::Retries: %s\n' "$apt_bootstrap" >&2
     exit 1
@@ -260,6 +268,10 @@ for apt_bootstrap in \
     exit 1
   }
 done
+if grep -q 'qemu-kvm' "$gcp_bootstrap"; then
+  printf 'GCP VM bootstrap must not install Ubuntu qemu-kvm; Android SDK emulator provides its own QEMU\n' >&2
+  exit 1
+fi
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"
