@@ -213,6 +213,16 @@ for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/
   bash -n "$script"
 done
 
+gcp_bootstrap="$root/scripts/lab/gcp/bootstrap-vm.sh"
+grep -q 'git config --global user.name' "$gcp_bootstrap" || {
+  printf 'GCP VM bootstrap must configure a lab git user.name for vendor extraction\n' >&2
+  exit 1
+}
+grep -q 'git config --global user.email' "$gcp_bootstrap" || {
+  printf 'GCP VM bootstrap must configure a lab git user.email for vendor extraction\n' >&2
+  exit 1
+}
+
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"
   xmllint --noout "$root/overlay/packages/apps/OpenPhoneAssistant/AndroidManifest.xml"
