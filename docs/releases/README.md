@@ -8,7 +8,7 @@ OpenPhone releases are developer previews until `1.0.0`.
 - Release workflow: [../../.github/workflows/release.yml](../../.github/workflows/release.yml)
 - Release process: [../RELEASE_PROCESS.md](../RELEASE_PROCESS.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Current draft notes: [0.0.1.md](0.0.1.md)
+- Current draft notes: [0.0.2.md](0.0.2.md)
 
 ## Pipeline
 

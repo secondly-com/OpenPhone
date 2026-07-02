@@ -8,6 +8,8 @@ flow, and device support.
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-07-02
+
 ### Added
 
 - Agent Runtime V1 design and first assistant-side background job runtime,
