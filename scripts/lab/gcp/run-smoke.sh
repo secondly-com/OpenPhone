@@ -315,7 +315,7 @@ prepare_android_workspace() {
     return 0
   fi
 
-  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-${OPENPHONE_GCP_CACHE_ANDROID_DIR:-/home/adamcohenhillel/openphone-android}}"
+  export OPENPHONE_ANDROID_DIR="${OPENPHONE_ANDROID_DIR:-${OPENPHONE_GCP_CACHE_ANDROID_DIR:-$HOME/openphone-android}}"
 
   local device="/dev/disk/by-id/google-openphone-cache"
   local deadline=$((SECONDS + 300))
