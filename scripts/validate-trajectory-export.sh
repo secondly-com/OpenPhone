@@ -31,7 +31,9 @@ fi
   exit 1
 }
 
-python3 - <<'PY' "$input"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+python3 - <<'PY' "$input" "$root/schemas/trajectory-event.schema.json"
 import base64
 import json
 import pathlib
@@ -40,7 +42,9 @@ import sys
 import zipfile
 
 path = pathlib.Path(sys.argv[1])
-allowed_events = {"task_started", "tool_call", "tool_result", "agent_result"}
+schema = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+schema_marker = schema["properties"]["schema"]["const"]
+allowed_events = set(schema["properties"]["event"]["enum"])
 secret_name_re = re.compile(r"(api[_-]?key|authorization|token|secret|private[_-]?key)", re.I)
 secret_value_re = re.compile(
     r"(sk-proj-|sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|"
@@ -137,7 +141,7 @@ try:
             event = json.loads(line)
         except json.JSONDecodeError as exc:
             raise SystemExit(f"invalid JSONL at line {expected_index + 1}: {exc}") from exc
-        if event.get("schema") != "openphone.trajectory_event.v1":
+        if event.get("schema") != schema_marker:
             raise SystemExit(f"event {expected_index} has missing/invalid schema marker")
         if event.get("index") != expected_index:
             raise SystemExit(f"event index mismatch: expected {expected_index} got {event.get('index')}")

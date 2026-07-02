@@ -30,7 +30,9 @@ fi
   exit 1
 }
 
-python3 - <<'PY' "$input"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+python3 - <<'PY' "$input" "$root"
 import base64
 import json
 import pathlib
@@ -38,12 +40,15 @@ import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
-root = pathlib.Path(__file__).resolve().parents[1] if "__file__" in globals() else pathlib.Path.cwd()
-contract_path = pathlib.Path.cwd() / "schemas/audit-event.schema.json"
-if not contract_path.is_file():
-    contract_path = path.parent / "schemas/audit-event.schema.json"
+root = pathlib.Path(sys.argv[2])
+
+evidence_schema = json.loads(
+    (root / "schemas/audit-evidence.schema.json").read_text(encoding="utf-8"))
+evidence_marker = evidence_schema["properties"]["schema"]["const"]
+required_evidence_keys = set(evidence_schema["required"])
 
 allowed_events = None
+contract_path = root / "schemas/audit-event.schema.json"
 if contract_path.is_file():
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     allowed_events = set(contract["properties"]["event_type"]["enum"])
@@ -98,10 +103,9 @@ def walk(value, current_path=""):
 
 
 payload = json.loads(path.read_text(encoding="utf-8"))
-expected_keys = {"schema", "exported_at_ms", "redaction", "service_status", "audit"}
-if set(payload) != expected_keys:
+if set(payload) != required_evidence_keys:
     raise SystemExit(f"unexpected audit evidence keys: {sorted(payload)}")
-if payload.get("schema") != "openphone.audit_evidence.v1":
+if payload.get("schema") != evidence_marker:
     raise SystemExit("invalid audit evidence schema marker")
 if not isinstance(payload.get("exported_at_ms"), int):
     raise SystemExit("exported_at_ms must be an integer")

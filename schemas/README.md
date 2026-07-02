@@ -16,6 +16,19 @@ release tooling, and eval tooling must agree on:
 - background agent jobs and task reports;
 - OTA feed metadata.
 
-`scripts/check.sh` and the validation scripts use these schemas to catch drift
-between model tools, framework actions, audit logs, eval traces, and release
-artifacts.
+`scripts/check.sh` loads `action-registry`, `action-request`, `audit-event`,
+`screen-context`, and `trajectory-event` schemas for its cross-consistency
+checks, and the validation scripts derive their checks directly from the
+schemas they validate against:
+
+- `scripts/validate-trajectory-export.sh` — `trajectory-event.schema.json`;
+- `scripts/validate-ota-feed.sh` — `ota-feed.schema.json`;
+- `scripts/validate-agent-eval-report.sh` — `agent-eval-report.schema.json`;
+- `scripts/validate-audit-evidence-export.sh` — `audit-evidence.schema.json`
+  and `audit-event.schema.json`.
+
+Editing enums, required keys, or const markers in those schemas changes
+validator behavior directly. The remaining schemas (`action-result`,
+`agent-job`, `agent-task`, `app-policy`, `audit-log`, `model-tool`) document
+contracts but are not yet wired into any validator; `scripts/check.sh` only
+verifies they exist.
