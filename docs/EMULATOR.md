@@ -64,6 +64,66 @@ bsdtar -xf sdk-repo-linux-system-images.zip \
 The ARM64 image expands to roughly 8 GiB before AVD userdata. Keep at least
 15-20 GiB free before first boot.
 
+## Mac Studio Codex Lab Slots
+
+For local agent work, do not sync/build Android on macOS. Use a portable image
+zip produced by Linux/GCP, then let the lab scripts create an isolated AVD and
+userdata directory per Codex slot.
+
+To produce a Mac-usable image from GCP, run the `GCP Lab` workflow manually with
+`arch=arm64`, `export_emulator_image=true`, and `run_smoke=false`. The GCP lab
+still syncs, checks, builds, and exports the image; the actual ARM64 boot smoke
+then happens on the Mac Studio. The uploaded `openphone-gcp-lab` artifact will
+contain:
+
+```text
+artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip
+artifacts/emulator-image/openphone-sdk-phone-arm64-eng.zip.sha256
+```
+
+Keep the `.zip` and `.zip.sha256` sidecar together. The installer verifies a
+local sibling sidecar automatically. For a remote zip URL, pass
+`--emulator-image-sha256` or publish a sibling `<zip-url>.sha256`.
+
+First run for a slot, with a local zip path or URL:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-main \
+  --arch arm64 \
+  --emulator-image /path/to/openphone-sdk-phone-arm64-eng.zip \
+  --emulator-image-sha256 /path/to/openphone-sdk-phone-arm64-eng.zip.sha256 \
+  --runtime local \
+  --timeout 900
+```
+
+After the image is installed in the Android SDK, new or repeated slots can use
+the prebuilt path directly:
+
+```bash
+scripts/lab/up.sh \
+  --slot codex-local-second \
+  --arch arm64 \
+  --prebuilt \
+  --runtime local \
+  --timeout 900
+```
+
+Each slot writes its own environment under `.worktree/lab/<slot>/env`, including
+the emulator serial, AVD home, runtime ports, userdata directory, and artifact
+directory. Source it before running CLI/MCP commands manually:
+
+```bash
+source .worktree/lab/codex-local-main/env
+node integrations/cli/src/index.mjs --serial "$ANDROID_SERIAL" --json runtime status
+```
+
+Stop a slot with:
+
+```bash
+scripts/lab/down.sh --slot codex-local-main
+```
+
 ## Create An AVD
 
 Try the normal Android SDK path first:

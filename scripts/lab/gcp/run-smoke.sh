@@ -39,6 +39,10 @@ Options:
   --repo-sync-jobs <n>        repo sync jobs. Default: nproc.
   --keep-vm                   Leave VM running for debug.
   --skip-build                Reuse existing Android build outputs on the VM.
+  --export-emulator-image     Copy sdk-repo-linux-system-images.zip into lab
+                              artifacts for local Mac/SDK installation.
+  --skip-smoke                Build/export artifacts but do not boot the
+                              emulator. Intended for cross-arch image exports.
   -h, --help                  Show this help.
 EOF
 }
@@ -70,6 +74,8 @@ timeout_seconds=900
 repo_sync_jobs=""
 keep_vm=false
 skip_build=false
+export_emulator_image=false
+skip_smoke=false
 runtimes=()
 
 while [[ $# -gt 0 ]]; do
@@ -170,6 +176,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       skip_build=true
+      shift
+      ;;
+    --export-emulator-image)
+      export_emulator_image=true
+      shift
+      ;;
+    --skip-smoke)
+      skip_smoke=true
       shift
       ;;
     -h|--help)
@@ -288,6 +302,8 @@ variant="${OPENPHONE_EMULATOR_VARIANT:?}"
 timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
 repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
 skip_build="${OPENPHONE_SKIP_BUILD:-0}"
+export_emulator_image="${OPENPHONE_EXPORT_EMULATOR_IMAGE:-0}"
+skip_smoke="${OPENPHONE_SKIP_SMOKE:-0}"
 runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
 cache_mode="${OPENPHONE_GCP_CACHE_MODE:-scratch}"
 cache_mount="${OPENPHONE_GCP_CACHE_MOUNT:-/mnt/openphone-cache}"
@@ -397,6 +413,44 @@ if [[ "$skip_build" != "1" ]]; then
   ./scripts/check.sh
 fi
 
+emulator_product_dir() {
+  case "$arch" in
+    arm64) printf 'emu64a' ;;
+    x86_64) printf 'emu64x' ;;
+    *)
+      printf 'error: unsupported emulator arch for export: %s\n' "$arch" >&2
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "$export_emulator_image" == "1" && "$skip_build" != "1" ]]; then
+  ./scripts/build-emulator.sh --arch "$arch" --variant "$variant"
+  skip_build=1
+fi
+
+if [[ "$export_emulator_image" == "1" ]]; then
+  product_dir="$(emulator_product_dir)"
+  image_zip="$OPENPHONE_ANDROID_DIR/out/target/product/$product_dir/sdk-repo-linux-system-images.zip"
+  artifact_image_dir="$HOME/openphone-src/.worktree/lab/$slot/artifacts/emulator-image"
+  mkdir -p "$artifact_image_dir"
+  if [[ ! -f "$image_zip" ]]; then
+    printf 'error: emulator image zip not found for export: %s\n' "$image_zip" >&2
+    exit 1
+  fi
+  cp "$image_zip" "$artifact_image_dir/openphone-sdk-phone-${arch}-${variant}.zip"
+  (
+    cd "$artifact_image_dir"
+    sha256sum "openphone-sdk-phone-${arch}-${variant}.zip" \
+      > "openphone-sdk-phone-${arch}-${variant}.zip.sha256"
+  )
+fi
+
+if [[ "$skip_smoke" == "1" ]]; then
+  printf '==> Skipping emulator smoke by request after build/export\n'
+  exit 0
+fi
+
 IFS=',' read -r -a runtimes <<< "$runtime_csv"
 smoke_args=(--slot "$slot" --arch "$arch" --variant "$variant" --timeout "$timeout_seconds")
 if [[ "$skip_build" == "1" ]]; then
@@ -420,6 +474,14 @@ skip_build_value=0
 if [[ "$skip_build" == true ]]; then
   skip_build_value=1
 fi
+export_emulator_image_value=0
+if [[ "$export_emulator_image" == true ]]; then
+  export_emulator_image_value=1
+fi
+skip_smoke_value=0
+if [[ "$skip_smoke" == true ]]; then
+  skip_smoke_value=1
+fi
 remote_command="OPENPHONE_REPO_URL=$(shell_quote "$repo_url")"
 remote_command+=" OPENPHONE_REF=$(shell_quote "$ref")"
 remote_command+=" OPENPHONE_LAB_SLOT=$(shell_quote "$slot")"
@@ -428,6 +490,8 @@ remote_command+=" OPENPHONE_EMULATOR_VARIANT=$(shell_quote "$variant")"
 remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
 remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
 remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
+remote_command+=" OPENPHONE_EXPORT_EMULATOR_IMAGE=$(shell_quote "$export_emulator_image_value")"
+remote_command+=" OPENPHONE_SKIP_SMOKE=$(shell_quote "$skip_smoke_value")"
 remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"
 remote_command+=" OPENPHONE_GCP_CACHE_MODE=$(shell_quote "$cache_mode")"
 remote_command+=" OPENPHONE_GCP_CACHE_MOUNT=$(shell_quote "$cache_mount")"

@@ -19,6 +19,9 @@ Options:
   --slot <name>            Lab slot name for isolated data/artifacts.
   --port <port>            Emulator console port. Default: 5584.
   --serial <serial>        ADB serial. Default: emulator-<port>.
+  --avd <name>             Boot an installed Android SDK AVD instead of the
+                           Android source-tree emulator launcher.
+  --avd-home <path>        ANDROID_AVD_HOME for --avd.
   --timeout <seconds>      Boot timeout. Default: 600.
   --skip-build             Reuse an already-built image.
   --keep-running           Do not stop the emulator on exit.
@@ -30,9 +33,11 @@ Environment:
   OPENPHONE_LAB_DIR                     Lab slot directory.
   OPENPHONE_EMULATOR_PORT               Emulator console port.
   OPENPHONE_EMULATOR_SERIAL             Emulator ADB serial.
+  OPENPHONE_EMULATOR_AVD                Installed AVD name for prebuilt images.
   OPENPHONE_EMULATOR_BUILD              Set to 0 to skip build.
   OPENPHONE_EMULATOR_ASSISTANT_SMOKE    Set to 0 to skip local assistant task.
   OPENPHONE_EMULATOR_ARGS               Extra emulator arguments.
+  ANDROID_AVD_HOME                      AVD home for installed SDK images.
 
 Artifacts are written under .worktree/emulator-smoke/<timestamp>/.
 EOF
@@ -73,6 +78,54 @@ run_adb_shell_with_timeout() {
   wait "$command_pid"
 }
 
+capture_user_state() {
+  {
+    echo "cmd user is-user-unlocked 0:"
+    adb -s "$serial" shell 'cmd user is-user-unlocked 0 2>/dev/null || true' \
+      | tr -d '\r' || true
+    echo
+    echo "dumpsys user:"
+    adb -s "$serial" shell dumpsys user 2>/dev/null | tr -d '\r' || true
+  } > "$out_dir/user-state.txt"
+}
+
+is_user_unlocked() {
+  local state
+  state="$(adb -s "$serial" shell 'cmd user is-user-unlocked 0 2>/dev/null' \
+    | tr -d '\r' || true)"
+  if printf '%s\n' "$state" | grep -Eq '(^|[[:space:]])true($|[[:space:]])'; then
+    return 0
+  fi
+
+  state="$(adb -s "$serial" shell dumpsys user 2>/dev/null | tr -d '\r' || true)"
+  printf '%s\n' "$state" \
+    | grep -Eq 'RUNNING_UNLOCKED|unlocked=true|mUnlockedUsers:.*0'
+}
+
+drive_user_unlock() {
+  adb -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb -s "$serial" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  adb -s "$serial" shell input keyevent KEYCODE_MENU >/dev/null 2>&1 || true
+  adb -s "$serial" shell input keyevent 82 >/dev/null 2>&1 || true
+  adb -s "$serial" shell am start-user -w 0 >/dev/null 2>&1 || true
+  adb -s "$serial" shell cmd user unlock-user 0 >/dev/null 2>&1 || true
+}
+
+wait_for_user_unlocked() {
+  info "Waiting for Android user 0 unlock"
+  local unlock_deadline=$((SECONDS + 90))
+  while [[ "$SECONDS" -lt "$unlock_deadline" ]]; do
+    if is_user_unlocked; then
+      capture_user_state
+      return 0
+    fi
+    drive_user_unlock
+    sleep 2
+  done
+  capture_user_state
+  die "Android user 0 did not unlock; see $out_dir/user-state.txt"
+}
+
 arch=""
 variant="eng"
 slot="${OPENPHONE_LAB_SLOT:-}"
@@ -81,6 +134,8 @@ serial=""
 timeout_seconds="600"
 build="${OPENPHONE_EMULATOR_BUILD:-1}"
 keep_running=false
+avd_name="${OPENPHONE_EMULATOR_AVD:-}"
+avd_home="${ANDROID_AVD_HOME:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -107,6 +162,16 @@ while [[ $# -gt 0 ]]; do
     --serial)
       [[ $# -ge 2 ]] || die "--serial requires a value"
       serial="$2"
+      shift 2
+      ;;
+    --avd)
+      [[ $# -ge 2 ]] || die "--avd requires a value"
+      avd_name="$2"
+      shift 2
+      ;;
+    --avd-home)
+      [[ $# -ge 2 ]] || die "--avd-home requires a value"
+      avd_home="$2"
       shift 2
       ;;
     --timeout)
@@ -148,6 +213,13 @@ esac
 [[ "$port" =~ ^[0-9]+$ ]] || die "--port must be numeric"
 [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || die "--timeout must be numeric"
 
+if [[ -n "$avd_name" ]]; then
+  build=0
+fi
+if [[ -n "$avd_home" ]]; then
+  export ANDROID_AVD_HOME="$avd_home"
+fi
+
 need_cmd adb
 need_cmd node
 need_cmd python3
@@ -169,6 +241,41 @@ mkdir -p "$out_dir"
 export ANDROID_SERIAL="$serial"
 
 emulator_pid=""
+launch_emulator() {
+  if [[ "$keep_running" == true ]]; then
+    local pid_file="$out_dir/emulator.pid"
+    python3 - "$pid_file" "$out_dir/emulator.log" "$@" <<'PY'
+import os
+import subprocess
+import sys
+
+pid_file = sys.argv[1]
+log_path = sys.argv[2]
+cmd = sys.argv[3:]
+
+with open(os.devnull, "rb") as devnull, open(log_path, "ab", buffering=0) as log:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=devnull,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+with open(pid_file, "w", encoding="utf-8") as handle:
+    handle.write(f"{proc.pid}\n")
+PY
+    read -r emulator_pid < "$pid_file"
+  else
+    "$@" > "$out_dir/emulator.log" 2>&1 &
+    emulator_pid="$!"
+  fi
+  if [[ -n "$lab_dir" ]]; then
+    mkdir -p "$lab_dir/run"
+    printf '%s\n' "$emulator_pid" > "$lab_dir/run/emulator.pid"
+  fi
+}
+
 cleanup() {
   set +e
   adb -s "$serial" logcat -d > "$out_dir/logcat.txt" 2>/dev/null
@@ -179,7 +286,7 @@ cleanup() {
   if [[ "$keep_running" != true ]]; then
     adb -s "$serial" emu kill >/dev/null 2>&1
   fi
-  if [[ -n "$emulator_pid" ]]; then
+  if [[ -n "$emulator_pid" && "$keep_running" != true ]]; then
     wait "$emulator_pid" >/dev/null 2>&1
   fi
 }
@@ -208,12 +315,18 @@ emulator_args=(
   -no-boot-anim
   -no-audio
 )
-emulator_args+=("${extra_emulator_args[@]}")
+if [[ ${#extra_emulator_args[@]} -gt 0 ]]; then
+  emulator_args+=("${extra_emulator_args[@]}")
+fi
 
-info "Launching emulator $serial"
-"$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
-  "${emulator_args[@]}" > "$out_dir/emulator.log" 2>&1 &
-emulator_pid="$!"
+if [[ -n "$avd_name" ]]; then
+  info "Launching emulator $serial from AVD $avd_name"
+  launch_emulator emulator -avd "$avd_name" "${emulator_args[@]}"
+else
+  info "Launching emulator $serial"
+  launch_emulator "$root/scripts/run-emulator.sh" --arch "$arch" --variant "$variant" -- \
+    "${emulator_args[@]}"
+fi
 
 info "Waiting for ADB device"
 deadline=$((SECONDS + timeout_seconds))
@@ -261,6 +374,8 @@ info "Preparing emulator for headless smoke"
 
   adb -s "$serial" shell input keyevent KEYCODE_HOME || true
 } > "$out_dir/headless-provisioning.txt" 2>&1
+
+wait_for_user_unlocked
 
 identity="$out_dir/device-identity.txt"
 adb -s "$serial" shell 'printf "model="; getprop ro.product.model; printf "device="; getprop ro.product.device; printf "openphone="; getprop ro.openphone.version; printf "lineage="; getprop ro.lineage.version; printf "boot_completed="; getprop sys.boot_completed' \
