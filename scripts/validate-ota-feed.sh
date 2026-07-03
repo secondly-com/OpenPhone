@@ -25,7 +25,9 @@ fi
   exit 1
 }
 
-python3 - <<'PY' "$feed" "$artifact_dir"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+python3 - <<'PY' "$feed" "$artifact_dir" "$root/schemas/ota-feed.schema.json"
 import hashlib
 import json
 import pathlib
@@ -34,29 +36,26 @@ import sys
 
 feed_path = pathlib.Path(sys.argv[1])
 artifact_dir = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
+schema = json.loads(pathlib.Path(sys.argv[3]).read_text(encoding="utf-8"))
 payload = json.loads(feed_path.read_text(encoding="utf-8"))
 
-required_top = {"schema_version", "generated_at", "channel", "device", "updates"}
+required_top = set(schema["required"])
+expected_schema_version = schema["properties"]["schema_version"]["const"]
+update_schema = schema["properties"]["updates"]["items"]
+required_update = set(update_schema["required"])
+sha256_re = update_schema["properties"]["sha256"]["pattern"]
+
 if set(payload) != required_top:
     raise SystemExit(f"unexpected OTA feed top-level keys: {sorted(payload)}")
-if payload["schema_version"] != 1:
+if payload["schema_version"] != expected_schema_version:
     raise SystemExit("unsupported OTA feed schema_version")
 if not isinstance(payload["updates"], list) or not payload["updates"]:
     raise SystemExit("OTA feed must contain at least one update")
 
-required_update = {
-    "version",
-    "filename",
-    "url",
-    "size",
-    "sha256",
-    "requires_wipe",
-    "release_notes_url",
-}
 for update in payload["updates"]:
     if set(update) != required_update:
         raise SystemExit(f"unexpected OTA update keys: {sorted(update)}")
-    if not re.fullmatch(r"[0-9a-f]{64}", update["sha256"]):
+    if not re.fullmatch(sha256_re, update["sha256"]):
         raise SystemExit(f"invalid SHA-256: {update['sha256']}")
     if not isinstance(update["size"], int) or update["size"] <= 0:
         raise SystemExit("OTA update size must be a positive integer")

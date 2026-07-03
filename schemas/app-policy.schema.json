@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openphone.example/contracts/app-policy.schema.json",
+  "$id": "https://openphone.dev/schemas/app-policy.schema.json",
   "title": "OpenPhone App Capability Policy",
   "type": "object",
   "required": ["version", "default_decision", "package_overrides"],

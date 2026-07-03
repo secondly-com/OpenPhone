@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openphone.example/contracts/agent-eval-report.schema.json",
+  "$id": "https://openphone.dev/schemas/agent-eval-report.schema.json",
   "title": "OpenPhone Agent Eval Report",
   "type": "object",
   "required": [

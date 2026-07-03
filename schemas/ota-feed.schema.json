@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openphone.example/contracts/ota-feed.schema.json",
+  "$id": "https://openphone.dev/schemas/ota-feed.schema.json",
   "title": "OpenPhone OTA Feed",
   "type": "object",
   "required": [
