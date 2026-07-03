@@ -4,6 +4,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# All temp files/dirs created by this script live under one root so the EXIT
+# trap guarantees cleanup even when an assertion fails under `set -e`
+# (rendered signing keys and env files must never be left behind).
+check_tmp_root="$(mktemp -d)"
+trap 'rm -rf "$check_tmp_root"' EXIT
+
 required=(
   AGENTS.md
   README.md
@@ -336,6 +342,17 @@ grep -q 'lane:' "$root/.github/workflows/gcp-lab.yml" || {
 if grep -q '^  push:' "$root/.github/workflows/emulator.yml"; then
   printf 'legacy self-hosted emulator workflow must be manual-only; use GCP Lab for trusted gates\n' >&2
   exit 1
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck_targets=()
+  for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/gcp/*.sh; do
+    [[ -e "$script" ]] || continue
+    shellcheck_targets+=("$script")
+  done
+  shellcheck --severity=error "${shellcheck_targets[@]}"
+else
+  printf 'shellcheck not found; skipping shell script lint (bash -n only)\n' >&2
 fi
 
 if command -v xmllint >/dev/null 2>&1; then
@@ -741,7 +758,7 @@ path = pathlib.Path(sys.argv[1])
 compile(path.read_text(encoding="utf-8"), str(path), "exec")
 PY
   "$root/scripts/smoke-test-model-broker.sh"
-  tmp_env="$(mktemp)"
+  tmp_env="$(mktemp "$check_tmp_root/env.XXXXXX")"
   cp "$root/services/model-broker/deploy/openphone-model-broker.env.example" "$tmp_env"
   "$root/scripts/rotate-model-broker-secrets.sh" --env-file "$tmp_env" >/dev/null
   python3 - <<'PY' "$tmp_env"
@@ -761,7 +778,7 @@ if values.get("OPENAI_API_KEY") != "":
     raise SystemExit("rotation changed OPENAI_API_KEY")
 PY
   rm -f "$tmp_env" "$tmp_env".bak.*
-  tmp_env="$(mktemp)"
+  tmp_env="$(mktemp "$check_tmp_root/env.XXXXXX")"
   cp "$root/services/model-broker/deploy/openphone-model-broker.env.example" "$tmp_env"
   "$root/scripts/rotate-model-broker-secrets.sh" \
     --env-file "$tmp_env" \
@@ -783,8 +800,8 @@ if values.get("OPENPHONE_BROKER_ADMIN_TOKENS") != "":
     raise SystemExit("provider rotation changed OPENPHONE_BROKER_ADMIN_TOKENS")
 PY
   rm -f "$tmp_env" "$tmp_env".bak.*
-  tmp_nginx="$(mktemp)"
-  tmp_tls_stderr="$(mktemp)"
+  tmp_nginx="$(mktemp "$check_tmp_root/nginx.XXXXXX")"
+  tmp_tls_stderr="$(mktemp "$check_tmp_root/tls-stderr.XXXXXX")"
   "$root/scripts/setup-model-broker-tls.sh" \
     --domain broker.example.com \
     --email ops@example.com \
@@ -798,7 +815,7 @@ PY
     exit 1
   }
   rm -f "$tmp_nginx" "$tmp_tls_stderr"
-  tmp_signing="$(mktemp -d)"
+  tmp_signing="$(mktemp -d "$check_tmp_root/signing.XXXXXX")"
   "$root/scripts/prepare-release-signing.sh" \
     --keys-dir "$tmp_signing/openphone-keys" >/dev/null
   mkdir -p "$tmp_signing/android/build/make/tools/releasetools" "$tmp_signing/out"
@@ -827,7 +844,7 @@ PY
     exit 1
   }
   rm -rf "$tmp_signing"
-  tmp_feed="$(mktemp -d)"
+  tmp_feed="$(mktemp -d "$check_tmp_root/feed.XXXXXX")"
   printf 'fake zip payload' > "$tmp_feed/openphone-check-ota.zip"
   "$root/scripts/generate-ota-feed.sh" \
     --version 0.0.1-check \
@@ -840,7 +857,7 @@ PY
     --requires-wipe >/dev/null
   "$root/scripts/validate-ota-feed.sh" "$tmp_feed/ota-feed.json" "$tmp_feed" >/dev/null
   rm -rf "$tmp_feed"
-  tmp_policy="$(mktemp -d)"
+  tmp_policy="$(mktemp -d "$check_tmp_root/policy.XXXXXX")"
   "$root/scripts/generate-app-policy-override.sh" \
     --package com.example.sensitive \
     --match prefix \
@@ -878,7 +895,7 @@ if unknown:
     raise SystemExit("override references unknown capabilities: " + ", ".join(unknown))
 PY
   rm -rf "$tmp_policy"
-  tmp_trace="$(mktemp -d)"
+  tmp_trace="$(mktemp -d "$check_tmp_root/trace.XXXXXX")"
   mkdir -p "$tmp_trace/session"
   printf '\xff\xd8\xff\xd9' > "$tmp_trace/session/screenshot_000.jpg"
   cat > "$tmp_trace/session/events.jsonl" <<'EOF'
@@ -902,7 +919,7 @@ with zipfile.ZipFile(target, "w") as archive:
 PY
   "$root/scripts/validate-trajectory-export.sh" "$tmp_trace/session.zip" >/dev/null
   rm -rf "$tmp_trace"
-  tmp_audit="$(mktemp -d)"
+  tmp_audit="$(mktemp -d "$check_tmp_root/audit.XXXXXX")"
   cat > "$tmp_audit/openphone-audit.json" <<'EOF'
 {
   "schema": "openphone.audit_evidence.v1",
@@ -932,7 +949,7 @@ PY
 EOF
   "$root/scripts/validate-audit-evidence-export.sh" "$tmp_audit/openphone-audit.json" >/dev/null
   rm -rf "$tmp_audit"
-  tmp_eval="$(mktemp -d)"
+  tmp_eval="$(mktemp -d "$check_tmp_root/eval.XXXXXX")"
   mkdir -p "$tmp_eval/session"
   printf '\xff\xd8\xff\xd9' > "$tmp_eval/session/screenshot_000.jpg"
   cat > "$tmp_eval/session/events.jsonl" <<'EOF'
