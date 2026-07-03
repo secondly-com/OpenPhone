@@ -38,11 +38,29 @@ smoke-test already-built outputs from a warm cache image. Automatic PR lab runs
 must rebuild from the PR ref and should use the warm snapshot cache instead of
 `skip_build`.
 
+Use the named GCP Lab lanes for day-to-day work:
+
+- `incremental-emulator`: restore the warm snapshot, rebuild changed Android
+  outputs from the requested ref, boot the emulator, and run smoke.
+- `smoke-only`: restore the warm snapshot and boot/smoke existing build
+  outputs without rebuilding.
+- `export-emulator-image`: rebuild and upload the SDK system image ZIP without
+  booting the emulator.
+- `custom`: use the lower-level build/export/smoke toggles directly.
+
+`gcp-cache-refresh.yml` refreshes the warm cache snapshot on a schedule and can
+be dispatched manually. After a successful refresh it updates
+`OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT`, so new PR/release labs start from fresher
+Android source/build state.
+
 Do not use a generic self-hosted runner label for official release builds. The
 release workflow must show the GCP project, zone, VM name, source SHA, cache
 mode, and artifact directory in the workflow summary.
 
 ## `openphone-emulator`
+
+This legacy self-hosted runner workflow is manual-only. Use GCP Lab lanes for
+trusted PR and release emulator gates.
 
 The emulator runner needs:
 

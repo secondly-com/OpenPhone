@@ -55,6 +55,7 @@ required=(
   .github/workflows/ci.yml
   .github/workflows/emulator.yml
   .github/workflows/eval.yml
+  .github/workflows/gcp-cache-refresh.yml
   .github/workflows/gcp-lab.yml
   .github/workflows/release.yml
   .github/RUNNERS.md
@@ -303,10 +304,30 @@ grep -q '.github/workflows/gcp-lab.yml@refs/heads/main' "$root/scripts/lab/gcp/s
   printf 'GCP WIF setup must include the trusted GCP lab workflow ref\n' >&2
   exit 1
 }
+grep -q '.github/workflows/gcp-cache-refresh.yml@refs/heads/main' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must include the trusted GCP cache refresh workflow ref\n' >&2
+  exit 1
+}
 grep -q 'openphone-lab-allow-iap-ssh' "$root/scripts/lab/gcp/setup-wif.sh" || {
   printf 'GCP WIF setup must create the IAP-only SSH firewall rule\n' >&2
   exit 1
 }
+grep -q 'scripts/lab/gcp/prewarm-cache.sh' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must call the cache prewarm script\n' >&2
+  exit 1
+}
+grep -q 'OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must update the warm snapshot variable\n' >&2
+  exit 1
+}
+grep -q 'lane:' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must expose explicit lab lanes\n' >&2
+  exit 1
+}
+if grep -q '^  push:' "$root/.github/workflows/emulator.yml"; then
+  printf 'legacy self-hosted emulator workflow must be manual-only; use GCP Lab for trusted gates\n' >&2
+  exit 1
+fi
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"

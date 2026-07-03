@@ -1,0 +1,233 @@
+name: GCP Cache Refresh
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref/SHA to prewarm. Defaults to this workflow SHA."
+        required: false
+        default: ""
+      arch:
+        description: "Emulator architecture"
+        required: true
+        default: "x86_64"
+        type: choice
+        options:
+          - x86_64
+          - arm64
+      variant:
+        description: "Emulator variant"
+        required: true
+        default: "eng"
+        type: choice
+        options:
+          - eng
+          - userdebug
+      cache_disk:
+        description: "Persistent cache disk to refresh. Empty uses the arch/release default."
+        required: false
+        default: ""
+      source_snapshot:
+        description: "Optional source snapshot when creating a missing cache disk"
+        required: false
+        default: ""
+      update_repo_variable:
+        description: "Update OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT after success"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      snapshot_retention_count:
+        description: "Number of recent cache snapshots to keep for this arch"
+        required: true
+        default: "3"
+      keep_vm:
+        description: "Leave the prewarm VM running for debugging"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-cache-refresh-${{ inputs.arch || vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}
+  cancel-in-progress: false
+
+jobs:
+  refresh-gcp-cache:
+    name: Refresh warm GCP emulator cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+    env:
+      OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
+      OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
+      OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
+      OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
+      OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
+      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
+      OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
+      OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Validate repository scaffold
+        run: |
+          set -euxo pipefail
+          ./scripts/check.sh
+          git diff --check
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.OPENPHONE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.OPENPHONE_GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Plan cache refresh
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${{ inputs.ref }}"
+          if [[ -z "$ref" ]]; then
+            ref="${GITHUB_SHA}"
+          fi
+          arch="${{ inputs.arch || vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
+          variant="${{ inputs.variant || 'eng' }}"
+          release="${OPENPHONE_RELEASE:-bp4a}"
+          arch_slug="${arch//_/-}"
+          cache_disk="${{ inputs.cache_disk }}"
+          if [[ -z "$cache_disk" ]]; then
+            cache_disk="openphone-cache-${arch_slug}-${release}"
+          fi
+          timestamp="$(date -u +%Y%m%d-%H%M%S)"
+          snapshot="${cache_disk}-${timestamp}"
+          source_snapshot="${{ inputs.source_snapshot }}"
+          if [[ -z "$source_snapshot" ]]; then
+            source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+          fi
+          retention="${{ inputs.snapshot_retention_count || '3' }}"
+          if ! [[ "$retention" =~ ^[0-9]+$ ]] || [[ "$retention" -lt 1 ]]; then
+            echo "::error::snapshot_retention_count must be a positive integer"
+            exit 1
+          fi
+          {
+            echo "ref=$ref"
+            echo "arch=$arch"
+            echo "variant=$variant"
+            echo "cache_disk=$cache_disk"
+            echo "snapshot=$snapshot"
+            echo "source_snapshot=$source_snapshot"
+            echo "retention=$retention"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Refresh cache and publish snapshot
+        id: refresh
+        shell: bash
+        run: |
+          set -euxo pipefail
+          args=(
+            --repo-url "https://github.com/secondly-com/OpenPhone.git"
+            --ref "${{ steps.plan.outputs.ref }}"
+            --project "${OPENPHONE_GCP_PROJECT}"
+            --zone "${OPENPHONE_GCP_ZONE}"
+            --machine-type "${OPENPHONE_GCP_MACHINE_TYPE}"
+            --boot-disk-size "${OPENPHONE_GCP_BOOT_DISK_SIZE}"
+            --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
+            --cache-disk "${{ steps.plan.outputs.cache_disk }}"
+            --snapshot "${{ steps.plan.outputs.snapshot }}"
+            --arch "${{ steps.plan.outputs.arch }}"
+            --variant "${{ steps.plan.outputs.variant }}"
+          )
+          if [[ -n "${{ steps.plan.outputs.source_snapshot }}" ]]; then
+            args+=(--source-snapshot "${{ steps.plan.outputs.source_snapshot }}")
+          fi
+          if [[ "${{ inputs.keep_vm }}" == "true" ]]; then
+            args+=(--keep-vm)
+          fi
+          ./scripts/lab/gcp/prewarm-cache.sh "${args[@]}"
+
+      - name: Update warm snapshot variable
+        if: ${{ inputs.keep_vm != 'true' && (github.event_name == 'schedule' || inputs.update_repo_variable == 'true') }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gcloud compute snapshots describe "${{ steps.plan.outputs.snapshot }}" \
+            --project "${OPENPHONE_GCP_PROJECT}" >/dev/null
+          gh variable set OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${{ steps.plan.outputs.snapshot }}"
+
+      - name: Prune older cache snapshots
+        if: ${{ inputs.keep_vm != 'true' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          arch_slug="${{ steps.plan.outputs.arch }}"
+          arch_slug="${arch_slug//_/-}"
+          prefix="openphone-cache-${arch_slug}-${OPENPHONE_RELEASE:-bp4a}-"
+          mapfile -t snapshots < <(
+            gcloud compute snapshots list \
+              --project "${OPENPHONE_GCP_PROJECT}" \
+              --filter="labels.app=openphone AND labels.purpose=lab-cache AND name~^${prefix}" \
+              --sort-by="~creationTimestamp" \
+              --format="value(name)"
+          )
+          retention="${{ steps.plan.outputs.retention }}"
+          if [[ "${#snapshots[@]}" -le "$retention" ]]; then
+            exit 0
+          fi
+          for snapshot in "${snapshots[@]:$retention}"; do
+            [[ "$snapshot" != "${{ steps.plan.outputs.snapshot }}" ]] || continue
+            gcloud compute snapshots delete "$snapshot" \
+              --project "${OPENPHONE_GCP_PROJECT}" \
+              --quiet
+          done
+
+      - name: Summarize cache refresh
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## GCP cache refresh"
+            echo
+            echo "- Ref: \`${{ steps.plan.outputs.ref }}\`"
+            echo "- Arch: \`${{ steps.plan.outputs.arch }}\`"
+            echo "- Variant: \`${{ steps.plan.outputs.variant }}\`"
+            echo "- Cache disk: \`${{ steps.plan.outputs.cache_disk }}\`"
+            echo "- Snapshot: \`${{ steps.plan.outputs.snapshot }}\`"
+            echo "- Source snapshot: \`${{ steps.plan.outputs.source_snapshot || 'none' }}\`"
+            echo "- Retention: \`${{ steps.plan.outputs.retention }}\`"
+            echo "- Keep VM: \`${{ inputs.keep_vm || 'false' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -19,6 +19,16 @@ on:
         description: "Comma-separated runtime intents"
         required: true
         default: "local"
+      lane:
+        description: "Lab lane"
+        required: true
+        default: "incremental-emulator"
+        type: choice
+        options:
+          - incremental-emulator
+          - smoke-only
+          - export-emulator-image
+          - custom
       arch:
         description: "Emulator architecture"
         required: true
@@ -65,7 +75,7 @@ on:
           - "false"
           - "true"
       export_emulator_image:
-        description: "Upload sdk-repo-linux-system-images.zip for local SDK/AVD use"
+        description: "Custom lane only: upload sdk-repo-linux-system-images.zip"
         required: true
         default: "false"
         type: choice
@@ -73,7 +83,7 @@ on:
           - "false"
           - "true"
       run_smoke:
-        description: "Boot emulator and run smoke after build/export"
+        description: "Custom lane only: boot emulator and run smoke after build/export"
         required: true
         default: "true"
         type: choice
@@ -81,7 +91,7 @@ on:
           - "true"
           - "false"
       skip_build:
-        description: "Manual only: reuse existing build outputs from a warm cache image"
+        description: "Custom lane only: reuse existing build outputs from a warm cache image"
         required: true
         default: "false"
         type: choice
@@ -183,6 +193,9 @@ jobs:
             fi
             cache_disk=""
             keep_vm="false"
+            lane="incremental-emulator"
+            export_emulator_image="false"
+            run_smoke="true"
             skip_build="false"
           else
             pr_number="${{ inputs.pr_number }}"
@@ -204,7 +217,33 @@ jobs:
             cache_disk="${{ inputs.cache_disk }}"
             cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
             keep_vm="${{ inputs.keep_vm }}"
-            skip_build="${{ inputs.skip_build }}"
+            lane="${{ inputs.lane }}"
+            case "$lane" in
+              incremental-emulator)
+                export_emulator_image="false"
+                run_smoke="true"
+                skip_build="false"
+                ;;
+              smoke-only)
+                export_emulator_image="false"
+                run_smoke="true"
+                skip_build="true"
+                ;;
+              export-emulator-image)
+                export_emulator_image="true"
+                run_smoke="false"
+                skip_build="false"
+                ;;
+              custom)
+                export_emulator_image="${{ inputs.export_emulator_image }}"
+                run_smoke="${{ inputs.run_smoke }}"
+                skip_build="${{ inputs.skip_build }}"
+                ;;
+              *)
+                echo "::error::Unsupported GCP lab lane: $lane"
+                exit 1
+                ;;
+            esac
           fi
 
           {
@@ -212,6 +251,7 @@ jobs:
             echo "ref=$ref"
             echo "repo_url=$repo_url"
             echo "runtime=$runtime"
+            echo "lane=$lane"
             echo "arch=$arch"
             echo "machine_type=$machine_type"
             echo "boot_disk_size=$boot_disk_size"
@@ -220,6 +260,8 @@ jobs:
             echo "cache_disk=$cache_disk"
             echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
+            echo "export_emulator_image=$export_emulator_image"
+            echo "run_smoke=$run_smoke"
             echo "skip_build=$skip_build"
           } >> "$GITHUB_OUTPUT"
 
@@ -248,13 +290,13 @@ jobs:
           if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
             args+=(--keep-vm)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.export_emulator_image }}" == "true" ]]; then
+          if [[ "${{ steps.target.outputs.export_emulator_image }}" == "true" ]]; then
             args+=(--export-emulator-image)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.run_smoke }}" != "true" ]]; then
+          if [[ "${{ steps.target.outputs.run_smoke }}" != "true" ]]; then
             args+=(--skip-smoke)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ steps.target.outputs.skip_build }}" == "true" ]]; then
+          if [[ "${{ steps.target.outputs.skip_build }}" == "true" ]]; then
             args+=(--skip-build)
           fi
           IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
@@ -278,11 +320,14 @@ jobs:
             echo "- Source ref: \`${{ steps.target.outputs.ref }}\`"
             echo "- Source repo: \`${{ steps.target.outputs.repo_url }}\`"
             echo "- Runtime intents: \`${{ steps.target.outputs.runtime }}\`"
+            echo "- Lane: \`${{ steps.target.outputs.lane }}\`"
             echo "- Emulator arch: \`${{ steps.target.outputs.arch }}\`"
             echo "- Machine type: \`${{ steps.target.outputs.machine_type }}\`"
             echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
             echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
             echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
+            echo "- Export emulator image: \`${{ steps.target.outputs.export_emulator_image }}\`"
+            echo "- Run smoke: \`${{ steps.target.outputs.run_smoke }}\`"
             echo "- Skip build: \`${{ steps.target.outputs.skip_build }}\`"
             echo "- VM service account: \`disabled\`"
             echo "- VM OAuth scopes: \`disabled\`"
