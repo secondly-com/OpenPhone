@@ -94,15 +94,14 @@ public final class ActionExecution {
     }
 
     private static Map<String, String> buildTypeToCapability() {
-        // Preserves the previous string-contains inference for the known-good
-        // happy path: open_app -> apps.launch, back/home/recents ->
-        // input.perform. Synthetic touch/type events also route to
-        // input.perform (the original code fell through to input.perform for
-        // them). Anything else now fails closed via CAPABILITY_UNKNOWN rather
-        // than silently defaulting to input.perform — see issue #65 for the
-        // authoritative-registry-lookup follow-up.
+        // Preserve support for every schema-valid action-request type this
+        // execution path accepts. Anything else fails closed via
+        // CAPABILITY_UNKNOWN rather than silently defaulting to input.perform;
+        // see issue #65 for the authoritative registry lookup follow-up.
         Map<String, String> map = new HashMap<>();
         map.put("open_app", "apps.launch");
+        map.put("launch_intent", "apps.launch");
+        map.put("open_url", "network.use");
         map.put("back", "input.perform");
         map.put("home", "input.perform");
         map.put("recents", "input.perform");
@@ -111,7 +110,9 @@ public final class ActionExecution {
         map.put("scroll", "input.perform");
         map.put("type_text", "input.perform");
         map.put("notification_action", "input.perform");
+        map.put("copy", "clipboard.write");
+        map.put("paste", "clipboard.read");
+        map.put("share", "share.content");
         return Collections.unmodifiableMap(map);
     }
 }
-
