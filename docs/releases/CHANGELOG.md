@@ -8,6 +8,34 @@ flow, and device support.
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-07-03
+
+### Added
+
+- Scheduled and manual GCP cache refresh workflow with named GCP Lab lanes and
+  latest labeled snapshot discovery for warm-cache runs.
+
+### Changed
+
+- The GCP-backed release path now uses version/device concurrency guards,
+  duplicate-release rejection, IAP-scoped lab access, and separate emulator
+  smoke build goals during release validation.
+- The assistant now defaults to confirm mode, and malformed or unknown action
+  payloads fail closed during capability inference instead of falling back to a
+  lower-risk default.
+- Release, OTA, trajectory, and audit validators now derive required fields,
+  enums, schema markers, and related checks from the tracked JSON schemas.
+- Repo checks now run `shellcheck` when available, clean temporary files
+  through a shared trap root, and keep the GCP warm-cache default Android path
+  user-relative instead of hardcoding a personal home directory.
+- Public release docs now fix rendered `/docs` links and mark `0.0.2` as the
+  current published latest release in the tracked notes.
+
+### Fixed
+
+- Release helper scripts no longer expose broker/admin/provider secrets through
+  host argv, stdout, or Android intent extras.
+
 ## [0.0.2] - 2026-07-02
 
 ### Added
