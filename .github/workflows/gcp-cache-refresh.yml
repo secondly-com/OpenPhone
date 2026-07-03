@@ -33,14 +33,6 @@ on:
         description: "Optional source snapshot when creating a missing cache disk"
         required: false
         default: ""
-      update_repo_variable:
-        description: "Update OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT after success"
-        required: true
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
       snapshot_retention_count:
         description: "Number of recent cache snapshots to keep for this arch"
         required: true
@@ -55,7 +47,6 @@ on:
           - "true"
 
 permissions:
-  actions: write
   contents: read
   id-token: write
 
@@ -75,10 +66,8 @@ jobs:
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
-      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -135,7 +124,11 @@ jobs:
           snapshot="${cache_disk}-${timestamp}"
           source_snapshot="${{ inputs.source_snapshot }}"
           if [[ -z "$source_snapshot" ]]; then
-            source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            source_snapshot="$(
+              scripts/lab/gcp/latest-cache-snapshot.sh \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --arch "$arch" || true
+            )"
           fi
           retention="${{ inputs.snapshot_retention_count || '3' }}"
           if ! [[ "$retention" =~ ^[0-9]+$ ]] || [[ "$retention" -lt 1 ]]; then
@@ -178,17 +171,6 @@ jobs:
           fi
           ./scripts/lab/gcp/prewarm-cache.sh "${args[@]}"
 
-      - name: Update warm snapshot variable
-        if: ${{ inputs.keep_vm != 'true' && (github.event_name == 'schedule' || inputs.update_repo_variable == 'true') }}
-        shell: bash
-        run: |
-          set -euxo pipefail
-          gcloud compute snapshots describe "${{ steps.plan.outputs.snapshot }}" \
-            --project "${OPENPHONE_GCP_PROJECT}" >/dev/null
-          gh variable set OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT \
-            --repo "${GITHUB_REPOSITORY}" \
-            --body "${{ steps.plan.outputs.snapshot }}"
-
       - name: Prune older cache snapshots
         if: ${{ inputs.keep_vm != 'true' }}
         shell: bash
@@ -228,6 +210,7 @@ jobs:
             echo "- Cache disk: \`${{ steps.plan.outputs.cache_disk }}\`"
             echo "- Snapshot: \`${{ steps.plan.outputs.snapshot }}\`"
             echo "- Source snapshot: \`${{ steps.plan.outputs.source_snapshot || 'none' }}\`"
+            echo "- Latest snapshot discovery: \`GCP labels\`"
             echo "- Retention: \`${{ steps.plan.outputs.retention }}\`"
             echo "- Keep VM: \`${{ inputs.keep_vm || 'false' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -197,6 +197,11 @@ scripts/lab/gcp/run-smoke.sh \
   --runtime local
 ```
 
+The GitHub workflows normally resolve the newest labeled warm snapshot directly
+from GCP with `scripts/lab/gcp/latest-cache-snapshot.sh`. The
+`OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT` repository variable is a fallback
+override, not the primary freshness mechanism.
+
 To refresh the warm GCP cache intentionally:
 
 ```bash
@@ -204,6 +209,11 @@ scripts/lab/gcp/prewarm-cache.sh \
   --cache-disk openphone-cache-x86-64-bp4a \
   --arch x86_64
 ```
+
+The scheduled `GCP Cache Refresh` workflow runs that prewarm path daily. A
+successful refresh builds/smokes the emulator cache, creates a new labeled
+snapshot, and prunes older cache snapshots according to the workflow retention
+setting.
 
 The pre-sync scaffold check may skip the standalone Java check when the full
 Android build provides the authoritative compiler/toolchain validation.

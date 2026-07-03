@@ -74,13 +74,12 @@ ls -lh "$OPENPHONE_ANDROID_DIR/out/target/product/emu64a/sdk-repo-linux-system-i
 Copy that zip to the workstation, install it into the Android SDK, create an
 AVD, and boot it with the steps in [EMULATOR.md](EMULATOR.md). For local Codex
 labs on a Mac Studio, prefer the slot-safe prebuilt path. When exporting an
-ARM64 zip from GCP for Apple Silicon, dispatch `GCP Lab` with
-`export_emulator_image=true` and `run_smoke=false`; the local slot boot is the
-ARM64 smoke proof. Keep the exported `.zip.sha256` sidecar next to the zip, or
-pass it explicitly with `--emulator-image-sha256`. Existing SDK installs are
-reused only when their recorded SHA-256 matches the requested zip; use
-`--force-emulator-image` when intentionally replacing an older or untracked
-install.
+ARM64 zip from GCP for Apple Silicon, dispatch `GCP Lab` with lane
+`export-emulator-image`; the local slot boot is the ARM64 smoke proof. Keep the
+exported `.zip.sha256` sidecar next to the zip, or pass it explicitly with
+`--emulator-image-sha256`. Existing SDK installs are reused only when their
+recorded SHA-256 matches the requested zip; use `--force-emulator-image` when
+intentionally replacing an older or untracked install.
 
 ```bash
 scripts/lab/up.sh \
@@ -151,6 +150,24 @@ runtime settings, ADB-backed tool access, MCP/CLI protocol wiring, and the
 OpenClaw Android adapter. Hardware behavior, Pixel boot/recovery/OTA behavior,
 radio/camera/fingerprint, and physical button handling still require the Pixel
 9a checks below.
+
+### GCP Lab Lanes
+
+Use the GCP Lab workflow when a PR needs real emulator validation without using
+the legacy self-hosted runner.
+
+- `incremental-emulator`: default trusted PR lane. Restores the newest labeled
+  GCP warm snapshot, rebuilds changed emulator outputs from the requested ref,
+  boots the emulator, and runs smoke.
+- `smoke-only`: fastest manual lane. Restores the newest warm snapshot and
+  boots/smokes already-built outputs without rebuilding.
+- `export-emulator-image`: rebuilds and uploads the SDK system image zip
+  without booting the emulator.
+- `custom`: exposes the lower-level export, smoke, and skip-build switches.
+
+Automatic maintainer-approved PR lab runs use `incremental-emulator`. Use
+`smoke-only` only when you intentionally want to test an already-built warm
+image rather than PR build output.
 
 ## Device Check
 

@@ -156,6 +156,7 @@ required=(
   scripts/lab/prepare-local.sh
   scripts/lab/install-android-sdk-tools.sh
   scripts/lab/gcp/common.sh
+  scripts/lab/gcp/latest-cache-snapshot.sh
   scripts/lab/gcp/setup-wif.sh
   scripts/lab/gcp/create-vm.sh
   scripts/lab/gcp/delete-vm.sh
@@ -316,8 +317,16 @@ grep -q 'scripts/lab/gcp/prewarm-cache.sh' "$root/.github/workflows/gcp-cache-re
   printf 'GCP cache refresh workflow must call the cache prewarm script\n' >&2
   exit 1
 }
-grep -q 'OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT' "$root/.github/workflows/gcp-cache-refresh.yml" || {
-  printf 'GCP cache refresh workflow must update the warm snapshot variable\n' >&2
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must discover source snapshots from GCP labels\n' >&2
+  exit 1
+}
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must discover the latest warm snapshot from GCP labels\n' >&2
+  exit 1
+}
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/release.yml" || {
+  printf 'release workflow must discover the latest warm snapshot from GCP labels\n' >&2
   exit 1
 }
 grep -q 'lane:' "$root/.github/workflows/gcp-lab.yml" || {

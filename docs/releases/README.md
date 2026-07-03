@@ -24,9 +24,10 @@ The public release pipeline is manual by design:
 5. Release validation checks that the release notes file is
    `docs/releases/<version>.md` and that `docs/releases/CHANGELOG.md` contains
    an exact heading for that version.
-6. The GCP release lab builds the OTA, runs the required emulator gate, stages
-   the artifact, generates checksums/manifests, validates the release
-   directory, and uploads the OTA plus metadata to GitHub Releases.
+6. The GCP release lab resolves the newest labeled warm cache snapshot, builds
+   the OTA, runs the required emulator gate, stages the artifact, generates
+   checksums/manifests, validates the release directory, and uploads the OTA
+   plus metadata to GitHub Releases.
 7. Release notes should link to device support, flashing notes, known issues,
    and validation evidence.
 
