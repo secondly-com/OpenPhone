@@ -92,7 +92,8 @@ sa_email="${service_account_id}@${project}.iam.gserviceaccount.com"
 wif_attribute_mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.workflow=assertion.workflow,attribute.workflow_ref=assertion.workflow_ref"
 wif_release_workflow_ref="${repo}/.github/workflows/release.yml@refs/heads/main"
 wif_lab_workflow_ref="${repo}/.github/workflows/gcp-lab.yml@refs/heads/main"
-wif_attribute_condition="assertion.repository == '${repo}' && (assertion.workflow_ref == '${wif_release_workflow_ref}' || assertion.workflow_ref == '${wif_lab_workflow_ref}')"
+wif_cache_refresh_workflow_ref="${repo}/.github/workflows/gcp-cache-refresh.yml@refs/heads/main"
+wif_attribute_condition="assertion.repository == '${repo}' && (assertion.workflow_ref == '${wif_release_workflow_ref}' || assertion.workflow_ref == '${wif_lab_workflow_ref}' || assertion.workflow_ref == '${wif_cache_refresh_workflow_ref}')"
 
 if ! gcloud iam service-accounts describe "$sa_email" --project "$project" >/dev/null 2>&1; then
   info "Creating service account: $sa_email"
