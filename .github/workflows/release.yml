@@ -183,13 +183,22 @@ jobs:
           )"
           lab_name="openphone-release-${safe_version}-${{ github.run_id }}-${{ github.run_attempt }}"
           arch="${{ vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
+          cache_source_snapshot="$(
+            scripts/lab/gcp/latest-cache-snapshot.sh \
+              --project "${OPENPHONE_GCP_PROJECT}" \
+              --arch "$arch" || true
+          )"
+          if [[ -z "$cache_source_snapshot" ]]; then
+            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+          fi
           cache_mode="scratch"
-          if [[ -n "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}" ]]; then
+          if [[ -n "$cache_source_snapshot" ]]; then
             cache_mode="snapshot"
           fi
           echo "lab_name=$lab_name" >> "$GITHUB_OUTPUT"
           echo "emulator_arch=$arch" >> "$GITHUB_OUTPUT"
           echo "cache_mode=$cache_mode" >> "$GITHUB_OUTPUT"
+          echo "cache_source_snapshot=$cache_source_snapshot" >> "$GITHUB_OUTPUT"
 
       - name: Run GCP release build and stage artifacts
         id: stage
@@ -199,6 +208,7 @@ jobs:
           lab_name="${{ steps.target.outputs.lab_name }}"
           arch="${{ steps.target.outputs.emulator_arch }}"
           cache_mode="${{ steps.target.outputs.cache_mode }}"
+          cache_source_snapshot="${{ steps.target.outputs.cache_source_snapshot }}"
           cleanup_behavior="delete-vm"
           args=(
             --name "$lab_name"
@@ -217,7 +227,7 @@ jobs:
             --emulator-build-goal "${OPENPHONE_EMULATOR_BUILD_GOAL}"
           )
           if [[ "$cache_mode" == "snapshot" ]]; then
-            args+=(--cache-mode snapshot --cache-source-snapshot "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}")
+            args+=(--cache-mode snapshot --cache-source-snapshot "$cache_source_snapshot")
           else
             args+=(--cache-mode scratch)
           fi
@@ -243,7 +253,7 @@ jobs:
             echo "- VM: \`${lab_name}\`"
             echo "- Source SHA: \`${GITHUB_SHA}\`"
             echo "- Cache mode: \`${cache_mode}\`"
-            echo "- Cache snapshot: \`${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT:-none}\`"
+            echo "- Cache snapshot: \`${cache_source_snapshot:-none}\`"
             echo "- Emulator gate: \`required\`"
             echo "- Artifact validation: \`passed\`"
             echo "- Artifact directory: \`${staging}\`"

@@ -120,8 +120,10 @@ Local-only agent notes belong in ignored `docs/local-temp/`, not in public docs.
 - `ci.yml` runs repository checks and whitespace checks on GitHub-hosted Linux.
 - `gcp-lab.yml` runs trusted or maintainer-approved emulator lab checks on
   disposable GCP VMs with warm Android cache state.
-- `emulator.yml` remains available for a local self-hosted emulator runner, but
-  it is not the release build path.
+- `gcp-cache-refresh.yml` refreshes the warm GCP Android/emulator cache snapshot
+  on a schedule and on demand.
+- `emulator.yml` remains available as a manual-only local self-hosted emulator
+  runner, but it is not the trusted PR or release build path.
 - `eval.yml` runs physical trajectory smokes on the `openphone-device`
   self-hosted runner.
 - `release.yml` runs release build, emulator gate, artifact validation, and
@@ -135,8 +137,9 @@ Local-only agent notes belong in ignored `docs/local-temp/`, not in public docs.
      regressions.
 
 2. **Emulator runtime smoke**
-   - Build or reuse an emulator image with the OpenPhone assistant.
-   - Boot it headlessly on the `openphone-emulator` runner.
+   - Use GCP Lab lane `incremental-emulator` for trusted PR validation.
+   - Use lane `smoke-only` only for manual checks against already-built warm
+     outputs.
    - Verify OpenPhone services, assistant install, ADB runtime status, screen
      context, and a local assistant task without provider keys.
 
@@ -164,7 +167,9 @@ Every public release should have one obvious trail:
 3. Run CI and relevant evals.
 4. Dispatch `.github/workflows/release.yml` with the version, device, release
    notes file, prerelease flag, and latest-release behavior.
-5. Publish OTA artifacts, `SHA256SUMS`, and `ARTIFACTS.md` to GitHub Releases.
+5. Let the Release workflow compile the OTA on GCP, run the required emulator
+   gate, validate artifacts, and publish OTA artifacts, `SHA256SUMS`, and
+   `ARTIFACTS.md` to GitHub Releases.
 6. Confirm the GitHub release page is the public source for that version.
 
 ## Work Queue Shape

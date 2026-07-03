@@ -49,9 +49,9 @@ Use the named GCP Lab lanes for day-to-day work:
 - `custom`: use the lower-level build/export/smoke toggles directly.
 
 `gcp-cache-refresh.yml` refreshes the warm cache snapshot on a schedule and can
-be dispatched manually. After a successful refresh it updates
-`OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT`, so new PR/release labs start from fresher
-Android source/build state.
+be dispatched manually. GCP Lab and Release discover the newest labeled cache
+snapshot directly from GCP. `OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT` remains a
+fallback override when no matching labeled snapshot exists.
 
 Do not use a generic self-hosted runner label for official release builds. The
 release workflow must show the GCP project, zone, VM name, source SHA, cache

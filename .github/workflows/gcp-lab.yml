@@ -185,7 +185,14 @@ jobs:
             machine_type="${OPENPHONE_GCP_MACHINE_TYPE}"
             boot_disk_size="${OPENPHONE_GCP_BOOT_DISK_SIZE}"
             boot_disk_type="${OPENPHONE_GCP_BOOT_DISK_TYPE}"
-            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            cache_source_snapshot="$(
+              scripts/lab/gcp/latest-cache-snapshot.sh \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --arch "$arch" || true
+            )"
+            if [[ -z "$cache_source_snapshot" ]]; then
+              cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            fi
             if [[ -n "$cache_source_snapshot" ]]; then
               cache_mode="snapshot"
             else
@@ -216,6 +223,13 @@ jobs:
             cache_mode="${{ inputs.cache_mode }}"
             cache_disk="${{ inputs.cache_disk }}"
             cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
+            if [[ -z "$cache_source_snapshot" ]]; then
+              cache_source_snapshot="$(
+                scripts/lab/gcp/latest-cache-snapshot.sh \
+                  --project "${OPENPHONE_GCP_PROJECT}" \
+                  --arch "$arch" || true
+              )"
+            fi
             keep_vm="${{ inputs.keep_vm }}"
             lane="${{ inputs.lane }}"
             case "$lane" in
