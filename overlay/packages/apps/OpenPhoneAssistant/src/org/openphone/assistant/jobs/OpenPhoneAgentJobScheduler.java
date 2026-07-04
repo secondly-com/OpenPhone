@@ -34,14 +34,15 @@ public final class OpenPhoneAgentJobScheduler {
     private static final long MIN_DELAY_MILLIS = 15_000L;
     private static final long STUCK_TIMEOUT_MILLIS = 10L * 60L * 1000L;
     private static final int MAX_DUE_PER_CHECK = 3;
-    private static final ConcurrentHashMap<String, AtomicBoolean> sCancelFlags =
+    private static final ConcurrentHashMap<Long, AtomicBoolean> sCancelFlags =
             new ConcurrentHashMap<>();
 
     private OpenPhoneAgentJobScheduler() {}
 
     /** Signals a running background job to stop at its next isCancelled() check. */
     public static void cancelJob(String jobId) {
-        AtomicBoolean flag = jobId == null ? null : sCancelFlags.get(jobId);
+        Long id = parseJobId(jobId);
+        AtomicBoolean flag = id == null ? null : sCancelFlags.get(id);
         if (flag != null) {
             flag.set(true);
         }
@@ -298,6 +299,17 @@ public final class OpenPhoneAgentJobScheduler {
             return new JSONObject(json == null || json.isEmpty() ? "{}" : json);
         } catch (JSONException e) {
             return new JSONObject();
+        }
+    }
+
+    private static Long parseJobId(String jobId) {
+        if (jobId == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(jobId.trim());
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
