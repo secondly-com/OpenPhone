@@ -196,6 +196,24 @@ passed = (
     and not missing_text
     and activity_ok
 )
+failure_reasons = []
+if not passed:
+    if status != "ran":
+        failure_reasons.append(f"harness failed (status: {status})")
+    trajectory_dir = task_dir / "trajectory"
+    if not trajectory_dir.exists():
+        failure_reasons.append("trajectory missing")
+    elif not summary_path.exists():
+        failure_reasons.append("trajectory summary missing")
+    if assistant_status != "task.finished":
+        reported = assistant_status or "missing"
+        failure_reasons.append(f"assistant did not report task.finished (status: {reported})")
+    if missing_text:
+        failure_reasons.append("expected text missing: " + ", ".join(missing_text))
+    if not activity_ok:
+        failure_reasons.append(f"expected activity missing or different: {expected_activity}")
+    if not final_window_text:
+        failure_reasons.append("final UI dump missing")
 print(json.dumps({
     "task_id": task.get("id", ""),
     "goal": task.get("goal", ""),
@@ -206,6 +224,7 @@ print(json.dumps({
     "expected_activity": expected_activity,
     "activity_ok": activity_ok,
     "final_ui_captured": bool(final_window_text),
+    "failure_reasons": failure_reasons,
     "tool_sequence": tool_sequence,
     "task_dir": str(task_dir),
 }))
@@ -220,6 +239,14 @@ summary = {
     "total": len(rows),
     "passed": sum(1 for row in rows if row["status"] == "pass"),
     "failed": sum(1 for row in rows if row["status"] != "pass"),
+    "failures": [
+        {
+            "task_id": row.get("task_id", ""),
+            "failure_reasons": row.get("failure_reasons", []),
+        }
+        for row in rows
+        if row["status"] != "pass"
+    ],
     "results": rows,
 }
 json.dump(summary, open(sys.argv[2], "w"), indent=2)
