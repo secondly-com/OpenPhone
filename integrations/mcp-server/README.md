@@ -16,6 +16,10 @@ node integrations/mcp-server/src/index.mjs
 Set `ANDROID_SERIAL` to target a specific ADB device or emulator. Set
 `OPENPHONE_DRY_RUN=1` for parser/protocol tests without ADB.
 
+The server speaks the MCP stdio transport: newline-delimited JSON-RPC (one
+message per line, no `Content-Length` headers) and negotiates
+`protocolVersion` during `initialize` (latest supported: `2025-06-18`).
+
 The same ADB transport works with the OpenPhone SDK phone emulator:
 
 ```sh
