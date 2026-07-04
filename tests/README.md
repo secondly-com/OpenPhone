@@ -6,6 +6,8 @@ This directory contains repo-level tests that are reusable across packages.
 
 `tests/integrations/` covers developer-facing runtime integrations:
 
+- `adb-stateful-gating-contract.mjs` checks that the ADB transport refuses
+  manifest-flagged stateful tools unless the operator opts in.
 - `runtime-cli-contract.mjs` checks the manifest-backed CLI surface.
 - `runtime-mcp-contract.mjs` checks the MCP JSON-RPC tool surface.
 - `openclaw-plugin-policy-contract.mjs` checks the OpenClaw plugin policy
