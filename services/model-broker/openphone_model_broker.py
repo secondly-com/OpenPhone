@@ -53,42 +53,72 @@ class BrokerConfig:
 
 
 class RateLimiter:
+    _EVICTION_INTERVAL_SECONDS = 60.0
+
     def __init__(self, max_events: int, window_seconds: int = 60) -> None:
         self._max_events = max_events
         self._window_seconds = window_seconds
         self._events: dict[str, Deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._last_eviction = time.monotonic()
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
-        events = self._events[key]
         cutoff = now - self._window_seconds
-        while events and events[0] < cutoff:
-            events.popleft()
-        if len(events) >= self._max_events:
-            return False
-        events.append(now)
-        return True
+        with self._lock:
+            self._maybe_evict_stale_keys(now, cutoff)
+            events = self._events[key]
+            while events and events[0] < cutoff:
+                events.popleft()
+            if len(events) >= self._max_events:
+                return False
+            events.append(now)
+            return True
+
+    def _maybe_evict_stale_keys(self, now: float, cutoff: float) -> None:
+        """Drop keys whose newest event fell out of the window. Caller holds lock."""
+        if now - self._last_eviction < self._EVICTION_INTERVAL_SECONDS:
+            return
+        self._last_eviction = now
+        stale = [key for key, events in self._events.items() if not events or events[-1] < cutoff]
+        for key in stale:
+            del self._events[key]
 
 
 class ByteRateLimiter:
+    _EVICTION_INTERVAL_SECONDS = 60.0
+
     def __init__(self, max_bytes: int, window_seconds: int = 60) -> None:
         self._max_bytes = max_bytes
         self._window_seconds = window_seconds
         self._events: dict[str, Deque[tuple[float, int]]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._last_eviction = time.monotonic()
 
     def allow(self, key: str, size: int) -> bool:
         if self._max_bytes <= 0:
             return True
         now = time.monotonic()
-        events = self._events[key]
         cutoff = now - self._window_seconds
-        while events and events[0][0] < cutoff:
-            events.popleft()
-        total = sum(event_size for _, event_size in events)
-        if total + size > self._max_bytes:
-            return False
-        events.append((now, size))
-        return True
+        with self._lock:
+            self._maybe_evict_stale_keys(now, cutoff)
+            events = self._events[key]
+            while events and events[0][0] < cutoff:
+                events.popleft()
+            total = sum(event_size for _, event_size in events)
+            if total + size > self._max_bytes:
+                return False
+            events.append((now, size))
+            return True
+
+    def _maybe_evict_stale_keys(self, now: float, cutoff: float) -> None:
+        """Drop keys whose newest event fell out of the window. Caller holds lock."""
+        if now - self._last_eviction < self._EVICTION_INTERVAL_SECONDS:
+            return
+        self._last_eviction = now
+        stale = [key for key, events in self._events.items() if not events or events[-1][0] < cutoff]
+        for key in stale:
+            del self._events[key]
 
 
 class BrokerHandler(http.server.BaseHTTPRequestHandler):
@@ -470,7 +500,12 @@ class BrokerServer(http.server.ThreadingHTTPServer):
     def validate_token(self, token: str | None) -> str | None:
         if token is None:
             return None
-        if token in self.config.session_tokens:
+        token_matches = False
+        for session_token in self.config.session_tokens:
+            # Check every configured token so the comparison time does not
+            # depend on where (or whether) the match occurs.
+            token_matches |= hmac.compare_digest(token, session_token)
+        if token_matches:
             digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
             return f"static:{digest}"
         if self.config.token_secret is None:
