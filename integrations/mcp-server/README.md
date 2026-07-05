@@ -30,7 +30,7 @@ Safety defaults:
 
 The server speaks the MCP stdio transport: newline-delimited JSON-RPC (one
 message per line, no `Content-Length` headers) and negotiates
-`protocolVersion` during `initialize` (latest supported: `2025-06-18`).
+`protocolVersion` during `initialize` (latest supported: `2025-11-25`).
 
 The same ADB transport works with the OpenPhone SDK phone emulator:
 
