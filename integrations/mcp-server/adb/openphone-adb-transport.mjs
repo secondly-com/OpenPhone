@@ -1,14 +1,29 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_ADB_TIMEOUT_MS = 15000;
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+// The transport ships in two layouts: packaged (adb/ next to runtime/) and
+// repo source (integrations/adb/ two levels above runtime/).
+const MANIFEST_CANDIDATES = [
+  path.resolve(moduleDir, "../runtime/protocol/openphone-commands.json"),
+  path.resolve(moduleDir, "../../runtime/protocol/openphone-commands.json"),
+];
 
 export class OpenPhoneAdbTransport {
   constructor(options = {}) {
     this.adb = options.adb ?? process.env.ADB ?? "adb";
     this.serial = options.serial ?? process.env.ANDROID_SERIAL ?? "";
     this.dryRun = Boolean(options.dryRun ?? process.env.OPENPHONE_DRY_RUN);
+    this.allowStateful = options.allowStateful != null
+      ? Boolean(options.allowStateful)
+      : truthySetting(process.env.OPENPHONE_ADB_ALLOW_STATEFUL);
     this.timeoutMs = Number(options.timeoutMs ?? process.env.OPENPHONE_ADB_TIMEOUT_MS)
       || DEFAULT_ADB_TIMEOUT_MS;
+    this.confirmations = confirmationMap(options.commands ?? loadManifestCommands());
   }
 
   runtimeList() {
@@ -83,6 +98,10 @@ export class OpenPhoneAdbTransport {
     if (this.dryRun) {
       return { ok: true, dry_run: true, command, args };
     }
+    const refusal = this.refuseStateful(command);
+    if (refusal) {
+      return refusal;
+    }
     switch (command) {
       case "openphone.screen.get":
       case "canvas.snapshot":
@@ -116,6 +135,23 @@ export class OpenPhoneAdbTransport {
           },
         };
     }
+  }
+
+  refuseStateful(command) {
+    const confirmation = this.confirmations.get(command) ?? "none";
+    if (confirmation === "none" || this.allowStateful) {
+      return null;
+    }
+    return {
+      ok: false,
+      error: {
+        code: "stateful_tool_refused",
+        message: `${command} changes device state (manifest confirmation: "${confirmation}") `
+          + "and the ADB transport cannot ask the user for confirmation. "
+          + "Set OPENPHONE_ADB_ALLOW_STATEFUL=1 (or pass allowStateful: true) to opt in, "
+          + "or set OPENPHONE_DRY_RUN=1 to explore without touching the device.",
+      },
+    };
   }
 
   screenGet(args = {}) {
@@ -261,6 +297,28 @@ export class OpenPhoneAdbTransport {
       throw error;
     }
   }
+}
+
+export function loadManifestCommands(candidates = MANIFEST_CANDIDATES) {
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      const manifest = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      return manifest.commands ?? [];
+    }
+  }
+  throw new Error("openphone-commands.json manifest not found next to the ADB transport");
+}
+
+export function confirmationMap(commands) {
+  const out = new Map();
+  for (const command of commands) {
+    const confirmation = command.confirmation ?? "none";
+    out.set(command.name, confirmation);
+    for (const alias of command.aliases ?? []) {
+      out.set(alias, confirmation);
+    }
+  }
+  return out;
 }
 
 export function cleanRuntime(value) {

@@ -123,6 +123,7 @@ required=(
   integrations/cli/package.json
   integrations/cli/src/index.mjs
   tests/README.md
+  tests/integrations/adb-stateful-gating-contract.mjs
   tests/integrations/runtime-cli-contract.mjs
   tests/integrations/runtime-mcp-contract.mjs
   tests/integrations/openclaw-plugin-policy-contract.mjs
