@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { handleRequest } from "../../integrations/mcp-server/src/index.mjs";
+import { once } from "node:events";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  handleRequest,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "../../integrations/mcp-server/src/index.mjs";
+
+const serverPath = fileURLToPath(
+  new URL("../../integrations/mcp-server/src/index.mjs", import.meta.url),
+);
 
 const calls = [];
 const fakeTransport = {
@@ -20,6 +30,29 @@ const fakeTransport = {
   }, { transport: fakeTransport });
   assert.equal(response.result.serverInfo.name, "openphone-runtime");
   assert.ok(response.result.capabilities.tools);
+  assert.equal(response.result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
+}
+
+{
+  // A supported client protocolVersion is echoed back.
+  const response = await handleRequest({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18" },
+  }, { transport: fakeTransport });
+  assert.equal(response.result.protocolVersion, "2025-06-18");
+}
+
+{
+  // An unsupported client protocolVersion falls back to the latest we support.
+  const response = await handleRequest({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "1999-01-01" },
+  }, { transport: fakeTransport });
+  assert.equal(response.result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
 }
 
 {
@@ -118,4 +151,73 @@ const fakeTransport = {
 {
   const response = await handleRequest("not an object", { transport: fakeTransport });
   assert.equal(response.error.code, -32600);
+}
+
+{
+  // Stdio smoke test: a real newline-delimited JSON handshake against the
+  // server process (initialize -> notifications/initialized -> tools/list).
+  const server = spawn(process.execPath, [serverPath], {
+    env: { ...process.env, OPENPHONE_DRY_RUN: "1" },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+
+  const responses = [];
+  let stdoutBuffer = "";
+  const waiters = [];
+  server.stdout.setEncoding("utf8");
+  server.stdout.on("data", (chunk) => {
+    stdoutBuffer += chunk;
+    let newline = stdoutBuffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = stdoutBuffer.slice(0, newline).trim();
+      stdoutBuffer = stdoutBuffer.slice(newline + 1);
+      if (line) {
+        responses.push(JSON.parse(line));
+        const waiter = waiters.shift();
+        if (waiter) {
+          waiter();
+        }
+      }
+      newline = stdoutBuffer.indexOf("\n");
+    }
+  });
+
+  const nextResponse = async () => {
+    if (responses.length === 0) {
+      await new Promise((resolve) => waiters.push(resolve));
+    }
+    return responses.shift();
+  };
+
+  const send = (message) => {
+    server.stdin.write(`${JSON.stringify(message)}\n`);
+  };
+
+  try {
+    send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "contract-test", version: "0.0.0" },
+      },
+    });
+    const initialize = await nextResponse();
+    assert.equal(initialize.id, 1);
+    assert.equal(initialize.result.protocolVersion, "2025-06-18");
+    assert.equal(initialize.result.serverInfo.name, "openphone-runtime");
+
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+
+    send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const toolsList = await nextResponse();
+    assert.equal(toolsList.id, 2);
+    assert.ok(toolsList.result.tools.length > 10);
+    assert.equal(responses.length, 0);
+  } finally {
+    server.kill();
+    await once(server, "exit");
+  }
 }

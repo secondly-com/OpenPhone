@@ -8,10 +8,18 @@ import {
   textContent,
 } from "../runtime/protocol/openphone-runtime-tools.mjs";
 
-const PROTOCOL_VERSION = "2025-11-25";
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18"];
+const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 const SERVER_INFO = { name: "openphone-runtime", version: "0.1.0" };
 
 const commands = loadCommands();
+
+export function negotiateProtocolVersion(requested) {
+  if (SUPPORTED_PROTOCOL_VERSIONS.includes(requested)) {
+    return requested;
+  }
+  return LATEST_PROTOCOL_VERSION;
+}
 
 export async function handleRequest(message, context = {}) {
   if (!message || typeof message !== "object") {
@@ -26,7 +34,7 @@ export async function handleRequest(message, context = {}) {
     switch (message.method) {
       case "initialize":
         return resultResponse(id, {
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion: negotiateProtocolVersion(message.params?.protocolVersion),
           capabilities: {
             tools: { listChanged: false },
           },
@@ -48,16 +56,39 @@ export async function handleRequest(message, context = {}) {
 
 export async function serve(options = {}) {
   const transport = options.transport ?? new OpenPhoneAdbTransport();
-  let buffer = Buffer.alloc(0);
-  process.stdin.on("data", async (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    const parsed = parseMessages(buffer);
-    buffer = parsed.remaining;
-    for (const message of parsed.messages) {
-      const response = await handleRequest(message, { transport });
-      if (response) {
-        writeMessage(response);
+  let buffer = "";
+  let queue = Promise.resolve();
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    // Buffer mutation must stay synchronous: extract every complete line
+    // before awaiting anything, then process messages serially on a promise
+    // chain so interleaved chunks cannot drop or reorder responses.
+    buffer += chunk;
+    const lines = [];
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      lines.push(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+    }
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
       }
+      queue = queue.then(async () => {
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          writeMessage(errorResponse(null, -32700, "Parse error"));
+          return;
+        }
+        const response = await handleRequest(message, { transport });
+        if (response) {
+          writeMessage(response);
+        }
+      });
     }
   });
   process.stdin.resume();
@@ -98,44 +129,9 @@ function errorResponse(id, code, message) {
   };
 }
 
-function parseMessages(buffer) {
-  const messages = [];
-  let rest = buffer;
-  while (rest.length > 0) {
-    const headerEnd = rest.indexOf("\r\n\r\n");
-    if (headerEnd >= 0) {
-      const header = rest.slice(0, headerEnd).toString("utf8");
-      const match = header.match(/content-length:\s*(\d+)/iu);
-      if (!match) {
-        break;
-      }
-      const length = Number(match[1]);
-      const bodyStart = headerEnd + 4;
-      const bodyEnd = bodyStart + length;
-      if (rest.length < bodyEnd) {
-        break;
-      }
-      messages.push(JSON.parse(rest.slice(bodyStart, bodyEnd).toString("utf8")));
-      rest = rest.slice(bodyEnd);
-      continue;
-    }
-
-    const newline = rest.indexOf("\n");
-    if (newline < 0) {
-      break;
-    }
-    const line = rest.slice(0, newline).toString("utf8").trim();
-    rest = rest.slice(newline + 1);
-    if (line) {
-      messages.push(JSON.parse(line));
-    }
-  }
-  return { messages, remaining: rest };
-}
-
 function writeMessage(message) {
-  const body = JSON.stringify(message);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
+  // MCP stdio transport framing: one JSON-RPC message per line.
+  process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
