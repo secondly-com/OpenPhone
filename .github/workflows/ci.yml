@@ -45,5 +45,10 @@ jobs:
       - name: Run OpenPhone checks
         run: ./scripts/check.sh
 
+      - name: Run model broker unit tests
+        run: |
+          pip install pytest
+          python3 -m pytest services/model-broker/tests -q
+
       - name: Check whitespace
         run: git diff --check
