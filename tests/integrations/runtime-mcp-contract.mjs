@@ -31,6 +31,13 @@ const fakeTransport = {
   assert.equal(response.result.serverInfo.name, "openphone-runtime");
   assert.ok(response.result.capabilities.tools);
   assert.equal(response.result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
+  // The initialize handshake advertises the runtime-protocol version range.
+  const runtimeProtocol = response.result.serverInfo.runtimeProtocol;
+  assert.equal(runtimeProtocol.name, "openphone-runtime-protocol");
+  assert.ok(Number.isInteger(runtimeProtocol.min_version));
+  assert.ok(Number.isInteger(runtimeProtocol.max_version));
+  assert.ok(runtimeProtocol.min_version <= runtimeProtocol.max_version);
+  assert.equal(runtimeProtocol.min_version, 1);
 }
 
 {
@@ -208,6 +215,8 @@ const fakeTransport = {
     assert.equal(initialize.id, 1);
     assert.equal(initialize.result.protocolVersion, "2025-06-18");
     assert.equal(initialize.result.serverInfo.name, "openphone-runtime");
+    assert.equal(initialize.result.serverInfo.runtimeProtocol.name, "openphone-runtime-protocol");
+    assert.equal(initialize.result.serverInfo.runtimeProtocol.min_version, 1);
 
     send({ jsonrpc: "2.0", method: "notifications/initialized" });
 

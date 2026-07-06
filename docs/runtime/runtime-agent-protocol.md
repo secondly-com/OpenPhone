@@ -45,3 +45,43 @@ session's autonomy. If no session is available, it falls back to
 - Events: `runtime/protocol/openphone-events.json`
 - Capabilities: `runtime/protocol/openphone-capabilities.json`
 - Shape reference: `runtime/protocol/openphone-runtime.schema.json`
+
+## Versioning
+
+Every protocol manifest carries an integer `version`. Consumers load
+manifests through `runtime/protocol/openphone-runtime-tools.mjs`, which
+accepts an inclusive supported range (`RUNTIME_PROTOCOL_VERSION_RANGE`,
+currently `min_version=1`, `max_version=1`) instead of a single pinned
+version, so new manifest versions can roll out without breaking older
+clients.
+
+### Handshake advertisement
+
+Integrations advertise the supported runtime-protocol range in a
+structured way so clients can negotiate before invoking tools:
+
+- MCP server: the `initialize` result's `serverInfo.runtimeProtocol`
+  field carries `{ name, min_version, max_version }`. (This is separate
+  from the MCP `protocolVersion` date string, which versions the MCP
+  transport itself.)
+- CLI: `openphone info --json` prints the same structure under
+  `runtime_protocol`.
+
+### Version-bump policy
+
+- Additive, backward-compatible changes (new commands, new optional
+  fields, new events/capabilities) do NOT bump the manifest version.
+- Breaking changes (removing or renaming a command, changing a field's
+  meaning or required shape) require bumping the manifest `version` and
+  raising `max_version` in `RUNTIME_PROTOCOL_VERSION_RANGE`. Keep
+  `min_version` unchanged while old clients are still supported.
+- Raise `min_version` only when support for an old manifest version is
+  deliberately dropped; announce it in release notes first.
+- Instead of removing a command in place, mark it `deprecated: true` and
+  point at its replacement with `superseded_by: "<command>"`. The
+  validator (`runtime/protocol/validate-runtime-protocol.mjs`, run by
+  `scripts/check.sh`) enforces that `superseded_by` references an
+  existing command and is only set alongside `deprecated: true`.
+  Deprecated commands must keep working for at least one released
+  version before removal (which is the breaking change that bumps the
+  manifest version).

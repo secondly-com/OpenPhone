@@ -21,6 +21,21 @@ function captureIo() {
 }
 
 {
+  // `info --json` advertises the supported runtime-protocol version range.
+  const capture = captureIo();
+  const code = await main(["info", "--json"], capture.io);
+  assert.equal(code, 0);
+  const parsed = JSON.parse(capture.stdout());
+  assert.equal(parsed.name, "openphone-runtime-cli");
+  assert.equal(parsed.runtime_protocol.name, "openphone-runtime-protocol");
+  assert.equal(parsed.runtime_protocol.min_version, 1);
+  assert.ok(Number.isInteger(parsed.runtime_protocol.max_version));
+  assert.ok(parsed.runtime_protocol.min_version <= parsed.runtime_protocol.max_version);
+  assert.ok(parsed.commands > 10);
+  assert.equal(capture.stderr(), "");
+}
+
+{
   const capture = captureIo();
   const code = await main(["tool", "list", "--json"], capture.io);
   assert.equal(code, 0);

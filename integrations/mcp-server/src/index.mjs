@@ -5,12 +5,18 @@ import {
   loadCommands,
   mcpTools,
   resolveCommand,
+  runtimeProtocolInfo,
   textContent,
 } from "../runtime/protocol/openphone-runtime-tools.mjs";
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18"];
 const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
-const SERVER_INFO = { name: "openphone-runtime", version: "0.1.0" };
+export const RUNTIME_PROTOCOL_INFO = runtimeProtocolInfo();
+const SERVER_INFO = {
+  name: "openphone-runtime",
+  version: "0.1.0",
+  runtimeProtocol: RUNTIME_PROTOCOL_INFO,
+};
 
 const commands = loadCommands();
 
