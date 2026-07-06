@@ -65,6 +65,7 @@ import http.server
 import json
 import pathlib
 import sys
+import time
 
 state_path = pathlib.Path(sys.argv[1])
 
@@ -72,7 +73,23 @@ state_path = pathlib.Path(sys.argv[1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
-        self.rfile.read(length)
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("stream") is True:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            for index in range(3):
+                self.wfile.write(f"data: chunk-{index}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.4)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
         attempts = int(state_path.read_text(encoding="utf-8")) if state_path.exists() else 0
         attempts += 1
         state_path.write_text(str(attempts), encoding="utf-8")
@@ -318,6 +335,59 @@ expect_status 200 \
   -H 'Content-Type: application/json' \
   --data '{"model":"gpt-4.1-mini","metadata":{"openphone_task":"true","risk_flags":""},"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]}'
 
+# Streaming: the broker must relay SSE chunks incrementally instead of
+# buffering the full upstream response before replying.
+python3 - <<'PY' "$port" "$static_token"
+import http.client
+import json
+import sys
+import time
+
+port, token = sys.argv[1:]
+body = json.dumps({
+    "model": "gpt-4.1-mini",
+    "stream": True,
+    "metadata": {"openphone_task": "true", "risk_flags": ""},
+    "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+})
+connection = http.client.HTTPConnection("127.0.0.1", int(port), timeout=30)
+connection.request(
+    "POST",
+    "/v1/responses",
+    body=body,
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    },
+)
+response = connection.getresponse()
+if response.status != 200:
+    raise SystemExit(f"streaming request failed: HTTP {response.status}")
+content_type = response.headers.get("Content-Type", "")
+if not content_type.startswith("text/event-stream"):
+    raise SystemExit(f"streaming response has wrong content-type: {content_type}")
+
+chunks = []
+arrival_times = []
+while True:
+    chunk = response.read1(65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+    arrival_times.append(time.monotonic())
+payload = b"".join(chunks).decode("utf-8")
+for expected in ("data: chunk-0", "data: chunk-1", "data: chunk-2", "data: [DONE]"):
+    if expected not in payload:
+        raise SystemExit(f"streaming response missing {expected!r}: {payload!r}")
+if len(arrival_times) < 2:
+    raise SystemExit("streaming response arrived as a single buffered chunk")
+spread = arrival_times[-1] - arrival_times[0]
+if spread < 0.2:
+    raise SystemExit(f"streaming chunks were not delivered incrementally (spread={spread:.3f}s)")
+print(f"streaming smoke case passed ({len(chunks)} chunks over {spread:.2f}s)")
+PY
+
 expect_status 429 \
   -X POST "http://127.0.0.1:$port/v1/responses" \
   -H "Authorization: Bearer $static_token" \
@@ -374,7 +444,7 @@ for event in events:
     if "body" in event or "request" in event or "response" in event:
         raise SystemExit(f"audit event contains body-like key: {event}")
 proxied = [event for event in events if event.get("outcome") == "proxied"]
-if not proxied or proxied[-1].get("provider_attempts") != 2:
+if not any(event.get("provider_attempts") == 2 for event in proxied):
     raise SystemExit("broker did not record retried provider forwarding")
 PY
 

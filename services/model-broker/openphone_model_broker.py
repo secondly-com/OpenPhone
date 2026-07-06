@@ -211,6 +211,7 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
                 body_size,
                 started_at,
                 model,
+                stream=self._wants_stream(payload),
             )
             return
 
@@ -326,6 +327,7 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
         body_size: int,
         started_at: float,
         model: str | None,
+        stream: bool = False,
     ) -> None:
         headers = {
             "Authorization": f"Bearer {self.server.config.api_key}",
@@ -338,6 +340,17 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
             attempts += 1
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
+                    if stream:
+                        self._stream_provider_response(
+                            response,
+                            token_subject,
+                            body_size,
+                            started_at,
+                            endpoint,
+                            model,
+                            attempts,
+                        )
+                        return
                     response_body = response.read()
                     self._audit_request(
                         "proxied",
@@ -403,6 +416,53 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
                     {"error": "provider_unavailable", "detail": str(error.reason)},
                 )
                 return
+
+    def _wants_stream(self, payload: dict[str, object]) -> bool:
+        accept = self.headers.get("Accept", "")
+        if "text/event-stream" in accept.lower():
+            return True
+        return payload.get("stream") is True
+
+    def _stream_provider_response(
+        self,
+        response: object,
+        token_subject: str,
+        body_size: int,
+        started_at: float,
+        endpoint: str,
+        model: str | None,
+        attempts: int,
+    ) -> None:
+        """Relay the upstream body chunk-by-chunk instead of buffering it.
+
+        The response is delimited by connection close (HTTP/1.0 semantics),
+        which every SSE-capable client handles; no Content-Length is sent.
+        """
+        self._audit_request(
+            "proxied",
+            token_subject,
+            response.status,
+            body_size,
+            started_at,
+            endpoint,
+            model,
+            provider_attempts=attempts,
+        )
+        self.send_response(response.status)
+        self.send_header(
+            "Content-Type",
+            response.headers.get("Content-Type", "text/event-stream"),
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        while True:
+            chunk = response.read1(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
 
     def _should_retry_provider(self, status: int, attempts: int) -> bool:
         if attempts > self.server.config.provider_max_retries:
