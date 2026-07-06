@@ -126,6 +126,7 @@ required=(
   tests/integrations/adb-stateful-gating-contract.mjs
   tests/integrations/runtime-cli-contract.mjs
   tests/integrations/runtime-mcp-contract.mjs
+  tests/integrations/runtime-protocol-versioning-contract.mjs
   tests/integrations/openclaw-plugin-policy-contract.mjs
   tests/integrations/runtime-package-contract.mjs
   integrations/mcp-server/README.md
