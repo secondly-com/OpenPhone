@@ -172,6 +172,12 @@ See [docs/devices/MATRIX.md](docs/devices/MATRIX.md) and
 Contributions, issues, and device validation reports are welcome under the
 terms in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
+- [ROADMAP.md](ROADMAP.md) — milestone tracks and current priorities.
+- [Discussions](https://github.com/secondly-com/OpenPhone/discussions) — for
+  questions, ideas, and show-and-tell; use issues for bugs and concrete work.
+- [No-build contribution path](docs/contributing/no-build.md) — schemas,
+  broker, integrations, protocol, and docs work needs no Android build host.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=secondly-com/OpenPhone&type=Date)](https://www.star-history.com/#secondly-com/OpenPhone&Date)

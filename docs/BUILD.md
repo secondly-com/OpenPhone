@@ -3,6 +3,12 @@
 OpenPhone uses Android's normal `repo` workflow. This repository stays small
 and contains only OpenPhone-owned code, manifests, scripts, and patches.
 
+> **Minimum build-host specs: 64 GB RAM, ~700 GB fast disk, x86_64 Linux.**
+> A full Android build will not complete on a typical laptop. If your machine
+> does not meet the bar, you can still contribute meaningfully without an
+> Android build host — see the
+> [no-build contribution path](contributing/no-build.md).
+
 ## Prerequisites
 
 - Linux Android build host dependencies installed for full device images.

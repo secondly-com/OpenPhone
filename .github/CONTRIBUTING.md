@@ -121,6 +121,29 @@ By contributing, you represent and warrant that:
   rate limits, data minimization, or licensing controls without explicit
   approval.
 
+## CI Ladder
+
+CI runs in three tiers. Only the first tier runs automatically on fork PRs;
+the heavier tiers need maintainer involvement.
+
+1. **Automatic on every PR** (`ci.yml`, ~10 minutes): docs-site build,
+   `./scripts/check.sh` (required files, JSON validity, schema
+   cross-consistency, runtime protocol validation, broker smoke test, Node
+   contract tests, assistant Java compile check), and `git diff --check`.
+   Run `./scripts/check.sh` locally before pushing — it is the same check.
+2. **Maintainer-triggered** (`gcp-lab.yml`): a maintainer applies the
+   `run-gcp-lab` label to run the GCP emulator smoke lab (~30–60 minutes).
+   Ask for a lab run in a PR comment when your change affects the image,
+   overlay, patches, or on-device behavior.
+3. **Release and nightly only**: `emulator.yml` (self-hosted arm64 emulator
+   smoke) and `eval.yml` (nightly on-device trajectory smokes and benchmark).
+   These do not run on fork PRs.
+
+Reviews are best-effort. If tier 1 is green and you need a lab run or a
+review, comment on the PR.
+
+The milestone tracks and current priorities are in [ROADMAP.md](../ROADMAP.md).
+
 ## Questions
 
 For licensing, commercial use, or contribution questions, contact support@secondly.com.
