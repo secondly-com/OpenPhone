@@ -436,6 +436,14 @@ export class OpenPhoneAdbTransport {
     return value === "" || value === "null" ? fallback : value;
   }
 
+  globalSettingGet(key, fallback = "") {
+    if (this.dryRun) {
+      return fallback;
+    }
+    const value = this.shell(["settings", "get", "global", key], { allowFailure: true }).trim();
+    return value === "" || value === "null" ? fallback : value;
+  }
+
   settingPut(key, value) {
     if (this.dryRun) {
       return;
@@ -556,6 +564,110 @@ function visibleText(xml) {
     }
   }
   return [...new Set(out)];
+}
+
+function parseInteractiveElements(xml) {
+  const out = [];
+  for (const nodeMatch of String(xml ?? "").matchAll(/<node\b([^>]*)>/gu)) {
+    const attrs = parseXmlAttrs(nodeMatch[1]);
+    const clickable = truthySetting(attrs.clickable);
+    const longClickable = truthySetting(attrs["long-clickable"]);
+    const focusable = truthySetting(attrs.focusable);
+    if (!clickable && !longClickable && !focusable) {
+      continue;
+    }
+    const bounds = parseBounds(attrs.bounds);
+    out.push({
+      id: `el-${out.length + 1}`,
+      view_id: attrs["resource-id"] || "",
+      class_name: attrs.class || "",
+      package: attrs.package || "",
+      text: decodeXml(attrs.text || ""),
+      content_description: decodeXml(attrs["content-desc"] || ""),
+      clickable,
+      long_clickable: longClickable,
+      focusable,
+      enabled: attrs.enabled == null ? true : truthySetting(attrs.enabled),
+      bounds,
+    });
+    if (out.length >= MAX_INTERACTIVE_ELEMENTS) {
+      break;
+    }
+  }
+  return out;
+}
+
+function parseXmlAttrs(rawAttrs) {
+  const attrs = {};
+  for (const match of String(rawAttrs ?? "").matchAll(/([:\w-]+)="([^"]*)"/gu)) {
+    attrs[match[1]] = match[2];
+  }
+  return attrs;
+}
+
+function parseBounds(bounds) {
+  const match = String(bounds ?? "").match(/^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/u);
+  if (!match) {
+    return [];
+  }
+  return match.slice(1).map((value) => Number(value));
+}
+
+function parseBatteryDump(raw) {
+  const fields = {};
+  for (const line of String(raw ?? "").split(/\r?\n/gu)) {
+    const match = line.match(/^\s*([^:]+):\s*(.*?)\s*$/u);
+    if (match) {
+      fields[match[1].trim().toLowerCase()] = match[2].trim();
+    }
+  }
+  const level = numberOrNull(fields.level);
+  const scale = numberOrNull(fields.scale) ?? 100;
+  const statusCode = numberOrNull(fields.status);
+  const status = batteryStatus(statusCode);
+  return {
+    level_percent: level == null ? null : Math.round((level / scale) * 100),
+    status,
+    charging: status === "charging" || status === "full",
+    ac_powered: truthySetting(fields["ac powered"]),
+    usb_powered: truthySetting(fields["usb powered"]),
+    wireless_powered: truthySetting(fields["wireless powered"]),
+  };
+}
+
+function batteryStatus(statusCode) {
+  switch (statusCode) {
+    case 2:
+      return "charging";
+    case 3:
+      return "discharging";
+    case 4:
+      return "not_charging";
+    case 5:
+      return "full";
+    default:
+      return "unknown";
+  }
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function matchLine(value, pattern) {
+  const match = String(value ?? "").match(pattern);
+  return match ? match[1] ?? match[0] : "";
+}
+
+function unsupportedOnDeviceState(command, reason) {
+  return {
+    ok: false,
+    error: {
+      code: "unsupported_adb_state",
+      message: `${command} is unavailable through the ADB transport: ${reason}.`,
+    },
+  };
 }
 
 function decodeXml(value) {
