@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/runtime/openphone-runtime.schema.json",
+  "title": "OpenPhone Runtime Agent Protocol",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "attention_request": {
+      "$ref": "#/$defs/attentionRequest"
+    },
+    "tool_request": {
+      "$ref": "#/$defs/toolRequest"
+    },
+    "tool_result": {
+      "$ref": "#/$defs/toolResult"
+    },
+    "runtime_event": {
+      "$ref": "#/$defs/runtimeEvent"
+    },
+    "confirmation": {
+      "$ref": "#/$defs/confirmation"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "$defs": {
+    "attentionRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "runtime",
+        "phone_session_id",
+        "attention_id",
+        "source",
+        "text",
+        "autonomy"
+      ],
+      "properties": {
+        "runtime": {
+          "type": "string"
+        },
+        "phone_session_id": {
+          "type": "string"
+        },
+        "runtime_session_id": {
+          "type": "string"
+        },
+        "attention_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "autonomy": {
+          "enum": [
+            "observe_only",
+            "ask_before_action",
+            "trusted_actions"
+          ]
+        },
+        "include_screen": {
+          "type": "boolean"
+        },
+        "context": {
+          "type": "object"
+        }
+      }
+    },
+    "toolRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "request_id",
+        "runtime",
+        "runtime_session_id",
+        "tool",
+        "params"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "runtime_session_id": {
+          "type": "string"
+        },
+        "phone_session_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "autonomy": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "toolResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "request_id",
+        "status",
+        "requires_confirmation"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        },
+        "requires_confirmation": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "object"
+        }
+      }
+    },
+    "runtimeEvent": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "event",
+        "payload"
+      ],
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "confirmation_id",
+        "request_id",
+        "runtime",
+        "tool",
+        "timeout_ms"
+      ],
+      "properties": {
+        "confirmation_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

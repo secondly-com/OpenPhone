@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/action-result.schema.json",
+  "title": "OpenPhone Action Result",
+  "type": "object",
+  "required": ["state", "capability", "source"],
+  "properties": {
+    "state": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": ["string", "null"]
+    },
+    "caller_uid": {
+      "type": "integer"
+    },
+    "capability": {
+      "type": "string"
+    },
+    "detail": {
+      "type": ["string", "null"]
+    },
+    "input": {
+      "type": ["string", "null"]
+    },
+    "pending_action_id": {
+      "type": ["string", "null"]
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

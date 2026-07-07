@@ -16,3 +16,8 @@ docs/site/.source/
 docs/site/content/docs/
 docs/site/node_modules/
 docs/site/tsconfig.tsbuildinfo
+
+# iOS agentd build outputs
+ios/agentd/.theos/
+ios/agentd/packages/
+*.deb

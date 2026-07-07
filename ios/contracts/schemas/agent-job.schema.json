@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/agent-job.schema.json",
+  "title": "OpenPhone Agent Job",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "title",
+    "prompt",
+    "payload_json",
+    "schedule_json",
+    "session_target",
+    "delivery_json",
+    "status",
+    "created_at",
+    "updated_at",
+    "next_run_at",
+    "running_at",
+    "last_run_at",
+    "last_result",
+    "failure_count",
+    "failure_alert_at"
+  ],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "type": {
+      "enum": ["agent_turn", "system_event", "heartbeat"]
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "prompt": { "type": "string" },
+    "payload_json": { "type": "object" },
+    "schedule_json": { "type": "object" },
+    "session_target": { "type": "string" },
+    "delivery_json": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": ["notification", "silent", "none"]
+        },
+        "notification_text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "status": {
+      "enum": ["active", "running", "completed", "failed", "stopped"]
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 },
+    "next_run_at": { "type": "integer", "minimum": 0 },
+    "running_at": { "type": "integer", "minimum": 0 },
+    "last_run_at": { "type": "integer", "minimum": 0 },
+    "last_result": { "type": "string" },
+    "failure_count": { "type": "integer", "minimum": 0 },
+    "failure_alert_at": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/screen-context.schema.json",
+  "title": "OpenPhone Screen Context",
+  "type": "object",
+  "required": ["interactive_elements", "risk_flags"],
+  "properties": {
+    "source": {
+      "type": "string"
+    },
+    "timestamp_ms": {
+      "type": "integer"
+    },
+    "foreground_app": {
+      "type": "string"
+    },
+    "foreground_package": {
+      "type": "string"
+    },
+    "foreground_source": {
+      "type": "string"
+    },
+    "running_apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pid", "bundle_id", "display_name", "app_path", "executable_path"],
+        "properties": {
+          "pid": {
+            "type": "integer"
+          },
+          "bundle_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "app_path": {
+            "type": "string"
+          },
+          "executable_path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "pixel_width": {
+          "type": "number"
+        },
+        "pixel_height": {
+          "type": "number"
+        },
+        "point_width": {
+          "type": "number"
+        },
+        "point_height": {
+          "type": "number"
+        },
+        "screen_width": {
+          "type": "number"
+        },
+        "screen_height": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number"
+        },
+        "orientation": {
+          "type": "integer"
+        },
+        "orientation_name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lock": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "passcode_enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "root_packages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "activity": {
+      "type": "string"
+    },
+    "visible_text": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ui_tree": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "window_count": {
+          "type": "integer"
+        },
+        "element_count": {
+          "type": "integer"
+        },
+        "text_count": {
+          "type": "integer"
+        },
+        "visible_text": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "interactive_elements": {
+          "type": "array"
+        },
+        "windows": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "visible_activities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["focused", "task_id", "user_id", "package", "activity"],
+        "properties": {
+          "focused": {
+            "type": "boolean"
+          },
+          "task_id": {
+            "type": "integer"
+          },
+          "user_id": {
+            "type": "integer"
+          },
+          "package": {
+            "type": ["string", "null"]
+          },
+          "activity": {
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "interactive_elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "label"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "bounds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "focused": {
+            "type": "boolean"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "sensitive": {
+            "type": "boolean"
+          },
+          "risk_hint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "focused", "active", "bounds"],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "integer"
+          },
+          "focused": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "bounds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "notifications": {
+      "type": "array"
+    },
+    "risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/trajectory-event.schema.json",
+  "title": "OpenPhone Trajectory Event",
+  "type": "object",
+  "required": ["schema", "timestamp_ms", "event", "payload"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "openphone.trajectory_event.v1"
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timestamp_ms": {
+      "type": "integer"
+    },
+    "event": {
+      "enum": [
+        "task_started",
+        "task_stopped",
+        "screen_observed",
+        "tool_call",
+        "tool_result",
+        "model_decision",
+        "task_finished",
+        "task_failed",
+        "agent_result"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

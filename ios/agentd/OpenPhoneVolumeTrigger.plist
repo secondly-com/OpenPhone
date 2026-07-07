@@ -1,0 +1,10 @@
+{
+  Filter = {
+    Bundles = (
+      "com.apple.springboard"
+    );
+    Executables = (
+      "SpringBoard"
+    );
+  };
+}

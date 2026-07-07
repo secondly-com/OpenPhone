@@ -1,0 +1,368 @@
+{
+  "version": 1,
+  "platform": "ios",
+  "runtime_authority": "openphone-agentd",
+  "default_autonomy_mode": "yolo",
+  "tools": [
+    {
+      "tool": "get_screen",
+      "command": "openphone.screen.get",
+      "capability": "screen.read.visible",
+      "status": "metadata_only",
+      "provider": "openphone-agentd.screen_metadata"
+    },
+    {
+      "tool": "list_tasks",
+      "command": "openphone.task.list",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "get_task",
+      "command": "openphone.task.get",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "get_audit",
+      "command": "openphone.audit.get",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "get_trajectory",
+      "command": "openphone.trajectory.get",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "memory_search",
+      "command": "openphone.memory.search",
+      "capability": "memory.read",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "memory_save",
+      "command": "openphone.memory.save",
+      "capability": "memory.write",
+      "status": "implemented",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "memory_update",
+      "command": "openphone.memory.update",
+      "capability": "memory.write",
+      "status": "implemented",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "memory_delete",
+      "command": "openphone.memory.delete",
+      "capability": "memory.write",
+      "status": "implemented",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "memory_merge",
+      "command": "openphone.memory.merge",
+      "capability": "memory.write",
+      "status": "implemented",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "context_search",
+      "command": "openphone.context.search",
+      "capability": "memory.read",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "clipboard_read",
+      "command": "openphone.clipboard.read",
+      "capability": "clipboard.read",
+      "status": "implemented_partial",
+      "provider": "OpenPhoneVolumeTrigger.SpringBoardClipboard",
+      "notes": "Reads bounded text from the phone clipboard through a SpringBoard-context UIPasteboard bridge, returns text to the caller/model, records context/audit metadata, and falls back to a daemon-local file only when the SpringBoard bridge is unavailable in local host smoke."
+    },
+    {
+      "tool": "clipboard_write",
+      "command": "openphone.clipboard.write",
+      "capability": "clipboard.write",
+      "status": "implemented_partial",
+      "provider": "OpenPhoneVolumeTrigger.SpringBoardClipboard",
+      "notes": "Writes text to the phone clipboard through a SpringBoard-context UIPasteboard bridge and indexes a bounded preview plus length/hash metadata into the context store; write responses do not echo the raw text."
+    },
+    {
+      "tool": "contacts_search",
+      "command": "openphone.contacts.search",
+      "capability": "contacts.read",
+      "status": "implemented_partial",
+      "provider": "AddressBook.sqlite",
+      "notes": "Read-only bounded search over the phone AddressBook SQLite database with local smoke fixture fallback; context/audit store counts and query hashes rather than raw contact values."
+    },
+    {
+      "tool": "calendar_search",
+      "command": "openphone.calendar.search",
+      "capability": "calendar.read",
+      "status": "implemented_partial",
+      "provider": "Calendar.sqlitedb",
+      "notes": "Read-only bounded search over the phone Calendar SQLite database with local smoke fixture fallback; context/audit store counts, query hashes, and time ranges rather than raw event values."
+    },
+    {
+      "tool": "calls_search",
+      "command": "openphone.calls.search",
+      "capability": "calls.read",
+      "status": "implemented_partial",
+      "provider": "CallHistory.storedata",
+      "notes": "Read-only bounded search over the phone call-history SQLite database with local smoke fixture fallback; context/audit store counts, query hashes, and time ranges rather than raw call values."
+    },
+    {
+      "tool": "messages_search",
+      "command": "openphone.messages.search",
+      "capability": "messages.read",
+      "status": "implemented_partial",
+      "provider": "SMS.sqlite",
+      "notes": "Read-only bounded search over the phone SMS/iMessage SQLite database with local smoke fixture fallback; context/audit store counts, query hashes, and time ranges rather than raw message values."
+    },
+    {
+      "tool": "commitment_create",
+      "command": "openphone.commitments.create",
+      "capability": "commitments.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite",
+      "notes": "Durable commitment store with a local due-time bridge. Active commitments with due_at_ms can be claimed and materialized into scheduler-enabled background jobs through commitment_run_due/background_job_run_due."
+    },
+    {
+      "tool": "commitment_search",
+      "command": "openphone.commitments.search",
+      "capability": "commitments.read",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "commitment_update_status",
+      "command": "openphone.commitments.update_status",
+      "capability": "commitments.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "commitment_run_due",
+      "command": "openphone.commitments.run_due",
+      "capability": "commitments.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.scheduler",
+      "notes": "Claims due active commitments as running, creates audited scheduler-enabled commitment_due background jobs, and marks successfully materialized commitments as triggered. It does not execute generated jobs directly; background_job_run_due or the daemon scheduler runs them."
+    },
+    {
+      "tool": "watcher_create",
+      "command": "openphone.watchers.create",
+      "capability": "watchers.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite",
+      "notes": "Durable store plus local timer watcher bridge. Active time/timer/deadline watchers with next_run_at_ms create scheduler-enabled background jobs through watcher_run_due/background_job_run_due. Notification/message/call/web watchers remain durable-only until providers exist."
+    },
+    {
+      "tool": "watcher_list",
+      "command": "openphone.watchers.list",
+      "capability": "watchers.read",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "watcher_stop",
+      "command": "openphone.watchers.stop",
+      "capability": "watchers.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "watcher_repair_stuck",
+      "command": "openphone.watchers.repair_stuck",
+      "capability": "watchers.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.scheduler",
+      "notes": "Requeues stale running local timer watchers with metadata.stuck_repair and makes them immediately due again. watcher_run_due also performs this repair before claiming due watchers."
+    },
+    {
+      "tool": "watcher_run_due",
+      "command": "openphone.watchers.run_due",
+      "capability": "watchers.write",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.scheduler",
+      "notes": "Repairs stale running local timer watchers, claims due local timer watchers as running, and materializes them into audited scheduler-enabled background jobs. It does not execute the generated jobs directly; background_job_run_due or the daemon scheduler runs them."
+    },
+    {
+      "tool": "background_job_create",
+      "command": "openphone.jobs.create",
+      "capability": "background.run",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite",
+      "notes": "Creates durable queued jobs. Due jobs run through phone-local run_task with the requested mode or auto model selection. Jobs with interval_ms or recurring=true requeue after successful runs unless recurring is explicitly false."
+    },
+    {
+      "tool": "background_job_list",
+      "command": "openphone.jobs.list",
+      "capability": "tasks.observe",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "background_job_stop",
+      "command": "openphone.jobs.stop",
+      "capability": "background.run",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.sqlite"
+    },
+    {
+      "tool": "background_job_repair_stuck",
+      "command": "openphone.jobs.repair_stuck",
+      "capability": "background.run",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.scheduler",
+      "notes": "Requeues stale scheduler-enabled running jobs with stuck_repair metadata. background_job_run_due runs this repair before claiming due work."
+    },
+    {
+      "tool": "background_job_run_due",
+      "command": "openphone.jobs.run_due",
+      "capability": "background.run",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.scheduler",
+      "notes": "Repairs stale scheduler-enabled running jobs, materializes due commitments and due timer watchers, claims due queued jobs, runs each job through phone-local run_task with requested mode/auto policy, and stores the run result back on the job. Successful recurring jobs requeue by interval; failed recurring jobs requeue with bounded exponential backoff."
+    },
+    {
+      "tool": "hardware_trigger",
+      "command": "openphone.trigger.hardware",
+      "capability": "background.run",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd",
+      "notes": "Daemon command records/audits the trigger and, when run_task=true with model provider ready, starts an async phone-local run_task loop in auto/model mode. It can still create or run background jobs when explicitly requested. Daemon HID listener registers but avoids unsafe activation on the current phone; the SpringBoard fallback tweak requires a tweak loader active in the userspace boot."
+    },
+    {
+      "tool": "local_screen_understanding",
+      "command": "openphone.screen.understand_local",
+      "capability": "screen.read.visible",
+      "status": "not_started",
+      "provider": "ios.providers.screen"
+    },
+    {
+      "tool": "open_app",
+      "command": "openphone.apps.open",
+      "capability": "apps.launch",
+      "status": "implemented",
+      "provider": "openphone-agentd.uiopen"
+    },
+    {
+      "tool": "list_apps",
+      "command": "openphone.apps.search",
+      "capability": "apps.read",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "open_url",
+      "command": "openphone.url.open",
+      "capability": "network.use",
+      "status": "implemented",
+      "provider": "openphone-agentd.uiopen"
+    },
+    {
+      "tool": "tap",
+      "command": "openphone.ui.tap",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.iohid"
+    },
+    {
+      "tool": "tap_element",
+      "command": "openphone.ui.tap_element",
+      "capability": "input.perform",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.iohid"
+    },
+    {
+      "tool": "long_press",
+      "command": "openphone.ui.long_press",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.iohid"
+    },
+    {
+      "tool": "swipe",
+      "command": "openphone.ui.swipe",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.iohid"
+    },
+    {
+      "tool": "type_text",
+      "command": "openphone.ui.type_text",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.iohid"
+    },
+    {
+      "tool": "home",
+      "command": "openphone.input.press_key",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.graphicsservices"
+    },
+    {
+      "tool": "wake_and_home",
+      "command": "openphone.input.wake_and_home",
+      "capability": "input.perform",
+      "status": "implemented",
+      "provider": "openphone-agentd.graphicsservices"
+    },
+    {
+      "tool": "wait",
+      "command": "openphone.task.wait",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "model_status",
+      "command": "openphone.model.status",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd.config"
+    },
+    {
+      "tool": "model_configure",
+      "command": "openphone.model.configure",
+      "capability": "tasks.observe",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd.config",
+      "notes": "Writes non-credential model metadata only. Provider credential values are external-only and rejected inline. Supports broker, direct_dev, bedrock_converse, openai_realtime, and openai_realtime2. credential_required may be false for trusted local broker fixtures or trusted external brokers that hold credentials outside the phone; direct OpenAI Realtime modes always require an external credential."
+    },
+    {
+      "tool": "finish_task",
+      "command": "openphone.task.finish",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "fail_task",
+      "command": "openphone.task.fail",
+      "capability": "tasks.observe",
+      "status": "implemented",
+      "provider": "openphone-agentd"
+    },
+    {
+      "tool": "run_task",
+      "command": "openphone.task.run",
+      "capability": "tasks.observe",
+      "status": "implemented_partial",
+      "provider": "openphone-agentd",
+      "notes": "Supports deterministic, model, and auto modes. Model mode has daemon-local parser/executor/trajectory support, conservative parser repair for prose/fenced-code wrapped decision JSON, fixture-provider smoke coverage, localhost broker HTTP smoke coverage, direct Bedrock Converse execution, and direct OpenAI Realtime WebSocket execution for openai_realtime/openai_realtime2. Realtime modes keep one session open per task, expose daemon tools as function tools, and execute function outputs locally through openphone-agentd."
+    }
+  ]
+}

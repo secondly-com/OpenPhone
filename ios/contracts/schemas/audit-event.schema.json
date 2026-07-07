@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/audit-event.schema.json",
+  "title": "OpenPhone Audit Event",
+  "type": "object",
+  "required": ["schema", "timestamp_ms", "event_type", "previous_hash", "event_hash"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "openphone.audit_event.v1"
+    },
+    "timestamp_ms": {
+      "type": "integer"
+    },
+    "timestamp_elapsed_ms": {
+      "type": "integer"
+    },
+    "task_id": {
+      "type": ["string", "null"]
+    },
+    "event_type": {
+      "enum": [
+        "task_started",
+        "task_stopped",
+        "task_finished",
+        "task_failed",
+        "screen_context_read",
+        "screen_capture",
+        "screen_capture_rejected",
+        "screen_watch_started",
+        "screen_watch_rejected",
+        "apps_listed",
+        "capability_evaluated",
+        "action_rejected",
+        "action_confirmed",
+        "action_executed",
+        "ui_tree_snapshot_submitted"
+      ]
+    },
+    "capability": {
+      "type": ["string", "null"]
+    },
+    "decision": {
+      "type": ["string", "null"]
+    },
+    "caller_uid": {
+      "type": "integer"
+    },
+    "detail": {
+      "type": ["string", "null"]
+    },
+    "input": {
+      "type": ["object", "array", "string", "number", "boolean", "null"]
+    },
+    "input_recorded": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "string"
+    },
+    "previous_hash": {
+      "type": "string",
+      "pattern": "^$|^[a-f0-9]{64}$"
+    },
+    "event_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openphone.protecteddatahelper</string>
+  <key>Program</key>
+  <string>/var/jb/bin/sh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/var/jb/bin/sh</string>
+    <string>/var/jb/usr/local/bin/openphone-helper-wrapper.sh</string>
+  </array>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>POSIXSpawnType</key>
+  <string>Interactive</string>
+  <key>SessionCreate</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/var/mobile/Library/OpenPhone/openphone-protected-data-helper.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/mobile/Library/OpenPhone/openphone-protected-data-helper.stderr.log</string>
+  <key>WorkingDirectory</key>
+  <string>/var/mobile</string>
+</dict>
+</plist>

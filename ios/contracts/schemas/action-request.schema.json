@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/action-request.schema.json",
+  "title": "OpenPhone Action Request",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "enum": [
+        "tap",
+        "long_press",
+        "scroll",
+        "type_text",
+        "back",
+        "home",
+        "recents",
+        "open_app",
+        "open_url",
+        "launch_intent",
+        "notification_action",
+        "copy",
+        "paste",
+        "share"
+      ]
+    },
+    "capability": {
+      "type": "string"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "package": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "start_x": {
+          "type": "number"
+        },
+        "start_y": {
+          "type": "number"
+        },
+        "end_x": {
+          "type": "number"
+        },
+        "end_y": {
+          "type": "number"
+        },
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "mime_type": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

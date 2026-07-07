@@ -1,0 +1,9 @@
+Package: com.openphone.agentd
+Name: OpenPhone Agent Daemon
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Phone-resident OpenPhone agent daemon for owned rootless iOS devices.
+Maintainer: OpenPhone
+Author: OpenPhone
+Section: Utilities
+Depends: firmware (>= 15.0)

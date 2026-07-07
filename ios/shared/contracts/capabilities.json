@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "capabilities": [
+    { "id": "screen.read.visible", "risk": "medium" },
+    { "id": "apps.read", "risk": "low" },
+    { "id": "apps.launch", "risk": "medium" },
+    { "id": "input.perform", "risk": "high" },
+    { "id": "network.use", "risk": "medium" },
+    { "id": "notifications.read", "risk": "medium" },
+    { "id": "notifications.act", "risk": "high" },
+    { "id": "contacts.read", "risk": "medium" },
+    { "id": "calendar.read", "risk": "medium" },
+    { "id": "calendar.write", "risk": "high" },
+    { "id": "calendar.delete", "risk": "high" },
+    { "id": "messages.read", "risk": "high" },
+    { "id": "messages.draft", "risk": "high" },
+    { "id": "messages.send", "risk": "critical" },
+    { "id": "calls.read", "risk": "medium" },
+    { "id": "calls.place", "risk": "critical" },
+    { "id": "clipboard.read", "risk": "medium" },
+    { "id": "clipboard.write", "risk": "high" },
+    { "id": "share.content", "risk": "high" },
+    { "id": "tasks.observe", "risk": "low" },
+    { "id": "background.run", "risk": "high" },
+    { "id": "memory.read", "risk": "medium" },
+    { "id": "memory.write", "risk": "high" },
+    { "id": "watchers.read", "risk": "medium" },
+    { "id": "watchers.write", "risk": "high" }
+  ]
+}

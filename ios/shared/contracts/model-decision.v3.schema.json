@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/shared/contracts/model-decision.v3.schema.json",
+  "title": "OpenPhone Model Decision v3 (router)",
+  "description": "One decision emitted per model step. v3 is the router shape: it carries mode/reply and does not require a top-level tool field (see main.m: v3 short-circuits tool validation). Legacy v1/v2 single-tool decisions are still accepted by the daemon parser.",
+  "type": "object",
+  "required": ["schema", "mode"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": [
+        "openphone.model_decision.v3",
+        "openphone.model_decision.v2",
+        "openphone.model_decision.v1"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["answer", "act", "stop"],
+      "description": "answer = user-facing reply only; act = run proposed_actions; stop = terminate the loop."
+    },
+    "reply": {
+      "type": "string",
+      "description": "User-facing text. Present for answer/stop; optional for act."
+    },
+    "task_goal": {
+      "type": "string",
+      "description": "Only set when the request is multi-step."
+    },
+    "proposed_actions": {
+      "type": "array",
+      "description": "For mode=act. Each action names a tool from model-tools.json and its arguments.",
+      "items": {
+        "type": "object",
+        "required": ["tool"],
+        "properties": {
+          "tool": { "type": "string" },
+          "arguments": { "type": "object" },
+          "expected_visible_change": {
+            "type": "string",
+            "description": "Required when the tool drives UI (see model-tools.json drives_ui)."
+          }
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "Private, brief rationale. Not shown to the user."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  }
+}

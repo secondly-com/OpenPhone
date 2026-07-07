@@ -1,0 +1,20 @@
+{
+  Filter = {
+    Bundles = (
+      "com.apple.mobilesafari",
+      "com.apple.WebKit.WebContent",
+      "com.apple.Preferences",
+      "com.apple.mobilenotes",
+      "com.apple.MobileSMS",
+      "com.apple.mobilecal"
+    );
+    Executables = (
+      "MobileSafari",
+      "com.apple.WebKit.WebContent",
+      "Preferences",
+      "MobileNotes",
+      "MobileSMS",
+      "MobileCal"
+    );
+  };
+}

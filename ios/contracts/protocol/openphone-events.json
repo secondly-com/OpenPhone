@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "events": [
+    { "name": "runtime.presence.online", "direction": "phone_to_runtime" },
+    { "name": "runtime.presence.offline", "direction": "phone_to_runtime" },
+    { "name": "runtime.attention.requested", "direction": "phone_to_runtime" },
+    { "name": "runtime.attention.accepted", "direction": "runtime_to_phone" },
+    { "name": "runtime.attention.failed", "direction": "runtime_to_phone" },
+    { "name": "runtime.message.delta", "direction": "runtime_to_phone" },
+    { "name": "runtime.message.final", "direction": "runtime_to_phone" },
+    { "name": "runtime.tool.requested", "direction": "runtime_to_phone" },
+    { "name": "runtime.tool.result", "direction": "phone_to_runtime" },
+    { "name": "runtime.confirmation.required", "direction": "phone_to_runtime" },
+    { "name": "runtime.confirmation.resolved", "direction": "phone_to_runtime" },
+    { "name": "runtime.session.updated", "direction": "bidirectional" }
+  ],
+  "transport_mappings": [
+    {
+      "runtime": "openclaw",
+      "transport": "node.event",
+      "events": [
+        { "protocol": "runtime.presence.online", "wire": "openphone.presence.online" },
+        { "protocol": "runtime.presence.offline", "wire": "openphone.presence.offline" },
+        { "protocol": "runtime.confirmation.required", "wire": "openphone.confirmation.required" },
+        { "protocol": "runtime.confirmation.resolved", "wire": "openphone.confirmation.resolved" },
+        { "protocol": "runtime.presence.online", "wire": "node.presence.alive" }
+      ]
+    }
+  ]
+}

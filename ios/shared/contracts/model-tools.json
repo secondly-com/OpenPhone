@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "description": "Canonical model-callable tool registry shared by iOS and Android. iOS source of truth is OPModelToolNames() / OPModelToolCapability() / OPModelToolDrivesUI() in ios/agentd/src/main.m. Keep this file in sync when the daemon tool surface changes.",
+  "decision_schema": "openphone.model_decision.v3",
+  "tools": [
+    { "tool": "get_screen",       "capability": "screen.read.visible", "drives_ui": false, "arguments": { "max_dimension_px": "integer?", "include_screenshot": "boolean?" } },
+    { "tool": "tap",              "capability": "input.perform",       "drives_ui": true,  "arguments": { "x": "number", "y": "number", "expected_visible_change": "string" } },
+    { "tool": "tap_element",      "capability": "input.perform",       "drives_ui": true,  "arguments": { "element_id": "string", "expected_visible_change": "string" } },
+    { "tool": "long_press",       "capability": "input.perform",       "drives_ui": true,  "arguments": { "x": "number", "y": "number", "duration_ms": "integer?", "expected_visible_change": "string" } },
+    { "tool": "swipe",            "capability": "input.perform",       "drives_ui": true,  "arguments": { "from_x": "number", "from_y": "number", "to_x": "number", "to_y": "number", "expected_visible_change": "string" } },
+    { "tool": "type_text",        "capability": "input.perform",       "drives_ui": true,  "arguments": { "text": "string", "element_id": "string?", "expected_visible_change": "string" } },
+    { "tool": "open_app",         "capability": "apps.launch",         "drives_ui": true,  "arguments": { "bundle_id": "string", "expected_visible_change": "string" } },
+    { "tool": "open_url",         "capability": "network.use",         "drives_ui": true,  "arguments": { "url": "string", "expected_visible_change": "string" } },
+    { "tool": "home",             "capability": "input.perform",       "drives_ui": true,  "arguments": { "expected_visible_change": "string" } },
+    { "tool": "wake_and_home",    "capability": "input.perform",       "drives_ui": true,  "arguments": { "expected_visible_change": "string" } },
+    { "tool": "wait",             "capability": "tasks.observe",       "drives_ui": false, "arguments": { "seconds": "number?" } },
+    { "tool": "clipboard_read",   "capability": "clipboard.read",      "drives_ui": false, "arguments": {} },
+    { "tool": "clipboard_write",  "capability": "clipboard.write",     "drives_ui": false, "arguments": { "text": "string" } },
+    { "tool": "contacts_search",  "capability": "contacts.read",       "drives_ui": false, "arguments": { "query": "string", "allow_empty_query": "boolean?", "limit": "integer?" } },
+    { "tool": "calendar_search",  "capability": "calendar.read",       "drives_ui": false, "arguments": { "query": "string", "allow_empty_query": "boolean?", "limit": "integer?", "start_at_ms": "integer?", "end_at_ms": "integer?" } },
+    { "tool": "calls_search",     "capability": "calls.read",          "drives_ui": false, "arguments": { "query": "string", "allow_empty_query": "boolean?", "limit": "integer?", "start_at_ms": "integer?", "end_at_ms": "integer?" } },
+    { "tool": "messages_search",  "capability": "messages.read",       "drives_ui": false, "arguments": { "query": "string", "allow_empty_query": "boolean?", "limit": "integer?" } },
+    { "tool": "memory_save",      "capability": "memory.write",        "drives_ui": false, "arguments": { "text": "string", "type": "string?", "metadata": "object?" } },
+    { "tool": "memory_search",    "capability": "memory.read",         "drives_ui": false, "arguments": { "query": "string", "limit": "integer?" } },
+    { "tool": "context_search",   "capability": "memory.read",         "drives_ui": false, "arguments": { "query": "string", "limit": "integer?" } },
+    { "tool": "finish_task",      "capability": "tasks.observe",       "drives_ui": false, "arguments": { "reply": "string?" } },
+    { "tool": "fail_task",        "capability": "tasks.observe",       "drives_ui": false, "arguments": { "reason": "string?" } }
+  ],
+  "notes": {
+    "expected_visible_change": "Required for any tool where drives_ui is true. The daemon rejects a UI-driving decision without it (missing_expected_visible_change).",
+    "search_query": "contacts/calendar/calls/messages searches require a non-empty query OR allow_empty_query:true.",
+    "capability_fallback": "Any model tool not explicitly mapped defaults to capability input.perform (see OPModelToolCapability)."
+  }
+}

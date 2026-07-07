@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/action-registry.schema.json",
+  "title": "OpenPhone Action Registry",
+  "type": "object",
+  "required": ["version", "actions"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "model_tool",
+          "kind",
+          "input_schema_json",
+          "output_schema_json",
+          "risk_class",
+          "required_capabilities",
+          "authorization_policy",
+          "allowed_callers",
+          "executor_service",
+          "audit_event_type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_tool": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": ["observe", "action", "control"]
+          },
+          "input_schema_json": {
+            "type": "object"
+          },
+          "output_schema_json": {
+            "type": "object"
+          },
+          "risk_class": {
+            "enum": ["low", "medium", "high", "critical"]
+          },
+          "required_capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "authorization_policy": {
+            "enum": ["task_grant", "confirm", "explicit_confirm"]
+          },
+          "allowed_callers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": ["model", "assistant_ui", "system", "watcher"]
+            },
+            "uniqueItems": true
+          },
+          "executor_service": {
+            "type": "string",
+            "minLength": 1
+          },
+          "audit_event_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
