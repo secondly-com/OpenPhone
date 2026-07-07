@@ -41,6 +41,9 @@ class RecordingTransport extends OpenPhoneAdbTransport {
   const transport = new RecordingTransport();
   for (const name of [
     "openphone.ui.tap",
+    "openphone.ui.tap_element",
+    "openphone.ui.long_press",
+    "openphone.ui.long_press_element",
     "openphone.ui.type_text",
     "openphone.clipboard.set",
     "openphone.url.open",
@@ -64,12 +67,63 @@ class RecordingTransport extends OpenPhoneAdbTransport {
   assert.ok(transport.shellCalls.length > 0);
 }
 
+// New ADB read-only approximations execute without unresolved helper failures.
+{
+  const transport = new RecordingTransport();
+  const screen = transport.invoke("openphone.screen.get", {});
+  assert.equal(screen.ok, true);
+  assert.deepEqual(screen.interactive_elements, []);
+
+  const status = transport.invoke("openphone.device.status", {});
+  assert.equal(status.ok, true);
+  assert.equal(status.source, "adb");
+  assert.equal(status.battery.status, "unknown");
+  assert.equal(status.connectivity.airplane_mode, false);
+
+  const watchers = transport.invoke("openphone.watchers.list", {});
+  assert.equal(watchers.ok, false);
+  assert.equal(watchers.error.code, "unsupported_adb_state");
+
+  const jobs = transport.invoke("openphone.jobs.list", {});
+  assert.equal(jobs.ok, false);
+  assert.equal(jobs.error.code, "unsupported_adb_state");
+}
+
 // The allowStateful constructor option opts in programmatically.
 {
   const transport = new RecordingTransport({ allowStateful: true });
   const result = transport.invoke("openphone.ui.tap", { x: 10, y: 20 });
   assert.deepEqual(result, { ok: true, x: 10, y: 20 });
   assert.deepEqual(transport.shellCalls, [["input", "tap", "10", "20"]]);
+}
+
+// Element-targeted actions resolve the current UI dump before issuing input.
+{
+  const transport = new RecordingTransport({ allowStateful: true });
+  transport.exec = (args) => {
+    transport.shellCalls.push(args);
+    return Buffer.from(
+      '<hierarchy><node text="OK" content-desc="Confirm" resource-id="com.example:id/ok" '
+      + 'class="android.widget.Button" clickable="true" enabled="true" '
+      + 'bounds="[10,20][110,220]" /></hierarchy>',
+    );
+  };
+
+  const tap = transport.invoke("openphone.ui.tap_element", { element_id: "el-1" });
+  assert.equal(tap.ok, true);
+  assert.deepEqual(tap, { ok: true, element_id: "el-1", x: 60, y: 120 });
+  assert.deepEqual(transport.shellCalls.at(-1), ["input", "tap", "60", "120"]);
+
+  const longPress = transport.invoke("openphone.ui.long_press_element", {
+    element_id: "com.example:id/ok",
+    duration_ms: 750,
+  });
+  assert.equal(longPress.ok, true);
+  assert.equal(longPress.duration_ms, 750);
+  assert.deepEqual(
+    transport.shellCalls.at(-1),
+    ["input", "swipe", "60", "120", "60", "120", "750"],
+  );
 }
 
 // OPENPHONE_ADB_ALLOW_STATEFUL=1 (or true) opts in per-session.

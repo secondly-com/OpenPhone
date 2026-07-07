@@ -4,6 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_ADB_TIMEOUT_MS = 15000;
+const DEFAULT_LONG_PRESS_MS = 600;
+// Mirrors MAX_ELEMENTS in the on-device accessibility snapshot so the ADB
+// approximation of interactive_elements stays bounded the same way.
+const MAX_INTERACTIVE_ELEMENTS = 120;
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 // The transport ships in two layouts: packaged (adb/ next to runtime/) and
@@ -112,12 +116,39 @@ export class OpenPhoneAdbTransport {
       case "openphone.apps.search":
       case "device.apps":
         return this.appsSearch(args);
+      case "openphone.device.status":
+      case "device.status":
+      case "device.info":
+        return this.deviceStatus(args);
+      case "openphone.watchers.list":
+        // Watcher state lives in the assistant app's private
+        // SharedPreferences (openphone_assistant_data, MODE_PRIVATE). There
+        // is no dumpsys, content provider, or settings surface a non-root
+        // adb shell can query, so we refuse honestly instead of faking an
+        // empty watcher list.
+        return unsupportedOnDeviceState(command,
+          "watcher state is stored in the assistant app's private "
+          + "preferences, which a non-root adb shell cannot read");
+      case "openphone.jobs.list":
+        // Background job state lives in the assistant app's private
+        // SharedPreferences (openphone_agent_jobs, MODE_PRIVATE). A non-root
+        // adb shell cannot read app-private storage, so we refuse honestly
+        // instead of returning a fabricated empty job list.
+        return unsupportedOnDeviceState(command,
+          "background job state is stored in the assistant app's private "
+          + "preferences, which a non-root adb shell cannot read");
       case "openphone.app.open":
         return this.openApp(args);
       case "openphone.url.open":
         return this.openUrl(args);
       case "openphone.ui.tap":
         return this.tap(args);
+      case "openphone.ui.long_press":
+        return this.longPress(args);
+      case "openphone.ui.tap_element":
+        return this.tapElement(args);
+      case "openphone.ui.long_press_element":
+        return this.longPressElement(args);
       case "openphone.ui.swipe":
         return this.swipe(args);
       case "openphone.ui.type_text":
@@ -156,15 +187,13 @@ export class OpenPhoneAdbTransport {
 
   screenGet(args = {}) {
     const activity = this.shell(["dumpsys", "window"], { allowFailure: true });
-    this.shell(["uiautomator", "dump", "/sdcard/window.xml"], { allowFailure: true });
-    const uiTreeXml = this.exec(["exec-out", "cat", "/sdcard/window.xml"], {
-      allowFailure: true,
-    }).toString("utf8");
+    const uiTreeXml = this.uiTreeXml();
     const result = {
       ok: true,
       foreground: focusedWindow(activity),
       ui_tree_xml: uiTreeXml.trim(),
       visible_text: visibleText(uiTreeXml),
+      interactive_elements: parseInteractiveElements(uiTreeXml),
     };
     if (args.include_screenshot) {
       result.screenshot_png_base64 = this.exec(["exec-out", "screencap", "-p"])
@@ -181,6 +210,40 @@ export class OpenPhoneAdbTransport {
       foreground: screen.foreground,
       visible_text: screen.visible_text.slice(0, maxVisible),
       interactive_hint: "ADB transport returns raw accessibility text; Android runtime provides richer local understanding.",
+    };
+  }
+
+  deviceStatus() {
+    // The Android runtime serves openphone.device.status from private
+    // on-device data (call log, contacts, messages, calendar). ADB stays out
+    // of private data by design, so this transport returns the device-level
+    // slice only: battery, connectivity toggles, and screen state.
+    const battery = parseBatteryDump(
+      this.shell(["dumpsys", "battery"], { allowFailure: true }),
+    );
+    const connectivity = {
+      airplane_mode: truthySetting(
+        this.globalSettingGet("airplane_mode_on"),
+      ),
+      wifi_enabled: truthySetting(this.globalSettingGet("wifi_on")),
+      mobile_data_enabled: truthySetting(this.globalSettingGet("mobile_data")),
+    };
+    const power = this.shell(["dumpsys", "power"], { allowFailure: true });
+    const wakefulness = matchLine(power, /mWakefulness=(\w+)/u);
+    const window = this.shell(["dumpsys", "window"], { allowFailure: true });
+    return {
+      ok: true,
+      source: "adb",
+      battery,
+      connectivity,
+      screen: {
+        wakefulness: wakefulness || "unknown",
+        awake: wakefulness === "Awake",
+      },
+      foreground: focusedWindow(window),
+      note: "ADB device status covers battery, connectivity, and screen state only. "
+        + "The Android runtime's richer phone-context card (calls, messages, "
+        + "calendar) requires on-device private data access that ADB does not expose.",
     };
   }
 
@@ -220,6 +283,111 @@ export class OpenPhoneAdbTransport {
     const y = numberArg(args.y, "y");
     this.shell(["input", "tap", String(x), String(y)]);
     return { ok: true, x, y };
+  }
+
+  longPress(args = {}) {
+    const x = numberArg(args.x, "x");
+    const y = numberArg(args.y, "y");
+    const duration = Math.max(1, Number(args.duration_ms ?? DEFAULT_LONG_PRESS_MS));
+    // `input swipe` at a fixed point with a duration is the standard adb
+    // idiom for a long press; there is no dedicated long-press input command.
+    this.shell(["input", "swipe", String(x), String(y), String(x), String(y),
+      String(duration)]);
+    return { ok: true, x, y, duration_ms: duration };
+  }
+
+  tapElement(args = {}) {
+    const resolved = this.resolveElementCenter(args.element_id);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    this.shell(["input", "tap", String(resolved.x), String(resolved.y)]);
+    return { ok: true, element_id: resolved.element.id, x: resolved.x, y: resolved.y };
+  }
+
+  longPressElement(args = {}) {
+    const resolved = this.resolveElementCenter(args.element_id);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    const duration = Math.max(1, Number(args.duration_ms ?? DEFAULT_LONG_PRESS_MS));
+    this.shell(["input", "swipe", String(resolved.x), String(resolved.y),
+      String(resolved.x), String(resolved.y), String(duration)]);
+    return {
+      ok: true,
+      element_id: resolved.element.id,
+      x: resolved.x,
+      y: resolved.y,
+      duration_ms: duration,
+    };
+  }
+
+  resolveElementCenter(elementId) {
+    const id = String(elementId ?? "").trim();
+    if (!id) {
+      return missing("element_id");
+    }
+    const elements = parseInteractiveElements(this.uiTreeXml());
+    // The manifest defines element_id as the selector. Ids come from the
+    // current interactive_elements snapshot ("el-N"); resource ids from the
+    // same dump are accepted too because they are stable across dumps.
+    const matches = elements.filter(
+      (element) => element.id === id || element.view_id === id,
+    );
+    if (matches.length === 0) {
+      return {
+        ok: false,
+        error: {
+          code: "element_not_found",
+          message: `no interactive element matches "${id}" in the current UI dump; `
+            + "call openphone.screen.get for a fresh interactive_elements snapshot",
+        },
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error: {
+          code: "ambiguous_element",
+          message: `"${id}" matches ${matches.length} interactive elements; `
+            + "use the unique element id from interactive_elements instead",
+        },
+      };
+    }
+    const element = matches[0];
+    if (!element.enabled) {
+      return {
+        ok: false,
+        error: {
+          code: "element_disabled",
+          message: `element "${id}" is disabled`,
+        },
+      };
+    }
+    const [left, top, right, bottom] = element.bounds ?? [];
+    if (![left, top, right, bottom].every(Number.isFinite)
+      || right <= left || bottom <= top) {
+      return {
+        ok: false,
+        error: {
+          code: "element_bounds_unavailable",
+          message: `element "${id}" has no usable on-screen bounds`,
+        },
+      };
+    }
+    return {
+      ok: true,
+      element,
+      x: Math.round((left + right) / 2),
+      y: Math.round((top + bottom) / 2),
+    };
+  }
+
+  uiTreeXml() {
+    this.shell(["uiautomator", "dump", "/sdcard/window.xml"], { allowFailure: true });
+    return this.exec(["exec-out", "cat", "/sdcard/window.xml"], {
+      allowFailure: true,
+    }).toString("utf8");
   }
 
   swipe(args = {}) {
@@ -265,6 +433,14 @@ export class OpenPhoneAdbTransport {
       return fallback;
     }
     const value = this.shell(["settings", "get", "secure", key], { allowFailure: true }).trim();
+    return value === "" || value === "null" ? fallback : value;
+  }
+
+  globalSettingGet(key, fallback = "") {
+    if (this.dryRun) {
+      return fallback;
+    }
+    const value = this.shell(["settings", "get", "global", key], { allowFailure: true }).trim();
     return value === "" || value === "null" ? fallback : value;
   }
 
@@ -388,6 +564,110 @@ function visibleText(xml) {
     }
   }
   return [...new Set(out)];
+}
+
+function parseInteractiveElements(xml) {
+  const out = [];
+  for (const nodeMatch of String(xml ?? "").matchAll(/<node\b([^>]*)>/gu)) {
+    const attrs = parseXmlAttrs(nodeMatch[1]);
+    const clickable = truthySetting(attrs.clickable);
+    const longClickable = truthySetting(attrs["long-clickable"]);
+    const focusable = truthySetting(attrs.focusable);
+    if (!clickable && !longClickable && !focusable) {
+      continue;
+    }
+    const bounds = parseBounds(attrs.bounds);
+    out.push({
+      id: `el-${out.length + 1}`,
+      view_id: attrs["resource-id"] || "",
+      class_name: attrs.class || "",
+      package: attrs.package || "",
+      text: decodeXml(attrs.text || ""),
+      content_description: decodeXml(attrs["content-desc"] || ""),
+      clickable,
+      long_clickable: longClickable,
+      focusable,
+      enabled: attrs.enabled == null ? true : truthySetting(attrs.enabled),
+      bounds,
+    });
+    if (out.length >= MAX_INTERACTIVE_ELEMENTS) {
+      break;
+    }
+  }
+  return out;
+}
+
+function parseXmlAttrs(rawAttrs) {
+  const attrs = {};
+  for (const match of String(rawAttrs ?? "").matchAll(/([:\w-]+)="([^"]*)"/gu)) {
+    attrs[match[1]] = match[2];
+  }
+  return attrs;
+}
+
+function parseBounds(bounds) {
+  const match = String(bounds ?? "").match(/^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/u);
+  if (!match) {
+    return [];
+  }
+  return match.slice(1).map((value) => Number(value));
+}
+
+function parseBatteryDump(raw) {
+  const fields = {};
+  for (const line of String(raw ?? "").split(/\r?\n/gu)) {
+    const match = line.match(/^\s*([^:]+):\s*(.*?)\s*$/u);
+    if (match) {
+      fields[match[1].trim().toLowerCase()] = match[2].trim();
+    }
+  }
+  const level = numberOrNull(fields.level);
+  const scale = numberOrNull(fields.scale) ?? 100;
+  const statusCode = numberOrNull(fields.status);
+  const status = batteryStatus(statusCode);
+  return {
+    level_percent: level == null ? null : Math.round((level / scale) * 100),
+    status,
+    charging: status === "charging" || status === "full",
+    ac_powered: truthySetting(fields["ac powered"]),
+    usb_powered: truthySetting(fields["usb powered"]),
+    wireless_powered: truthySetting(fields["wireless powered"]),
+  };
+}
+
+function batteryStatus(statusCode) {
+  switch (statusCode) {
+    case 2:
+      return "charging";
+    case 3:
+      return "discharging";
+    case 4:
+      return "not_charging";
+    case 5:
+      return "full";
+    default:
+      return "unknown";
+  }
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function matchLine(value, pattern) {
+  const match = String(value ?? "").match(pattern);
+  return match ? match[1] ?? match[0] : "";
+}
+
+function unsupportedOnDeviceState(command, reason) {
+  return {
+    ok: false,
+    error: {
+      code: "unsupported_adb_state",
+      message: `${command} is unavailable through the ADB transport: ${reason}.`,
+    },
+  };
 }
 
 function decodeXml(value) {
