@@ -10,6 +10,21 @@ This is experimental proof-of-concept work, not a supported product. It targets
 an owned device that already exposes a rootless runtime prefix at `/var/jb`;
 reaching that state is the owner's responsibility and out of scope here.
 
+## Legal boundary
+
+These materials contain **only OpenPhone-authored code**. They do **not**
+contain, bundle, distribute, or explain any exploit, unlocking tool, or other
+means of circumventing device protections. This is application-layer software
+that runs **on top of** a device the owner has already prepared through separate
+means of their own choosing.
+
+Provided for **personal, non-commercial use on a device you own**, as a proof of
+concept, "as is" and without warranty. OpenPhone is not affiliated with or
+endorsed by Apple Inc.; Apple, iPhone, and iOS are trademarks of Apple Inc. used
+only to describe interoperability. Full terms are in
+[docs/legal/IOS.md](../docs/legal/IOS.md); licensing is the repository-wide
+PolyForm Noncommercial License (see [LICENSE](../LICENSE)).
+
 ## Layout
 
 ```text
