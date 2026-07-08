@@ -726,6 +726,13 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
             try {
                 return postResponsesOnce(body);
             } catch (TransientHttpException e) {
+                if (e.retryAfterMillis > MAX_BACKOFF_MILLIS) {
+                    // The server closed the window for longer than this call
+                    // is willing to wait; retrying sooner would land inside
+                    // the declared closed window, so fail fast and let the
+                    // caller's own backoff (e.g. the job store) reschedule.
+                    throw e;
+                }
                 transientFailure = e;
             }
         }
@@ -736,10 +743,20 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     }
 
     private JSONObject postResponsesOnce(JSONObject body) throws IOException, JSONException {
+        if (isRequestCancelled()) {
+            throw new IOException("request_cancelled");
+        }
         HttpURLConnection connection = (HttpURLConnection) new URL(
                 mEndpointConfig.responsesUrl()).openConnection();
         mActiveConnection = connection;
         try {
+            // Re-check after publishing the connection: a cancel() that
+            // fired in between saw no connection to disconnect, so without
+            // this the request would proceed with nothing able to abort it
+            // until the watchdog's next cancel poll.
+            if (isRequestCancelled()) {
+                throw new IOException("request_cancelled");
+            }
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(45000);
             connection.setRequestMethod("POST");
@@ -810,14 +827,19 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
         long delay = retryAfterMillis > 0 ? retryAfterMillis
                 : backoff / 2 + ThreadLocalRandom.current().nextLong(backoff / 2 + 1);
         delay = Math.min(delay, MAX_BACKOFF_MILLIS);
-        long deadline = System.currentTimeMillis() + delay;
-        while (System.currentTimeMillis() < deadline) {
+        // Monotonic deadline: a wall-clock adjustment mid-backoff must not
+        // stretch or skip the wait.
+        long deadlineNanos = System.nanoTime() + delay * 1_000_000L;
+        while (true) {
+            long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+            if (remainingMillis <= 0) {
+                break;
+            }
             if (isRequestCancelled()) {
                 return false;
             }
             try {
-                Thread.sleep(Math.min(BACKOFF_POLL_MILLIS,
-                        Math.max(1L, deadline - System.currentTimeMillis())));
+                Thread.sleep(Math.min(BACKOFF_POLL_MILLIS, Math.max(1L, remainingMillis)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;

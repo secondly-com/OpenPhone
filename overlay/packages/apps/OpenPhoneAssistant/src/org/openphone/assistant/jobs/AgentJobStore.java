@@ -19,6 +19,13 @@ public final class AgentJobStore {
     private static final String KEY_NEXT_ID = "next_id";
     private static final int MAX_JOBS = 200;
 
+    // Every caller constructs its own AgentJobStore over the same
+    // SharedPreferences file, so instance-level synchronized cannot
+    // serialize the read-parse-modify-commit cycles against each other.
+    // All mutations take this process-wide lock so a concurrent stop()
+    // cannot be erased by a job thread committing a stale jobs array.
+    private static final Object WRITE_LOCK = new Object();
+
     private final SharedPreferences mPrefs;
 
     public AgentJobStore(Context context) {
@@ -26,7 +33,7 @@ public final class AgentJobStore {
                 Context.MODE_PRIVATE);
     }
 
-    public synchronized long createJob(String type, String title, String prompt,
+    public long createJob(String type, String title, String prompt,
             String payloadJson, String scheduleJson, String sessionTarget,
             String deliveryJson, long nextRunAtMillis) {
         String cleanTitle = safe(title).trim();
@@ -34,37 +41,39 @@ public final class AgentJobStore {
             return -1L;
         }
         long now = System.currentTimeMillis();
-        long id = Math.max(1L, mPrefs.getLong(KEY_NEXT_ID, 1L));
-        JSONArray jobs = readJobs();
-        JSONObject job = new JSONObject();
-        try {
-            job.put("id", id)
-                    .put("type", normalizeType(type))
-                    .put("title", cleanTitle)
-                    .put("prompt", safe(prompt))
-                    .put("payload_json", objectOrEmpty(payloadJson))
-                    .put("schedule_json", objectOrEmpty(scheduleJson))
-                    .put("session_target", safe(sessionTarget).isEmpty()
-                            ? "main" : safe(sessionTarget))
-                    .put("delivery_json", objectOrEmpty(defaultDelivery(deliveryJson)))
-                    .put("status", "active")
-                    .put("created_at", now)
-                    .put("updated_at", now)
-                    .put("next_run_at", Math.max(0L, nextRunAtMillis))
-                    .put("running_at", 0L)
-                    .put("last_run_at", 0L)
-                    .put("last_result", "")
-                    .put("failure_count", 0)
-                    .put("failure_alert_at", 0L);
-        } catch (JSONException e) {
-            return -1L;
+        synchronized (WRITE_LOCK) {
+            long id = Math.max(1L, mPrefs.getLong(KEY_NEXT_ID, 1L));
+            JSONArray jobs = readJobs();
+            JSONObject job = new JSONObject();
+            try {
+                job.put("id", id)
+                        .put("type", normalizeType(type))
+                        .put("title", cleanTitle)
+                        .put("prompt", safe(prompt))
+                        .put("payload_json", objectOrEmpty(payloadJson))
+                        .put("schedule_json", objectOrEmpty(scheduleJson))
+                        .put("session_target", safe(sessionTarget).isEmpty()
+                                ? "main" : safe(sessionTarget))
+                        .put("delivery_json", objectOrEmpty(defaultDelivery(deliveryJson)))
+                        .put("status", "active")
+                        .put("created_at", now)
+                        .put("updated_at", now)
+                        .put("next_run_at", Math.max(0L, nextRunAtMillis))
+                        .put("running_at", 0L)
+                        .put("last_run_at", 0L)
+                        .put("last_result", "")
+                        .put("failure_count", 0)
+                        .put("failure_alert_at", 0L);
+            } catch (JSONException e) {
+                return -1L;
+            }
+            jobs.put(job);
+            trimOldTerminalJobs(jobs);
+            if (!writeJobs(jobs, id + 1L)) {
+                return -1L;
+            }
+            return id;
         }
-        jobs.put(job);
-        trimOldTerminalJobs(jobs);
-        if (!writeJobs(jobs, id + 1L)) {
-            return -1L;
-        }
-        return id;
     }
 
     public synchronized List<AgentJobRecord> due(long nowMillis, int limit) {
@@ -150,27 +159,44 @@ public final class AgentJobStore {
     }
 
     /**
-     * Current stored status for a job, or "" when the job no longer exists.
-     * Running jobs poll this so a user stop ({@link #stop}) or a stuck-run
-     * repair actually cancels the in-flight run instead of being ignored.
+     * True while the given run of a job is still live: the job exists, is
+     * "running", and running_at still carries this run's token (the
+     * markRunning timestamp). Running jobs poll this so a user stop
+     * ({@link #stop}) or a stuck-run repair actually cancels the in-flight
+     * run, and a zombie run cannot mistake its successor's execution for
+     * its own.
      */
-    public synchronized String statusOf(long id) {
+    public synchronized boolean isRunLive(long id, long runToken) {
         JSONArray jobs = readJobs();
         for (int i = 0; i < jobs.length(); i++) {
             JSONObject job = jobs.optJSONObject(i);
             if (job != null && job.optLong("id", -1L) == id) {
-                return job.optString("status", "");
+                return isLiveRun(job, runToken);
             }
         }
-        return "";
+        return false;
     }
 
-    public synchronized boolean markCompleted(long id, String result, long nowMillis) {
+    /** True when any job is currently marked running. */
+    public synchronized boolean hasRunningJobs() {
+        JSONArray jobs = readJobs();
+        for (int i = 0; i < jobs.length(); i++) {
+            JSONObject job = jobs.optJSONObject(i);
+            if (job != null && "running".equals(job.optString("status", ""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public synchronized boolean markCompleted(long id, String result, long nowMillis,
+            long runToken) {
         return updateJob(id, job -> {
-            // Only a run the store still considers live may record completion.
-            // Without this guard a finishing run would resurrect a job the
-            // user stopped (or that stuck-run repair already rescheduled).
-            if (!"running".equals(job.optString("status", ""))) {
+            // Only the run that markRunning stamped may record completion.
+            // Anything else means the user stopped the job or stuck-run
+            // repair reclaimed it (possibly for a successor run), and
+            // recording would resurrect or clobber that state.
+            if (!isLiveRun(job, runToken)) {
                 return false;
             }
             JSONObject schedule = job.optJSONObject("schedule_json");
@@ -191,8 +217,14 @@ public final class AgentJobStore {
         });
     }
 
-    public synchronized boolean markDispatched(long id, String result, long nowMillis) {
+    public synchronized boolean markDispatched(long id, String result, long nowMillis,
+            long runToken) {
         return updateJob(id, job -> {
+            // Same live-run guard as markCompleted: a stop that lands while
+            // the job is being handed to an external runtime must win.
+            if (!isLiveRun(job, runToken)) {
+                return false;
+            }
             job.put("status", "dispatched")
                     .put("updated_at", nowMillis)
                     .put("last_run_at", nowMillis)
@@ -204,11 +236,11 @@ public final class AgentJobStore {
     }
 
     public synchronized boolean markFailed(long id, String reason, long nextRunAtMillis,
-            int failureCount, long failureAlertAtMillis, long nowMillis) {
+            int failureCount, long failureAlertAtMillis, long nowMillis, long runToken) {
         return updateJob(id, job -> {
             // Same live-run guard as markCompleted: a failure from a run the
             // user already stopped must not reactivate the job for retry.
-            if (!"running".equals(job.optString("status", ""))) {
+            if (!isLiveRun(job, runToken)) {
                 return false;
             }
             job.put("status", "active")
@@ -260,6 +292,11 @@ public final class AgentJobStore {
         return (1L << (bounded - 1)) * 60L * 1000L;
     }
 
+    private static boolean isLiveRun(JSONObject job, long runToken) {
+        return "running".equals(job.optString("status", ""))
+                && job.optLong("running_at", 0L) == runToken;
+    }
+
     static JSONObject toJson(AgentJobRecord job) {
         JSONObject out = new JSONObject();
         try {
@@ -302,20 +339,22 @@ public final class AgentJobStore {
     }
 
     private boolean updateAllJobs(JobUpdater updater) {
-        JSONArray jobs = readJobs();
-        boolean changed = false;
-        for (int i = 0; i < jobs.length(); i++) {
-            JSONObject job = jobs.optJSONObject(i);
-            if (job == null) {
-                continue;
+        synchronized (WRITE_LOCK) {
+            JSONArray jobs = readJobs();
+            boolean changed = false;
+            for (int i = 0; i < jobs.length(); i++) {
+                JSONObject job = jobs.optJSONObject(i);
+                if (job == null) {
+                    continue;
+                }
+                try {
+                    changed |= updater.update(job);
+                } catch (JSONException e) {
+                    Log.w(TAG, "job update failed", e);
+                }
             }
-            try {
-                changed |= updater.update(job);
-            } catch (JSONException e) {
-                Log.w(TAG, "job update failed", e);
-            }
+            return !changed || writeJobs(jobs, mPrefs.getLong(KEY_NEXT_ID, 1L));
         }
-        return !changed || writeJobs(jobs, mPrefs.getLong(KEY_NEXT_ID, 1L));
     }
 
     private JSONArray readJobs() {

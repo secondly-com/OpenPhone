@@ -72,11 +72,14 @@ public final class OpenPhoneAgentJobScheduler {
         if (!store.markRunning(job.id, now)) {
             return;
         }
+        // markRunning stamped running_at with this timestamp; it doubles as
+        // the run-ownership token so only this run can record its outcome.
+        final long runToken = now;
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    runJob(context, job);
+                    runJob(context, job, runToken);
                 } catch (RuntimeException e) {
                     // An uncaught exception here (broker outage, store
                     // corruption, notification failure) would kill the
@@ -85,7 +88,7 @@ public final class OpenPhoneAgentJobScheduler {
                     Log.e(TAG, "Agent job crashed: " + job.id, e);
                     try {
                         failJob(context, new AgentJobStore(context), job,
-                                "job_crash:" + e.getClass().getSimpleName());
+                                "job_crash:" + e.getClass().getSimpleName(), runToken);
                     } catch (RuntimeException inner) {
                         Log.e(TAG, "Agent job crash handling failed: " + job.id, inner);
                     }
@@ -94,16 +97,16 @@ public final class OpenPhoneAgentJobScheduler {
         }, "OpenPhoneAgentJob-" + job.id).start();
     }
 
-    private static void runJob(Context context, AgentJobRecord job) {
+    private static void runJob(Context context, AgentJobRecord job, long runToken) {
         AgentJobStore store = new AgentJobStore(context);
         long now = System.currentTimeMillis();
         if ("heartbeat".equals(job.type)) {
-            store.markCompleted(job.id, "heartbeat", now);
+            store.markCompleted(job.id, "heartbeat", now, runToken);
             scheduleNext(context, store);
             return;
         }
         if (!"agent_turn".equals(job.type)) {
-            store.markCompleted(job.id, "system_event_recorded", now);
+            store.markCompleted(job.id, "system_event_recorded", now, runToken);
             scheduleNext(context, store);
             return;
         }
@@ -111,18 +114,19 @@ public final class OpenPhoneAgentJobScheduler {
         String backgroundRuntime = AssistantBrainConfig.routeBackgroundRuntime(
                 context, runtimeConfig);
         if (!AssistantBrainConfig.BUILTIN.equals(backgroundRuntime)) {
-            sendBackgroundJobToRuntime(context, store, job, backgroundRuntime, runtimeConfig);
+            sendBackgroundJobToRuntime(context, store, job, backgroundRuntime, runtimeConfig,
+                    runToken);
             scheduleNext(context, store);
             return;
         }
         OpenPhoneAgentManager agentManager = context.getSystemService(OpenPhoneAgentManager.class);
         if (agentManager == null) {
-            failJob(context, store, job, "framework_unavailable");
+            failJob(context, store, job, "framework_unavailable", runToken);
             return;
         }
         ModelEndpointConfig endpointConfig = backgroundEndpointConfig(context);
         if (!endpointConfig.isConfigured()) {
-            failJob(context, store, job, "model_unconfigured");
+            failJob(context, store, job, "model_unconfigured", runToken);
             return;
         }
         String taskId = null;
@@ -130,13 +134,14 @@ public final class OpenPhoneAgentJobScheduler {
             String response = agentManager.startTask(taskRequestJson(job));
             taskId = parseString(response, "task_id");
             if (taskId == null || taskId.isEmpty()) {
-                failJob(context, store, job, "task_start_failed");
+                failJob(context, store, job, "task_start_failed", runToken);
                 return;
             }
             FrameworkToolExecutor toolExecutor = new FrameworkToolExecutor(context, agentManager);
             OpenAiResponsesAgentAdapter adapter = new OpenAiResponsesAgentAdapter(endpointConfig);
             final String activeTaskId = taskId;
-            final JobCancellationSignal cancellation = new JobCancellationSignal(store, job.id);
+            final JobCancellationSignal cancellation =
+                    new JobCancellationSignal(store, job.id, runToken);
             Thread cancelWatchdog = startCancelWatchdog(adapter, cancellation, job.id);
             String result;
             try {
@@ -166,15 +171,24 @@ public final class OpenPhoneAgentJobScheduler {
                 cancellation.finish();
                 cancelWatchdog.interrupt();
             }
-            // markCompleted refuses to record when the job is no longer
-            // "running" (user stop or stuck-run repair), so a cancelled run
+            // Infrastructure failures (exhausted HTTP retries, unchecked
+            // adapter errors) follow the job store's failure backoff and its
+            // repeated-failure alert instead of recording as completed runs.
+            String resultStatus = parseString(result, "status");
+            if ("network_error".equals(resultStatus) || "adapter_error".equals(resultStatus)) {
+                failJob(context, store, job, "job_error:" + resultStatus, runToken);
+                return;
+            }
+            // markCompleted refuses to record when this run is no longer the
+            // live one (user stop or stuck-run repair), so a cancelled run
             // neither resurrects the job nor notifies as if it finished.
-            boolean recorded = store.markCompleted(job.id, result, System.currentTimeMillis());
+            boolean recorded = store.markCompleted(job.id, result,
+                    System.currentTimeMillis(), runToken);
             if (recorded && shouldNotify(job)) {
                 OpenPhoneNotificationController.showAgentJobFinished(context, job, result);
             }
         } catch (RuntimeException e) {
-            failJob(context, store, job, "job_error:" + e.getClass().getSimpleName());
+            failJob(context, store, job, "job_error:" + e.getClass().getSimpleName(), runToken);
         } finally {
             if (agentManager != null && taskId != null && !taskId.isEmpty()) {
                 try {
@@ -187,11 +201,13 @@ public final class OpenPhoneAgentJobScheduler {
     }
 
     /**
-     * Aborts the in-flight model call once the job leaves the "running"
-     * status. The adapter checks {@code isCancelled()} between steps and
-     * while backing off between HTTP retries, but only a hard
-     * {@code adapter.cancel()} can break a thread blocked on a stuck
-     * upstream read, so a dedicated watcher does that.
+     * Aborts the in-flight model call once the run stops being live. The
+     * adapter checks {@code isCancelled()} between steps and while backing
+     * off between HTTP retries, but only a hard {@code adapter.cancel()}
+     * can break a thread blocked on a stuck upstream read, so a dedicated
+     * watcher does that. It keeps re-cancelling every poll until the run
+     * finishes: a request opened just after one cancel() (which then saw no
+     * connection to disconnect) must also be torn down.
      */
     private static Thread startCancelWatchdog(OpenAiResponsesAgentAdapter adapter,
             JobCancellationSignal cancellation, long jobId) {
@@ -201,7 +217,6 @@ public final class OpenPhoneAgentJobScheduler {
                 while (!cancellation.isFinished()) {
                     if (cancellation.isCancelled()) {
                         adapter.cancel();
-                        return;
                     }
                     try {
                         Thread.sleep(CANCEL_POLL_MILLIS);
@@ -218,37 +233,41 @@ public final class OpenPhoneAgentJobScheduler {
 
     /**
      * Live cancellation signal for one job run, backed by the job store:
-     * the run counts as cancelled as soon as the stored status leaves
-     * "running" (user called background_job_stop, or stuck-run repair
-     * reclaimed the job). Store reads are throttled so per-step
-     * isCancelled() checks stay cheap, and store failures are treated as
-     * "not cancelled" rather than crashing the job thread.
+     * the run counts as cancelled as soon as it stops being the live run
+     * (user called background_job_stop, or stuck-run repair reclaimed the
+     * job — possibly for a successor run). Store reads are throttled on a
+     * monotonic clock so per-step isCancelled() checks stay cheap, and
+     * store failures are treated as "not cancelled" rather than crashing
+     * the job thread.
      */
     static final class JobCancellationSignal {
         private final AgentJobStore mStore;
         private final long mJobId;
+        private final long mRunToken;
         private volatile boolean mCancelled;
         private volatile boolean mFinished;
-        private long mLastPolledAtMillis;
+        private long mLastPolledAtNanos;
 
-        JobCancellationSignal(AgentJobStore store, long jobId) {
+        JobCancellationSignal(AgentJobStore store, long jobId, long runToken) {
             mStore = store;
             mJobId = jobId;
+            mRunToken = runToken;
+            mLastPolledAtNanos = System.nanoTime() - CANCEL_POLL_MILLIS * 1_000_000L;
         }
 
         boolean isCancelled() {
             if (mCancelled) {
                 return true;
             }
-            long now = System.currentTimeMillis();
+            long now = System.nanoTime();
             synchronized (this) {
-                if (now - mLastPolledAtMillis < CANCEL_POLL_MILLIS) {
+                if (now - mLastPolledAtNanos < CANCEL_POLL_MILLIS * 1_000_000L) {
                     return false;
                 }
-                mLastPolledAtMillis = now;
+                mLastPolledAtNanos = now;
             }
             try {
-                if (!"running".equals(mStore.statusOf(mJobId))) {
+                if (!mStore.isRunLive(mJobId, mRunToken)) {
                     mCancelled = true;
                 }
             } catch (RuntimeException e) {
@@ -274,11 +293,11 @@ public final class OpenPhoneAgentJobScheduler {
     }
 
     private static void sendBackgroundJobToRuntime(Context context, AgentJobStore store,
-            AgentJobRecord job, String runtime, RuntimeConfig config) {
+            AgentJobRecord job, String runtime, RuntimeConfig config, long runToken) {
         String cleanRuntime = runtime == null ? "" : runtime.trim().toLowerCase(java.util.Locale.US);
         if (cleanRuntime.isEmpty() || !config.configured(cleanRuntime)) {
             failJob(context, store, job,
-                    "runtime_background_dispatch_unavailable:" + cleanRuntime);
+                    "runtime_background_dispatch_unavailable:" + cleanRuntime, runToken);
             return;
         }
         try {
@@ -296,9 +315,10 @@ public final class OpenPhoneAgentJobScheduler {
             intent.putExtra(OpenPhoneAssistantService.EXTRA_RUNTIME_ATTENTION_INCLUDE_SCREEN,
                     true);
             context.startService(intent);
-            store.markDispatched(job.id, "runtime_attention.sent:" + cleanRuntime,
-                    System.currentTimeMillis());
-            if (shouldNotify(job)) {
+            boolean recorded = store.markDispatched(job.id,
+                    "runtime_attention.sent:" + cleanRuntime, System.currentTimeMillis(),
+                    runToken);
+            if (recorded && shouldNotify(job)) {
                 OpenPhoneNotificationController.showAgentJobFinished(context, job,
                         AssistantBrainConfig.label(cleanRuntime)
                                 + " accepted this background job.");
@@ -306,18 +326,18 @@ public final class OpenPhoneAgentJobScheduler {
         } catch (RuntimeException e) {
             failJob(context, store, job,
                     "runtime_background_dispatch_failed:" + cleanRuntime + ":"
-                            + e.getClass().getSimpleName());
+                            + e.getClass().getSimpleName(), runToken);
         }
     }
 
     private static void failJob(Context context, AgentJobStore store,
-            AgentJobRecord job, String reason) {
+            AgentJobRecord job, String reason, long runToken) {
         long now = System.currentTimeMillis();
         int failures = job.failureCount + 1;
         long nextRunAt = now + AgentJobStore.backoffMillis(failures);
         long failureAlertAt = failures >= 3 ? now : job.failureAlertAtMillis;
         boolean recorded = store.markFailed(job.id, reason, nextRunAt, failures,
-                failureAlertAt, now);
+                failureAlertAt, now, runToken);
         Log.w(TAG, "Agent job failed: " + job.id + " " + reason
                 + (recorded ? "" : " (not recorded; job no longer running)"));
         if (recorded && failures >= 3 && shouldNotify(job)) {
@@ -334,6 +354,14 @@ public final class OpenPhoneAgentJobScheduler {
         PendingIntent pending = checkPendingIntent(context);
         long now = System.currentTimeMillis();
         long nextDueAt = store.nextRunAt(now);
+        if (store.hasRunningJobs()) {
+            // Keep the alarm armed while anything is marked running so
+            // repairStuck can reclaim a run whose process died even when no
+            // other job is due; otherwise such a job is stranded until the
+            // next boot or job creation.
+            long repairAt = now + STUCK_TIMEOUT_MILLIS;
+            nextDueAt = nextDueAt <= 0 ? repairAt : Math.min(nextDueAt, repairAt);
+        }
         if (nextDueAt <= 0) {
             alarms.cancel(pending);
             return;
