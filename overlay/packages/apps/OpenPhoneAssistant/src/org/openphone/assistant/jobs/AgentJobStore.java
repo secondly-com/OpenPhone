@@ -149,8 +149,30 @@ public final class AgentJobStore {
         });
     }
 
+    /**
+     * Current stored status for a job, or "" when the job no longer exists.
+     * Running jobs poll this so a user stop ({@link #stop}) or a stuck-run
+     * repair actually cancels the in-flight run instead of being ignored.
+     */
+    public synchronized String statusOf(long id) {
+        JSONArray jobs = readJobs();
+        for (int i = 0; i < jobs.length(); i++) {
+            JSONObject job = jobs.optJSONObject(i);
+            if (job != null && job.optLong("id", -1L) == id) {
+                return job.optString("status", "");
+            }
+        }
+        return "";
+    }
+
     public synchronized boolean markCompleted(long id, String result, long nowMillis) {
         return updateJob(id, job -> {
+            // Only a run the store still considers live may record completion.
+            // Without this guard a finishing run would resurrect a job the
+            // user stopped (or that stuck-run repair already rescheduled).
+            if (!"running".equals(job.optString("status", ""))) {
+                return false;
+            }
             JSONObject schedule = job.optJSONObject("schedule_json");
             long interval = schedule == null ? 0L : schedule.optLong("interval_ms", 0L);
             job.put("status", interval > 0 ? "active" : "completed")
@@ -184,6 +206,11 @@ public final class AgentJobStore {
     public synchronized boolean markFailed(long id, String reason, long nextRunAtMillis,
             int failureCount, long failureAlertAtMillis, long nowMillis) {
         return updateJob(id, job -> {
+            // Same live-run guard as markCompleted: a failure from a run the
+            // user already stopped must not reactivate the job for retry.
+            if (!"running".equals(job.optString("status", ""))) {
+                return false;
+            }
             job.put("status", "active")
                     .put("updated_at", nowMillis)
                     .put("last_run_at", nowMillis)
