@@ -5,10 +5,12 @@
 [![CI](https://github.com/secondly-com/OpenPhone/actions/workflows/ci.yml/badge.svg)](https://github.com/secondly-com/OpenPhone/actions/workflows/ci.yml)
 [![Release](https://github.com/secondly-com/OpenPhone/actions/workflows/release.yml/badge.svg)](https://github.com/secondly-com/OpenPhone/actions/workflows/release.yml)
 [![Docs](https://img.shields.io/badge/docs-openphone.secondly.com-black)](https://docs.openphone.secondly.com)
+[![Discord](https://img.shields.io/badge/community-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/t8hfBH5vb)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
 ![Status](https://img.shields.io/badge/status-developer%20preview-orange)
 
-**Docs: [docs.openphone.secondly.com](https://docs.openphone.secondly.com)**
+**Docs: [docs.openphone.secondly.com](https://docs.openphone.secondly.com)** |
+**Community: [Join the Discord](https://discord.gg/t8hfBH5vb)**
 
 OpenPhone is an AI-native Android OS that turns the phone into an agentic
 device: a system-level AI agent that can see the screen, operate apps, remember
@@ -169,8 +171,12 @@ See [docs/devices/MATRIX.md](docs/devices/MATRIX.md) and
 
 ## Community
 
-Contributions, issues, and device validation reports are welcome under the
-terms in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
+Join the [OpenPhone Discord](https://discord.gg/t8hfBH5vb) to follow development,
+ask build and device-porting questions, share validation results, and meet other
+people working on AI-native phones.
+
+Contributions, issues, and device validation reports are welcome under the terms
+in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 - [ROADMAP.md](ROADMAP.md) — milestone tracks and current priorities.
 - [Discussions](https://github.com/secondly-com/OpenPhone/discussions) — for
