@@ -87,6 +87,25 @@ The assistant schedules a single alarm for the next active job. On wake it:
 Jobs also wake during boot, locked boot, package replacement, and assistant
 service startup.
 
+## Cancellation and Upstream Failures
+
+- `background_job_stop` marks the job `stopped`. A running job polls its
+  stored status between agent steps and while waiting out retry backoff; a
+  watchdog additionally aborts the in-flight model call, so a stopped job
+  halts even when it is blocked on a stuck upstream read.
+- `stopped` is terminal for that run: completion and failure results from a
+  cancelled run are not recorded back onto the job, so a stop cannot be
+  overwritten or the job resurrected by a run that finishes late.
+- Model HTTP calls retry 429 and 5xx responses with bounded exponential
+  backoff plus jitter, honoring `Retry-After` when it fits the in-call retry
+  budget; a longer `Retry-After` fails the call immediately. A run that ends
+  in an infrastructure error (exhausted retries, adapter crash) is recorded
+  as a failure and follows the job store's normal failure backoff and
+  repeated-failure alerting instead of counting as a completion.
+- An unchecked exception inside the background runner (for example a broker
+  outage surfacing as a runtime error) marks the job failed with backoff
+  instead of killing the assistant process.
+
 ## Safety
 
 Background jobs may call observe/read tools and terminal tools. State-changing

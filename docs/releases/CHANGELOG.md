@@ -8,6 +8,17 @@ flow, and device support.
 
 ## [Unreleased]
 
+### Changed
+
+- Cloud model calls now retry 429/5xx responses with bounded exponential
+  backoff plus jitter and honor `Retry-After`.
+- `background_job_stop` now cancels a running job: the runner polls the stored
+  job status, aborts the in-flight model call, and a stopped run can no longer
+  resurrect the job by recording completion or failure.
+- Background job runner threads survive unchecked exceptions (for example a
+  broker outage) by recording a failed run with backoff instead of crashing
+  the assistant process.
+
 ## [0.0.3] - 2026-07-03
 
 ### Added
