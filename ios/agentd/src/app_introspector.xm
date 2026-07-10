@@ -2016,13 +2016,32 @@ static NSDictionary *OPAITypeTextIntoView(UIView *view,
         }
     }
     NSString *afterLength = OPAIEditableTextLength(editable);
+    long long beforeLen = [beforeLength longLongValue];
+    long long afterLen = [afterLength longLongValue];
+    // Verify the insert actually landed: some balloon/compose views accept the
+    // replaceRange/insertText call without applying it (no first responder, an
+    // input delegate that rejects the edit, etc.) and would otherwise report a
+    // false success for text that never entered the field. Require the content
+    // length to have grown by the inserted text before trusting it.
+    NSUInteger insertedLength = (text ?: @"").length;
+    if (insertedLength > 0 && afterLen <= beforeLen) {
+        return OPAIInputResponse(@"unavailable", @"text_input_not_applied",
+                actionType, target, @{
+                    @"activation_method": @"text_input_insert",
+                    @"target_class": NSStringFromClass([editable class]) ?: @"",
+                    @"became_first_responder": @(becameFirstResponder),
+                    @"text_length": @(insertedLength),
+                    @"before_text_length": @(beforeLen),
+                    @"after_text_length": @(afterLen)
+                });
+    }
     return OPAIInputResponse(@"ok", nil, actionType, target, @{
         @"activation_method": @"text_input_insert",
         @"target_class": NSStringFromClass([editable class]) ?: @"",
         @"became_first_responder": @(becameFirstResponder),
-        @"text_length": @((text ?: @"").length),
-        @"before_text_length": @([beforeLength longLongValue]),
-        @"after_text_length": @([afterLength longLongValue])
+        @"text_length": @(insertedLength),
+        @"before_text_length": @(beforeLen),
+        @"after_text_length": @(afterLen)
     });
 }
 
@@ -2298,6 +2317,12 @@ static void *OPAIStateThread(void *unused) {
 __attribute__((constructor))
 static void OPAIInit(void) {
     NSString *bundleId = OPAIAppBundleId();
+    // SpringBoard is owned by OpenPhoneVolumeTrigger, which drives the island
+    // overlay and its own input bridge. Running the introspector's publish/input
+    // loop there too would fight over the daemon's app-input socket, so stay out.
+    if ([bundleId isEqualToString:@"com.apple.springboard"]) {
+        return;
+    }
     OPAILog(@"OpenPhoneAppIntrospector loaded bundle=%@ pid=%d",
             bundleId ?: @"", getpid());
     pthread_t thread;

@@ -51,6 +51,32 @@ static long long OPVTLastComboEventMs = 0;
 static NSString *OPVTLastButtonEventName = nil;
 static NSString *OPVTLastButtonEventSource = nil;
 static NSString *OPVTLastTriggerRoute = nil;
+
+// Diagnostic-only hold/phase probe (T: long-press feasibility on the safe path).
+// Classifies press-down vs press-up from the hooked selector name and records
+// hold duration. Publishes into trigger-status.json; does not change routing.
+static long long OPVTDownPhaseEventCount = 0;
+static long long OPVTUpPhaseEventCount = 0;
+static long long OPVTUnknownPhaseEventCount = 0;
+static CFAbsoluteTime OPVTLastUpDownTime = 0;   // last DOWN phase for volume-up button
+static CFAbsoluteTime OPVTLastDownDownTime = 0;  // last DOWN phase for volume-down button
+static double OPVTLastHoldMs = -1.0;
+static NSString *OPVTLastHoldButton = nil;
+static NSString *OPVTLastPhaseObserved = nil;
+
+// Gesture discrimination on the safe SpringBoard path. The probe confirmed the
+// PressDown and PressUp selectors fire as a clean pair on this device, so we can
+// track each button's held state and split one "squeeze both" gesture by how
+// long it is held:
+//   * squeeze both, release < LongPressMs  -> realtime streaming
+//   * squeeze both, hold   > LongPressMs   -> local record/transcribe harness
+static BOOL OPVTUpPressed = NO;
+static BOOL OPVTDownPressed = NO;
+static BOOL OPVTBothPressed = NO;
+static CFAbsoluteTime OPVTBothPressedStart = 0;
+static BOOL OPVTLongPressFired = NO;
+static long long OPVTGestureGeneration = 0;  // bumped to invalidate stale hold timers
+static NSString *OPVTLastGesture = nil;
 static UIWindow *OPVTOverlayWindow = nil;
 static UIWindow *OPVTPromptWindow = nil;
 static NSString *OPVTIslandCurrentMode = @"idle";
@@ -165,7 +191,7 @@ static BOOL OPVTForegroundNoArgBoolReplacement(id self, SEL _cmd);
 static BOOL OPVTShouldLogHookMiss(NSString *phase);
 static void OPVTRecordButtonFromSource(BOOL volumeUp, NSString *source);
 static void OPVTPresentTriggerPrompt(void);
-static void OPVTCallDaemonVoiceAgent(void);
+static void OPVTCallDaemonVoiceAgent(BOOL realtime);
 static void OPVTCallAgentWithGoal(NSString *requestedGoal, BOOL userProvidedGoal);
 static void OPVTPublishTriggerStatus(NSString *eventName, NSDictionary *extra);
 static void OPVTInstallVolumeNotificationObserver(void);
@@ -558,6 +584,14 @@ static void OPVTPublishTriggerStatus(NSString *eventName, NSDictionary *extra) {
         @"last_button_event_source": OPVTLastButtonEventSource ?: @"",
         @"last_combo_event_ms": @(OPVTLastComboEventMs),
         @"last_trigger_route": OPVTLastTriggerRoute ?: @"",
+        @"phase_probe": @{
+            @"down_phase_events": @(OPVTDownPhaseEventCount),
+            @"up_phase_events": @(OPVTUpPhaseEventCount),
+            @"unknown_phase_events": @(OPVTUnknownPhaseEventCount),
+            @"last_phase": OPVTLastPhaseObserved ?: @"",
+            @"last_hold_ms": @(OPVTLastHoldMs),
+            @"last_hold_button": OPVTLastHoldButton ?: @""
+        },
         @"source": @"springboard"
     } mutableCopy];
     if (extra.count > 0) {
@@ -1150,12 +1184,14 @@ static NSString *OPVTBundleIdentifierFromObject(id object, NSUInteger depth) {
     return nil;
 }
 
-static NSTimeInterval OPVTWindowSeconds(void) {
-    return OPVTMillisecondsPreference(@"WindowMs", 1200.0, 50.0, 3000.0);
-}
-
 static NSTimeInterval OPVTCooldownSeconds(void) {
     return OPVTMillisecondsPreference(@"CooldownMs", 10000.0, 250.0, 60000.0);
+}
+
+// Squeeze both buttons and release before this threshold -> realtime; keep both
+// held past it -> record/transcribe harness.
+static NSTimeInterval OPVTLongPressSeconds(void) {
+    return OPVTMillisecondsPreference(@"LongPressMs", 550.0, 250.0, 3000.0);
 }
 
 static void OPVTPlayHapticSuccess(void) {
@@ -3594,27 +3630,41 @@ static NSString *OPVTVoiceOverlayDetail(NSDictionary *response) {
 // (Legacy toast-based helpers removed. The island observer now renders live
 //  status directly from the daemon's island-status.json file.)
 
-static void OPVTCallDaemonVoiceAgent(void) {
+static void OPVTCallDaemonVoiceAgent(BOOL realtime) {
     OPVTPublishSpringBoardStateOnMain();
     OPVTLastTriggerRoute = @"daemon_voice_agent";
     OPVTPublishTriggerStatus(@"voice_request", @{
-        @"route": OPVTLastTriggerRoute ?: @""
+        @"route": OPVTLastTriggerRoute ?: @"",
+        @"realtime": @(realtime)
     });
-    NSDictionary *request = @{
+    NSMutableDictionary *request = [@{
         @"command": @"voice_trigger",
-        @"trigger": @"volume_up_down_combo",
+        @"trigger": realtime ? @"volume_double_tap_realtime" : @"volume_long_press_harness",
         @"source": @"springboard_volume",
-        @"reason": @"hardware volume combo voice trigger",
+        @"reason": realtime ? @"hardware volume double-tap realtime trigger"
+                            : @"hardware volume long-press harness trigger",
         @"mode": @"auto",
+        // Realtime gesture streams the mic to the realtime model and requires it
+        // to be configured; long-press gesture forces the record/transcribe path.
+        @"stream": @(realtime),
+        @"require_realtime": @(realtime),
         @"max_steps": @25,
         @"max_duration_ms": @600000
-    };
+    } mutableCopy];
+    if (!realtime) {
+        // Long-press harness is push-to-talk: the mic records for as long as the
+        // user holds both buttons and stops when they release (a voice_stop
+        // command). Disable silence-based auto-stop so a natural pause mid-
+        // sentence doesn't cut the recording; keep a large safety ceiling.
+        request[@"vad"] = @NO;
+        request[@"record_max_ms"] = @90000;
+    }
 
     OPVTPlayHapticSuccess();
     OPVTIslandApplyState(@{
-        @"mode": @"listening",
+        @"mode": realtime ? @"realtime" : @"listening",
         @"subtitle": @"Listening",
-        @"accent": @"red"
+        @"accent": realtime ? @"yellow" : @"red"
     });
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *response = OPVTAgentRequest(request);
@@ -3637,8 +3687,12 @@ static void OPVTCallDaemonVoiceAgent(void) {
             NSString *accent = @"red";
             if ([state isEqualToString:@"voice.credential_missing"] ||
                     [state isEqualToString:@"voice.already_running"] ||
+                    [state isEqualToString:@"voice.realtime_not_configured"] ||
                     [state isEqualToString:@"voice.empty_transcript"]) {
                 accent = @"orange";
+            }
+            if ([state isEqualToString:@"voice.realtime_not_configured"]) {
+                detail = @"Realtime not configured";
             }
             OPVTIslandApplyState(@{
                 @"mode": @"error",
@@ -3647,7 +3701,8 @@ static void OPVTCallDaemonVoiceAgent(void) {
             });
         }
         if (!ok && OPVTPromptForGoalEnabled() &&
-                ![state isEqualToString:@"voice.credential_missing"]) {
+                ![state isEqualToString:@"voice.credential_missing"] &&
+                ![state isEqualToString:@"voice.realtime_not_configured"]) {
             OPVTPresentTriggerPrompt();
         }
     });
@@ -4343,6 +4398,191 @@ static void OPVTHandleSystemVolumeNotification(NSNotification *notification) {
     }
 }
 
+// Diagnostic-only: classify the press phase from the hooked selector name.
+// Returns @"down", @"up", or @"unknown". Phase markers ("PressDown", "ButtonUp",
+// etc.) are chosen so they never collide with the volume direction words
+// ("handleVolumeUpButtonPress" is direction=up, phase=unknown, not phase=up).
+static NSString *OPVTClassifyPressPhase(NSString *source) {
+    if (![source isKindOfClass:[NSString class]] || source.length == 0) {
+        return @"unknown";
+    }
+    // Unambiguous, phase-specific selectors only. Selectors whose name carries a
+    // phase token regardless of the actual call (e.g.
+    // "_sendVolumeButtonToSBUIControllerForIncrease:down:", which contains
+    // ":down:" even on the up-call) are deliberately left "unknown" so they never
+    // corrupt the pressed-state latch that drives gesture timing.
+    if ([source containsString:@"PressDown"] ||
+            [source containsString:@"ButtonDownFor"]) {
+        return @"down";
+    }
+    if ([source containsString:@"PressUp"] ||
+            [source containsString:@"ButtonUpFor"] ||
+            [source containsString:@"IncreaseUp"] ||
+            [source containsString:@"DecreaseUp"]) {
+        return @"up";
+    }
+    return @"unknown";
+}
+
+// The gesture latch must see exactly one down and one up per physical press.
+// SpringBoard fires several redundant hooked selectors per press (public
+// PressDown/PressUp plus internal _handle*/_send* forwarders), which desynced
+// OPVTUpPressed/OPVTDownPressed in the first cut (down_phase_events 24 !=
+// up_phase_events 40). Only the outermost public selectors fire exactly once per
+// physical edge, so we drive the latch from those alone; the others still feed
+// the diagnostic probe but never touch the pressed state.
+static BOOL OPVTIsCanonicalGestureSource(NSString *source) {
+    if (![source isKindOfClass:[NSString class]] || source.length == 0) {
+        return NO;
+    }
+    return [source containsString:@"PressDownWithModifiers"] ||
+            [source containsString:@"PressUp"];
+}
+
+// Route a detected gesture. realtime=YES -> realtime streaming; NO -> harness.
+// Honors the daemon-voice-agent / prompt / direct-agent preference chain and
+// respects the cooldown + active-island-cancel behavior of the old combo path.
+static void OPVTFireGesture(NSString *gesture, BOOL realtime) {
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+
+    // While a voice turn is live, either gesture acts as a cancel. This is
+    // checked BEFORE the cooldown so a re-squeeze can always stop an active
+    // turn — otherwise the 10s cooldown swallows the stop gesture and the user
+    // is stuck in "Listening" with no way out.
+    BOOL activeIslandMode = [OPVTIslandCurrentMode isEqualToString:@"listening"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"realtime"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"transcribing"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"thinking"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"action"];
+    if (activeIslandMode) {
+        OPVTLastTrigger = now;
+        OPVTPublishTriggerStatus(@"gesture_cancel", @{
+            @"gesture": gesture ?: @"",
+            @"mode": OPVTIslandCurrentMode ?: @""
+        });
+        OPVTPlayHapticFailure();
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            OPVTAgentRequest(@{@"command": @"voice_cancel",
+                               @"reason": @"user_gesture_cancel"});
+        });
+        return;
+    }
+
+    if ((now - OPVTLastTrigger) < OPVTCooldownSeconds()) {
+        OPVTPublishTriggerStatus(@"gesture_cooldown", @{
+            @"gesture": gesture ?: @"",
+            @"realtime": @(realtime)
+        });
+        return;
+    }
+
+    OPVTLastTrigger = now;
+    OPVTComboEventCount++;
+    OPVTLastComboEventMs = OPVTNowMs();
+    OPVTLastGesture = gesture;
+    NSString *route = OPVTDaemonVoiceAgentEnabled()
+            ? @"daemon_voice_agent"
+            : (OPVTPromptForGoalEnabled() ? @"springboard_prompt" : @"direct_agent");
+    OPVTLastTriggerRoute = route;
+    OPVTPublishTriggerStatus(@"gesture_fired", @{
+        @"gesture": gesture ?: @"",
+        @"realtime": @(realtime),
+        @"route": route ?: @"",
+        @"combo_event_count": @(OPVTComboEventCount)
+    });
+    OPVTLog(@"gesture=%@ realtime=%d route=%@", gesture ?: @"", realtime, route);
+    if (OPVTDaemonVoiceAgentEnabled()) {
+        OPVTCallDaemonVoiceAgent(realtime);
+    } else if (OPVTPromptForGoalEnabled()) {
+        OPVTPresentTriggerPrompt();
+    } else {
+        OPVTCallAgent();
+    }
+}
+
+// Fires the record/transcribe harness once both buttons have been held past the
+// long-press threshold. Guarded by a generation token so a stale dispatch (from
+// an earlier press that was released before the threshold) is ignored.
+static void OPVTScheduleLongPressCheck(long long generation) {
+    NSTimeInterval hold = OPVTLongPressSeconds();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(hold * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+        if (generation != OPVTGestureGeneration) {
+            return;  // released or superseded before threshold
+        }
+        if (!(OPVTUpPressed && OPVTDownPressed) || OPVTLongPressFired) {
+            return;
+        }
+        OPVTLongPressFired = YES;
+        OPVTPublishTriggerStatus(@"gesture_long_press", @{
+            @"hold_ms": @(OPVTLongPressSeconds() * 1000.0)
+        });
+        OPVTLog(@"gesture LONG-PRESS -> harness (hold_ms=%0.0f)", OPVTLongPressSeconds() * 1000.0);
+        OPVTFireGesture(@"harness_long_press", NO);
+    });
+}
+
+// Drives gesture detection from clean down/up phase events. Maintains a per-
+// button pressed latch and times how long both buttons stay held. Squeeze both
+// and release quickly (< long-press threshold) -> realtime streaming. Keep both
+// held past the threshold -> record/transcribe harness. Splitting one natural
+// "squeeze both" gesture by hold duration avoids the double-tap timing problem,
+// where quick separate taps never actually overlap on both buttons.
+static void OPVTHandlePhaseGesture(BOOL volumeUp, BOOL down, CFAbsoluteTime now) {
+    BOOL wasBoth = OPVTUpPressed && OPVTDownPressed;
+    if (volumeUp) {
+        OPVTUpPressed = down;
+    } else {
+        OPVTDownPressed = down;
+    }
+    BOOL isBoth = OPVTUpPressed && OPVTDownPressed;
+    OPVTLog(@"gesture phase %@ %@ up_pressed=%d down_pressed=%d was_both=%d is_both=%d",
+            volumeUp ? @"volume_up" : @"volume_down", down ? @"down" : @"up",
+            OPVTUpPressed, OPVTDownPressed, wasBoth, isBoth);
+
+    if (isBoth && !wasBoth) {
+        // Both buttons just became held: start the long-press timer that fires
+        // the harness if the squeeze is held past the threshold.
+        OPVTBothPressed = YES;
+        OPVTBothPressedStart = now;
+        OPVTLongPressFired = NO;
+        OPVTGestureGeneration++;
+        OPVTScheduleLongPressCheck(OPVTGestureGeneration);
+        OPVTPublishTriggerStatus(@"gesture_both_down", @{
+            @"generation": @(OPVTGestureGeneration)
+        });
+        return;
+    }
+
+    if (!isBoth && wasBoth) {
+        // A button released while both were held. Invalidate the pending
+        // long-press timer. If the harness already fired on hold, we're done;
+        // otherwise this was a quick squeeze -> realtime.
+        OPVTGestureGeneration++;
+        double heldMs = (now - OPVTBothPressedStart) * 1000.0;
+        OPVTBothPressed = NO;
+        if (OPVTLongPressFired) {
+            OPVTLongPressFired = NO;
+            // Push-to-talk: the harness has been recording while both buttons
+            // were held. Releasing is the signal to stop the mic and run STT.
+            OPVTLog(@"gesture both-release held_ms=%0.0f -> harness push-to-talk stop", heldMs);
+            OPVTPublishTriggerStatus(@"gesture_harness_release", @{
+                @"held_ms": @(heldMs)
+            });
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                OPVTAgentRequest(@{@"command": @"voice_stop",
+                                   @"reason": @"harness_push_to_talk_release"});
+            });
+            return;
+        }
+        OPVTLog(@"gesture QUICK-SQUEEZE -> realtime (held_ms=%0.0f)", heldMs);
+        OPVTPublishTriggerStatus(@"gesture_quick_squeeze", @{
+            @"held_ms": @(heldMs)
+        });
+        OPVTFireGesture(@"realtime_quick_squeeze", YES);
+    }
+}
+
 static void OPVTRecordButtonFromSource(BOOL volumeUp, NSString *source) {
     if (!OPVTEnabled()) {
         OPVTPublishTriggerStatus(@"button_ignored_disabled", @{
@@ -4358,6 +4598,42 @@ static void OPVTRecordButtonFromSource(BOOL volumeUp, NSString *source) {
     OPVTLastButtonEventName = volumeUp ? @"volume_up" : @"volume_down";
     OPVTLastButtonEventSource = [source isKindOfClass:[NSString class]] && source.length > 0
             ? [source copy] : @"unknown";
+
+    // --- Diagnostic hold/phase probe (does not change routing) ---
+    NSString *phase = OPVTClassifyPressPhase(OPVTLastButtonEventSource);
+    OPVTLastPhaseObserved = phase;
+    double holdMsThisEvent = -1.0;
+    if ([phase isEqualToString:@"down"]) {
+        OPVTDownPhaseEventCount++;
+        if (volumeUp) {
+            OPVTLastUpDownTime = now;
+        } else {
+            OPVTLastDownDownTime = now;
+        }
+    } else if ([phase isEqualToString:@"up"]) {
+        OPVTUpPhaseEventCount++;
+        CFAbsoluteTime downTime = volumeUp ? OPVTLastUpDownTime : OPVTLastDownDownTime;
+        if (downTime > 0 && now >= downTime) {
+            holdMsThisEvent = (now - downTime) * 1000.0;
+            OPVTLastHoldMs = holdMsThisEvent;
+            OPVTLastHoldButton = volumeUp ? @"volume_up" : @"volume_down";
+        }
+    } else {
+        OPVTUnknownPhaseEventCount++;
+    }
+    OPVTPublishTriggerStatus(@"button_phase_probe", @{
+        @"button": OPVTLastButtonEventName ?: @"",
+        @"phase": phase ?: @"unknown",
+        @"source": OPVTLastButtonEventSource ?: @"",
+        @"hold_ms_this_event": @(holdMsThisEvent),
+        @"down_phase_events": @(OPVTDownPhaseEventCount),
+        @"up_phase_events": @(OPVTUpPhaseEventCount),
+        @"unknown_phase_events": @(OPVTUnknownPhaseEventCount),
+        @"last_hold_ms": @(OPVTLastHoldMs),
+        @"last_hold_button": OPVTLastHoldButton ?: @""
+    });
+    // --- end probe ---
+
     OPVTPublishTriggerStatus(@"button_event", @{
         @"button": OPVTLastButtonEventName ?: @"",
         @"button_event_count": @(OPVTButtonEventCount),
@@ -4377,53 +4653,17 @@ static void OPVTRecordButtonFromSource(BOOL volumeUp, NSString *source) {
         OPVTLastDown = now;
     }
 
-    BOOL combo = fabs(OPVTLastUp - OPVTLastDown) <= OPVTWindowSeconds();
-    BOOL cooledDown = (now - OPVTLastTrigger) >= OPVTCooldownSeconds();
-    if (combo && cooledDown) {
-        OPVTLastTrigger = now;
-        OPVTComboEventCount++;
-        OPVTLastComboEventMs = OPVTNowMs();
-
-        // If the island is in an active state, treat the combo as a cancel.
-        BOOL activeIslandMode = [OPVTIslandCurrentMode isEqualToString:@"listening"] ||
-                [OPVTIslandCurrentMode isEqualToString:@"realtime"] ||
-                [OPVTIslandCurrentMode isEqualToString:@"transcribing"] ||
-                [OPVTIslandCurrentMode isEqualToString:@"thinking"] ||
-                [OPVTIslandCurrentMode isEqualToString:@"action"];
-        if (activeIslandMode) {
-            OPVTLog(@"volume combo -> cancel (island mode=%@)",
-                    OPVTIslandCurrentMode ?: @"");
-            OPVTPublishTriggerStatus(@"volume_combo_cancel", @{
-                @"mode": OPVTIslandCurrentMode ?: @""
-            });
-            OPVTPlayHapticFailure();
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                OPVTAgentRequest(@{@"command": @"voice_cancel",
-                                   @"reason": @"user_double_combo"});
-            });
-            return;
-        }
-
-        NSString *route = OPVTDaemonVoiceAgentEnabled()
-                ? @"daemon_voice_agent"
-                : (OPVTPromptForGoalEnabled() ? @"springboard_prompt" : @"direct_agent");
-        OPVTLastTriggerRoute = route;
-        OPVTPublishTriggerStatus(@"volume_combo", @{
-            @"route": route ?: @"",
-            @"combo_event_count": @(OPVTComboEventCount),
-            @"source": OPVTLastButtonEventSource ?: @"",
-            @"last_up_delta_s": @(now - OPVTLastUp),
-            @"last_down_delta_s": @(now - OPVTLastDown)
-        });
-        OPVTLog(@"volume combo detected up=%0.3f down=%0.3f source=%@",
-                OPVTLastUp, OPVTLastDown, OPVTLastButtonEventSource ?: @"");
-        if (OPVTDaemonVoiceAgentEnabled()) {
-            OPVTCallDaemonVoiceAgent();
-        } else if (OPVTPromptForGoalEnabled()) {
-            OPVTPresentTriggerPrompt();
-        } else {
-            OPVTCallAgent();
-        }
+    // Gesture detection runs purely on the deterministic phase engine, and only
+    // for the canonical public selectors (each fires exactly once per physical
+    // edge). The redundant internal forwarders and the no-arg wrappers still feed
+    // the diagnostic probe above but must not touch the pressed-state latch.
+    //
+    // The old "two volume events within window_ms" combo fallback was removed: it
+    // treated any two ordinary volume adjustments as a realtime trigger, which is
+    // a constant false-fire source now that real gestures are deterministic.
+    if (OPVTIsCanonicalGestureSource(OPVTLastButtonEventSource) &&
+            ([phase isEqualToString:@"down"] || [phase isEqualToString:@"up"])) {
+        OPVTHandlePhaseGesture(volumeUp, [phase isEqualToString:@"down"], now);
     }
 }
 
@@ -5882,6 +6122,12 @@ static UIView *OPVTIslandStatusDot = nil;
 static CAShapeLayer *OPVTIslandGlowLayer = nil;
 static CAGradientLayer *OPVTIslandGradientGlowLayer = nil;
 static CAShapeLayer *OPVTIslandGradientMask = nil;
+// Full-screen edge glow shown only during realtime streaming so the user can
+// tell at a glance they're in live voice mode (vs. the STT harness). Mirrors
+// the Android PointerOverlayController screen-border glow.
+static UIView *OPVTRealtimeEdgeView = nil;
+static CAGradientLayer *OPVTRealtimeEdgeGradient = nil;
+static CAShapeLayer *OPVTRealtimeEdgeMask = nil;
 static CADisplayLink *OPVTIslandTicker = nil;
 static CGFloat OPVTIslandGradientShift = 0.0;
 static NSInteger OPVTIslandThinkingTick = 0;
@@ -5913,6 +6159,7 @@ static long long OPVTIslandLastAppliedMs = 0;
 static NSDictionary *OPVTIslandCurrentState = nil;
 static int OPVTIslandStatusNotifyToken = 0;
 static BOOL OPVTIslandStatusNotifyRegistered = NO;
+static dispatch_source_t OPVTIslandLivenessTimer = nil;
 
 static UIColor *OPVTIslandAccentColor(NSString *accent) {
     NSString *key = [accent isKindOfClass:[NSString class]] ? accent.lowercaseString : @"cyan";
@@ -5944,6 +6191,24 @@ static BOOL OPVTIslandDeviceHasDynamicIsland(void) {
     return NO;
 }
 
+// True when the STT harness is mid-flight AND has text worth showing in the
+// compact band. Only then does the compact pill extend below the physical
+// notch; otherwise it stays exactly notch-sized so it disappears into the
+// hardware Dynamic Island (idle and realtime both read as a bare notch).
+static BOOL OPVTIslandCompactShouldExtend(void) {
+    NSString *mode = OPVTIslandCurrentMode ?: @"idle";
+    BOOL sttHarnessActive = [mode isEqualToString:@"listening"] ||
+            [mode isEqualToString:@"transcribing"] ||
+            [mode isEqualToString:@"thinking"] ||
+            [mode isEqualToString:@"action"];
+    if (!sttHarnessActive) {
+        return NO;
+    }
+    NSString *subtitle = [OPVTIslandCurrentState[@"subtitle"] isKindOfClass:[NSString class]]
+            ? OPVTIslandCurrentState[@"subtitle"] : @"";
+    return subtitle.length > 0;
+}
+
 // level: 0 = compact (DI shape), 1 = medium panel, 2 = large full-screen panel.
 static CGRect OPVTIslandPillFrameForLevel(CGRect bounds, NSInteger level) {
     CGFloat topBase = OPVTIslandDeviceHasDynamicIsland() ? 11.0 : 12.0;
@@ -5957,11 +6222,14 @@ static CGRect OPVTIslandPillFrameForLevel(CGRect bounds, NSInteger level) {
         }
     }
     if (level >= 2) {
-        // Large: full width minus small margin, ~75% of screen height.
-        CGFloat pillWidth = bounds.size.width - 16.0;
-        CGFloat pillHeight = bounds.size.height * 0.75;
-        CGFloat originX = (bounds.size.width - pillWidth) / 2.0;
-        return CGRectMake(originX, topBase, pillWidth, pillHeight);
+        // Large: inset from every screen edge so the rounded panel floats
+        // clearly inside the device bezel (doesn't touch the screen edges).
+        CGFloat sideMargin = 12.0;
+        CGFloat pillWidth = bounds.size.width - sideMargin * 2.0;
+        CGFloat originY = topBase;
+        CGFloat pillHeight = bounds.size.height * 0.82;
+        CGFloat originX = sideMargin;
+        return CGRectMake(originX, originY, pillWidth, pillHeight);
     }
     if (level == 1) {
         // Medium panel.
@@ -5974,8 +6242,20 @@ static CGRect OPVTIslandPillFrameForLevel(CGRect bounds, NSInteger level) {
     }
     // Compact: match Dynamic Island exactly on DI devices, plain pill elsewhere.
     if (OPVTIslandDeviceHasDynamicIsland()) {
-        CGFloat pillWidth = 122.0;
-        CGFloat pillHeight = 37.0;
+        // The hardware Dynamic Island is a physical cutout — its ~37pt tall
+        // region is not real screen, so anything we draw there is invisible.
+        // To read as ONE continuous black shape (not a detached blob with a
+        // gap above), the pill must be a touch WIDER than the physical cutout
+        // so the hardware notch sits fully inside our black fill, and its top
+        // edge must align with the TOP of the physical notch (topBase) — not
+        // the screen top, which would paint black above the notch. It extends
+        // one text line below the cutout onto visible screen. Top corners
+        // square so the top edge is flush with the notch top; bottom rounded.
+        CGFloat pillWidth = 134.0;   // slightly wider than the ~126pt cutout.
+        // Notch-only by default so the pill vanishes into the hardware Dynamic
+        // Island; extend one text line below only when the STT harness has
+        // something to say. ~37pt cutout, +20pt visible line when extended.
+        CGFloat pillHeight = OPVTIslandCompactShouldExtend() ? 57.0 : 37.0;
         CGFloat originX = (bounds.size.width - pillWidth) / 2.0;
         return CGRectMake(originX, topBase, pillWidth, pillHeight);
     }
@@ -6024,9 +6304,65 @@ static void OPVTIslandEnsureWindow(void) {
 
     UIView *root = controller.view;
 
+    // Full-screen realtime edge glow (hidden until realtime mode). A rainbow
+    // gradient filling the screen, masked to a wide rounded-rect band that is
+    // gaussian-blurred into a soft feathered glow hugging the display corners.
+    // Non-interactive so it never eats touches meant for the app underneath.
+    OPVTRealtimeEdgeView = [[UIView alloc] initWithFrame:bounds];
+    OPVTRealtimeEdgeView.userInteractionEnabled = NO;
+    OPVTRealtimeEdgeView.backgroundColor = [UIColor clearColor];
+    OPVTRealtimeEdgeView.hidden = YES;
+    OPVTRealtimeEdgeView.alpha = 0.0;
+
+    OPVTRealtimeEdgeGradient = [CAGradientLayer layer];
+    OPVTRealtimeEdgeGradient.frame = bounds;
+    OPVTRealtimeEdgeGradient.colors = @[
+        (id)[UIColor colorWithRed:0.365 green:0.863 blue:1.0 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.580 green:0.424 blue:1.0 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:1.0 green:0.337 blue:0.659 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:1.0 green:0.800 blue:0.424 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.365 green:0.863 blue:1.0 alpha:1.0].CGColor
+    ];
+    OPVTRealtimeEdgeGradient.startPoint = CGPointMake(0.0, 0.5);
+    OPVTRealtimeEdgeGradient.endPoint = CGPointMake(1.0, 0.5);
+
+    OPVTRealtimeEdgeMask = [CAShapeLayer layer];
+    OPVTRealtimeEdgeMask.fillColor = [UIColor clearColor].CGColor;
+    OPVTRealtimeEdgeMask.strokeColor = [UIColor blackColor].CGColor;
+    // Wide band hugging the device's rounded screen corners. The band is then
+    // gaussian-blurred (below) so it reads as a soft feathered glow that fades
+    // toward the screen interior rather than a hard-edged stroke.
+    OPVTRealtimeEdgeMask.lineWidth = 46.0;
+    CGFloat screenRadius = 55.0;  // iPhone 15 Pro display corner radius
+    UIBezierPath *edgePath = [UIBezierPath bezierPathWithRoundedRect:
+            CGRectInset(bounds, 6.0, 6.0) cornerRadius:screenRadius];
+    OPVTRealtimeEdgeMask.path = edgePath.CGPath;
+    OPVTRealtimeEdgeMask.frame = bounds;
+    // Feather the mask so the reveal has soft edges (a glow, not a stroke).
+    // CAFilter is private QuartzCore but available inside the SpringBoard
+    // process we inject into; degrade gracefully to the crisp band if absent.
+    Class CAFilterClass = NSClassFromString(@"CAFilter");
+    SEL filterSel = NSSelectorFromString(@"filterWithType:");
+    if (CAFilterClass && [CAFilterClass respondsToSelector:filterSel]) {
+        id (*makeFilter)(id, SEL, id) = (id (*)(id, SEL, id))objc_msgSend;
+        id blur = makeFilter(CAFilterClass, filterSel, @"gaussianBlur");
+        if (blur) {
+            [blur setValue:@(22.0) forKey:@"inputRadius"];
+            @try { [blur setValue:@NO forKey:@"inputNormalizeEdges"]; } @catch (__unused NSException *e) {}
+            OPVTRealtimeEdgeMask.filters = @[blur];
+        }
+    }
+    OPVTRealtimeEdgeGradient.mask = OPVTRealtimeEdgeMask;
+    OPVTRealtimeEdgeGradient.shadowColor = [UIColor colorWithRed:0.580 green:0.424 blue:1.0 alpha:1.0].CGColor;
+    OPVTRealtimeEdgeGradient.shadowRadius = 18.0;
+    OPVTRealtimeEdgeGradient.shadowOpacity = 0.8;
+    OPVTRealtimeEdgeGradient.shadowOffset = CGSizeZero;
+    [OPVTRealtimeEdgeView.layer addSublayer:OPVTRealtimeEdgeGradient];
+    [root addSubview:OPVTRealtimeEdgeView];
+
     // Pill container.
     OPVTIslandPill = [[UIView alloc] initWithFrame:OPVTIslandPillFrame(bounds, NO)];
-    OPVTIslandPill.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.94];
+    OPVTIslandPill.backgroundColor = [UIColor blackColor];
     // Match the Dynamic Island's exact corner curvature — its height is ~37pt
     // and it's a full pill (radius = height/2). We keep that ratio on expand
     // too so the shape stays consistent.
@@ -6141,7 +6477,9 @@ static void OPVTIslandEnsureWindow(void) {
     // Tap toggles expansion. Never hides the pill entirely — it's always
     // present so the user can tap into chat history at any time. Fresh
     // volume trigger is the only way to start a new voice turn.
-    if (OPVTIslandExpanded && !OPVTIslandExpanded.hidden) {
+    BOOL expanded = OPVTIslandExpanded && !OPVTIslandExpanded.hidden;
+    OPVTLog(@"island tap expanded=%d level=%ld", expanded, (long)OPVTIslandExpansionLevel);
+    if (expanded) {
         OPVTIslandCollapse();
     } else {
         OPVTIslandExpand();
@@ -6229,6 +6567,15 @@ static void OPVTIslandEnsureWindow(void) {
         OPVTIslandGradientGlowLayer.endPoint =
                 CGPointMake(2.0 + OPVTIslandGradientShift, 0.5);
     }
+    if (OPVTRealtimeEdgeGradient && !OPVTRealtimeEdgeView.hidden) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        OPVTRealtimeEdgeGradient.startPoint =
+                CGPointMake(-1.0 + OPVTIslandGradientShift, 0.5);
+        OPVTRealtimeEdgeGradient.endPoint =
+                CGPointMake(2.0 + OPVTIslandGradientShift, 0.5);
+        [CATransaction commit];
+    }
 }
 - (void)thinkingDotsTick:(NSTimer *)timer {
     (void)timer;
@@ -6310,36 +6657,101 @@ static void OPVTIslandStartTicker(void) {
 static void OPVTIslandLayoutInterior(void) {
     if (!OPVTIslandPill) return;
     CGRect b = OPVTIslandPill.bounds;
-    BOOL compact = b.size.height < 55.0;
+    BOOL compact = b.size.height < 120.0;
     BOOL activeMode = [OPVTIslandCurrentMode isEqualToString:@"listening"] ||
             [OPVTIslandCurrentMode isEqualToString:@"realtime"] ||
             [OPVTIslandCurrentMode isEqualToString:@"transcribing"] ||
             [OPVTIslandCurrentMode isEqualToString:@"thinking"] ||
             [OPVTIslandCurrentMode isEqualToString:@"action"];
-    // Show cancel chip only while active. Never during idle/terminal.
+    // Show the × stop chip while a turn is live so the user can tap to cancel
+    // (in addition to re-squeezing the volume buttons). Reserve room on the
+    // right so the subtitle text doesn't run under the chip.
     if (OPVTIslandCancelChip) OPVTIslandCancelChip.hidden = !activeMode;
     CGFloat rightReserve = activeMode ? 30.0 : 0.0;
+    // The compact/minimized small-text row (status dot + subtitle) is only
+    // meaningful for the STT harness, which narrates its progress as text.
+    // Realtime uses the edge glow instead, and at idle there is nothing to say,
+    // so in those cases keep the compact pill a bare black notch with no text.
+    BOOL sttHarnessActive = [OPVTIslandCurrentMode isEqualToString:@"listening"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"transcribing"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"thinking"] ||
+            [OPVTIslandCurrentMode isEqualToString:@"action"];
     if (compact) {
-        OPVTIslandStatusDot.frame = CGRectMake(11, (b.size.height - 10) / 2.0, 10, 10);
+        // The top ~37pt sits over (behind) the hardware Dynamic Island cutout
+        // and is not visible. Render the status dot + text in the LOWER band
+        // so it lands on real screen. On non-DI devices cutoutTop is 0 and the
+        // whole pill is visible, so we center within the pill instead.
+        CGFloat cutoutTop = OPVTIslandDeviceHasDynamicIsland() ? 37.0 : 0.0;
+        CGFloat visibleH = b.size.height - cutoutTop;
+        CGFloat dotY = cutoutTop + (visibleH - 10) / 2.0;
+        OPVTIslandStatusDot.frame = CGRectMake(14, dotY, 10, 10);
         OPVTIslandStatusDot.layer.cornerRadius = 5.0;
+        OPVTIslandStatusDot.hidden = !sttHarnessActive;
         OPVTIslandTitleLabel.hidden = YES;
-        OPVTIslandSubtitleLabel.frame = CGRectMake(28, 0, b.size.width - 40 - rightReserve, b.size.height);
-        OPVTIslandSubtitleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold];
+        OPVTIslandSubtitleLabel.hidden = !sttHarnessActive;
+        OPVTIslandSubtitleLabel.frame = CGRectMake(30, cutoutTop,
+                b.size.width - 42 - rightReserve, visibleH);
+        OPVTIslandSubtitleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold];
         OPVTIslandSubtitleLabel.textAlignment = NSTextAlignmentLeft;
         if (OPVTIslandCancelChip) {
-            OPVTIslandCancelChip.frame = CGRectMake(b.size.width - 30, (b.size.height - 22) / 2.0, 22, 22);
+            OPVTIslandCancelChip.frame = CGRectMake(b.size.width - 28,
+                    cutoutTop + (visibleH - 20) / 2.0, 20, 20);
         }
     } else {
-        OPVTIslandStatusDot.frame = CGRectMake(14, 14, 14, 14);
+        // Expanded panel. Inset content away from the rounded corners so the
+        // dot, text, and chip don't crowd the edges. padX/padY are the interior
+        // margins; the corner radius is ~44pt so these keep content clear of it.
+        CGFloat padX = 22.0;
+        CGFloat padY = 16.0;
+        OPVTIslandStatusDot.hidden = NO;
+        OPVTIslandSubtitleLabel.hidden = NO;
+        OPVTIslandStatusDot.frame = CGRectMake(padX, padY + 2, 14, 14);
         OPVTIslandStatusDot.layer.cornerRadius = 7.0;
         OPVTIslandTitleLabel.hidden = NO;
-        OPVTIslandTitleLabel.frame = CGRectMake(34, 6, b.size.width - 48 - rightReserve, 16);
-        OPVTIslandSubtitleLabel.frame = CGRectMake(34, 20, b.size.width - 48 - rightReserve, 16);
+        CGFloat textX = padX + 28;
+        CGFloat textW = b.size.width - textX - padX - rightReserve;
+        OPVTIslandTitleLabel.frame = CGRectMake(textX, padY, textW, 16);
+        OPVTIslandSubtitleLabel.frame = CGRectMake(textX, padY + 16, textW, 16);
         OPVTIslandSubtitleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
         OPVTIslandSubtitleLabel.textAlignment = NSTextAlignmentLeft;
         if (OPVTIslandCancelChip) {
-            OPVTIslandCancelChip.frame = CGRectMake(b.size.width - 32, 10, 22, 22);
+            OPVTIslandCancelChip.frame = CGRectMake(b.size.width - padX - 22, padY, 22, 22);
         }
+    }
+}
+
+// Show/hide the full-screen realtime edge glow. Only realtime streaming mode
+// gets the border glow; the STT harness ("listening"/"transcribing") does not,
+// so the two modes are visually distinct at a glance.
+static BOOL OPVTRealtimeEdgeIntendedVisible = NO;
+static void OPVTRealtimeEdgeSetVisible(BOOL visible) {
+    if (!OPVTRealtimeEdgeView) {
+        return;
+    }
+    // Track the INTENDED state, not the current alpha. Keying off a mid-fade
+    // alpha (> 0.5) meant a quick hide→show could latch the wrong state and
+    // leave the glow stuck off — the "appears for a millisecond then gone" bug.
+    if (visible == OPVTRealtimeEdgeIntendedVisible &&
+            (visible ? !OPVTRealtimeEdgeView.hidden : YES)) {
+        return;
+    }
+    OPVTRealtimeEdgeIntendedVisible = visible;
+    if (visible) {
+        [OPVTRealtimeEdgeView.layer removeAllAnimations];
+        OPVTRealtimeEdgeView.hidden = NO;
+        [UIView animateWithDuration:0.25 animations:^{
+            OPVTRealtimeEdgeView.alpha = 1.0;
+        }];
+    } else {
+        [UIView animateWithDuration:0.25 animations:^{
+            OPVTRealtimeEdgeView.alpha = 0.0;
+        } completion:^(BOOL finished) {
+            (void)finished;
+            // Only actually hide if a newer call hasn't re-requested visibility.
+            if (!OPVTRealtimeEdgeIntendedVisible) {
+                OPVTRealtimeEdgeView.hidden = YES;
+            }
+        }];
     }
 }
 
@@ -6349,15 +6761,32 @@ static void OPVTIslandUpdateGlowPath(void) {
     }
     CGRect bounds = OPVTIslandPill.bounds;
     // Keep the rounded-pill feel: radius = 22 when expanded (matches iOS
-    // system smart-stack corner), 18.5 when compact (matches hardware DI).
-    CGFloat radius = bounds.size.height > 60 ? 22.0 : 18.5;
-    OPVTIslandPill.layer.cornerRadius = radius;
+    // system smart-stack corner), matches the hardware DI curvature when
+    // compact so the pill reads as a continuation of the physical notch.
+    BOOL compact = bounds.size.height < 120.0;
+    // Compact: match the hardware DI curvature (~20pt) so top corners blend
+    // into the physical notch roundness. Expanded: use the iPhone 15 Pro screen
+    // corner radius (~55pt) so the panel echoes the device's rounded corners.
+    CGFloat radius = compact ? 20.0 : 44.0;
     OPVTIslandLayoutInterior();
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:bounds
-                                                    cornerRadius:radius];
+    UIBezierPath *path;
+    OPVTIslandPill.layer.cornerRadius = radius;
+    // All four corners rounded in every state.
+    OPVTIslandPill.layer.maskedCorners =
+            kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
+            kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    path = [UIBezierPath bezierPathWithRoundedRect:bounds
+                                      cornerRadius:radius];
+    // When compact the pill IS the notch — a real notch has no colored border
+    // or glow bloom. Hide every glow layer so it renders as pure solid black.
+    // The rainbow stroke + shadow return the moment the user expands it.
+    BOOL hideGlow = compact;
+    OPVTIslandGlowLayer.hidden = hideGlow;
+    OPVTIslandGlowLayer.shadowOpacity = hideGlow ? 0.0 : 0.85;
     OPVTIslandGlowLayer.path = path.CGPath;
     OPVTIslandGlowLayer.frame = bounds;
     if (OPVTIslandGradientGlowLayer) {
+        OPVTIslandGradientGlowLayer.hidden = hideGlow;
         OPVTIslandGradientGlowLayer.frame = bounds;
     }
     if (OPVTIslandGradientMask) {
@@ -6668,8 +7097,6 @@ static void OPVTIslandApplyState(NSDictionary *state) {
             ? state[@"subtitle"] : @"";
     NSString *transcript = [state[@"transcript"] isKindOfClass:[NSString class]]
             ? state[@"transcript"] : @"";
-    NSString *tool = [state[@"tool"] isKindOfClass:[NSString class]]
-            ? state[@"tool"] : @"";
     NSString *goal = [state[@"goal"] isKindOfClass:[NSString class]]
             ? state[@"goal"] : @"";
     NSString *accent = [state[@"accent"] isKindOfClass:[NSString class]]
@@ -6694,7 +7121,13 @@ static void OPVTIslandApplyState(NSDictionary *state) {
                 mode.length == 0 ||
                 [mode isEqualToString:@"hidden"] ||
                 [mode isEqualToString:@"idle"];
-        OPVTIslandPill.alpha = isIdle ? 0.55 : 1.0;
+        // The pill is ALWAYS solid black — compact it merges with the hardware
+        // notch, expanded it must not show the app behind it. Never dim the
+        // pill itself (an expanded translucent panel was the "transparent when
+        // I expand it" bug). Only dim the status dot/text on idle.
+        OPVTIslandPill.alpha = 1.0;
+        OPVTIslandStatusDot.alpha = isIdle ? 0.45 : 1.0;
+        OPVTIslandSubtitleLabel.alpha = isIdle ? 0.55 : 1.0;
         // Fire haptic on state transitions to terminal (Android-parity feel).
         BOOL modeChanged = ![OPVTIslandCurrentMode isEqualToString:mode];
         if (modeChanged && [mode isEqualToString:@"success"]) {
@@ -6720,6 +7153,26 @@ static void OPVTIslandApplyState(NSDictionary *state) {
             }
         }
         OPVTIslandCurrentMode = mode ?: @"idle";
+        // Realtime edge glow. A realtime conversation cycles through
+        // realtime → thinking/action (tool steps) → realtime, so keying the
+        // glow strictly on mode=="realtime" made it blink off the instant the
+        // agent started thinking after a question. Instead latch it: turn ON at
+        // "realtime", KEEP it on through the working tool-step modes, and only
+        // turn OFF on a harness/terminal/idle mode. (Harness thinking/action
+        // never turn it on because the latch starts from "listening", not
+        // "realtime".)
+        if ([mode isEqualToString:@"realtime"]) {
+            OPVTRealtimeEdgeSetVisible(YES);
+        } else if ([mode isEqualToString:@"listening"] ||
+                [mode isEqualToString:@"transcribing"] ||
+                isIdle ||
+                [mode isEqualToString:@"success"] ||
+                [mode isEqualToString:@"error"] ||
+                [mode isEqualToString:@"needs_review"]) {
+            OPVTRealtimeEdgeSetVisible(NO);
+        }
+        // thinking/action: leave the glow in whatever state the session set —
+        // keeps it lit during a realtime turn, stays off during a harness turn.
         UIColor *accentColor = OPVTIslandAccentColor(accent);
         OPVTIslandStatusDot.backgroundColor = accentColor;
         OPVTIslandGlowLayer.strokeColor = accentColor.CGColor;
@@ -6742,28 +7195,31 @@ static void OPVTIslandApplyState(NSDictionary *state) {
         OPVTIslandTitleLabel.text = title;
         OPVTIslandSubtitleLabel.text = subtitle.length > 0 ? subtitle : @"";
 
-        // Auto-expand when we have any meaningful content to show. The pill
-        // stays expanded across states until it collapses on terminal.
+        // Working states stay COMPACT — the pill should sit as a small top
+        // island while the agent listens/thinks/acts, so it never covers the
+        // screen the user (and the agent) needs to see. Only the terminal
+        // reply auto-expands briefly so the answer is readable; everything
+        // else expands solely on a user tap.
         NSString *primaryText = goal.length > 0 ? goal : transcript;
-        BOOL hasContent = primaryText.length > 0 ||
-                tool.length > 0 ||
-                [mode isEqualToString:@"success"] ||
-                [mode isEqualToString:@"error"] ||
-                [mode isEqualToString:@"needs_review"];
         BOOL isTerminal = [mode isEqualToString:@"success"] ||
                 [mode isEqualToString:@"error"];
-        BOOL shouldExpand = hasContent && !isTerminal;
-        if (shouldExpand) {
-            OPVTIslandPill.frame = OPVTIslandPillFrame(OPVTIslandWindow.bounds, YES);
-            OPVTIslandEnsureExpandedViews(OPVTIslandPill.bounds.size.width - 28);
-            OPVTIslandExpanded.hidden = NO;
-        } else if (isTerminal && primaryText.length > 0) {
-            // Keep expanded on terminal so user can read summary.
-            OPVTIslandPill.frame = OPVTIslandPillFrame(OPVTIslandWindow.bounds, YES);
+        BOOL autoExpand = isTerminal && primaryText.length > 0;
+        // Never shrink below the level the user opened by hand. applyState runs
+        // on every daemon update AND at the tail of a manual expand, so keying
+        // the frame purely off content would fight the user's tap and snap the
+        // pill back to compact (the "island won't open" bug). Honor the manual
+        // expansion level as a floor.
+        NSInteger autoLevel = autoExpand ? 1 : 0;
+        NSInteger effectiveLevel = MAX(OPVTIslandExpansionLevel, autoLevel);
+        OPVTIslandExpansionLevel = effectiveLevel;
+        if (effectiveLevel > 0) {
+            OPVTIslandPill.frame = OPVTIslandPillFrameForLevel(
+                    OPVTIslandWindow.bounds, effectiveLevel);
             OPVTIslandEnsureExpandedViews(OPVTIslandPill.bounds.size.width - 28);
             OPVTIslandExpanded.hidden = NO;
         } else {
-            OPVTIslandPill.frame = OPVTIslandPillFrame(OPVTIslandWindow.bounds, NO);
+            OPVTIslandPill.frame = OPVTIslandPillFrameForLevel(
+                    OPVTIslandWindow.bounds, 0);
             if (OPVTIslandExpanded) {
                 OPVTIslandExpanded.hidden = YES;
             }
@@ -6838,6 +7294,25 @@ static void OPVTIslandApplyState(NSDictionary *state) {
     });
 }
 
+// A "working" mode means the daemon claims it is mid-turn. Such a state is only
+// trustworthy while the daemon keeps its heartbeat fresh (see the daemon-side
+// OPIslandHeartbeatThread); a stale heartbeat means the owner died and the pill
+// must self-heal to idle. Resting modes never expire.
+static BOOL OPVTIslandModeIsWorking(NSString *mode) {
+    return [mode isEqualToString:@"listening"] ||
+            [mode isEqualToString:@"realtime"] ||
+            [mode isEqualToString:@"transcribing"] ||
+            [mode isEqualToString:@"thinking"] ||
+            [mode isEqualToString:@"action"] ||
+            [mode isEqualToString:@"needs_review"];
+}
+
+// Wall-clock ms matching the daemon's OPNowMs (Unix epoch), used to compare
+// against heartbeat_ms. CFAbsoluteTime is a different epoch, so it can't.
+static long long OPVTIslandWallClockMs(void) {
+    return (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+}
+
 static void OPVTIslandRefreshFromDisk(void) {
     NSData *data = [NSData dataWithContentsOfFile:OPVTIslandStatusPath];
     if (data.length == 0) {
@@ -6857,6 +7332,70 @@ static void OPVTIslandRefreshFromDisk(void) {
     OPVTIslandCurrentState = state;
     OPVTIslandLastAppliedMs = (long long)(CFAbsoluteTimeGetCurrent() * 1000.0);
     OPVTIslandApplyState(state);
+}
+
+// Self-heal a stale working pill. If the current mode is "working" but the
+// daemon's heartbeat is older than the grace window, the owning daemon has
+// died (crash, jetsam, hang) and left a frozen snapshot — collapse to idle.
+// The grace window (15s) comfortably clears the daemon's 5s heartbeat cadence
+// while still catching a dead owner within a couple of seconds of the miss.
+static void OPVTIslandCheckLiveness(void) {
+    if (!OPVTIslandModeIsWorking(OPVTIslandCurrentMode)) {
+        return;
+    }
+    // The daemon refreshes heartbeat_ms on disk every ~5s *without* bumping the
+    // sequence (a liveness ping shouldn't churn the tweak's sequence-gated
+    // re-render). OPVTIslandRefreshFromDisk therefore skips those writes and our
+    // cached OPVTIslandCurrentState holds a stale heartbeat. Read the live
+    // heartbeat straight from disk so a healthy long-running turn (e.g. an
+    // open-ended realtime conversation) isn't misjudged as a dead owner.
+    NSDictionary *diskState = OPVTIslandCurrentState;
+    NSData *diskData = [NSData dataWithContentsOfFile:OPVTIslandStatusPath];
+    if (diskData.length > 0) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:nil];
+        if ([parsed isKindOfClass:[NSDictionary class]]) {
+            diskState = parsed;
+        }
+    }
+    long long heartbeat = [diskState[@"heartbeat_ms"] isKindOfClass:[NSNumber class]]
+            ? [diskState[@"heartbeat_ms"] longLongValue] : 0;
+    // Fall back to updated_at_ms for states written before heartbeats existed.
+    if (heartbeat == 0) {
+        heartbeat = [diskState[@"updated_at_ms"] isKindOfClass:[NSNumber class]]
+                ? [diskState[@"updated_at_ms"] longLongValue] : 0;
+    }
+    if (heartbeat == 0) {
+        return;
+    }
+    if (OPVTIslandWallClockMs() - heartbeat < 15000) {
+        return;
+    }
+    OPVTLog(@"island self-heal: mode=%@ heartbeat stale by %lldms, collapsing to idle",
+            OPVTIslandCurrentMode, OPVTIslandWallClockMs() - heartbeat);
+    OPVTIslandExpansionLevel = 0;
+    NSDictionary *idle = @{
+        @"mode": @"idle",
+        @"subtitle": @"OpenPhone",
+        @"accent": @"cyan",
+        @"sequence": @(OPVTIslandLastSequence)
+    };
+    OPVTIslandCurrentState = idle;
+    OPVTIslandApplyState(idle);
+}
+
+static void OPVTIslandStartLivenessTimer(void) {
+    if (OPVTIslandLivenessTimer) {
+        return;
+    }
+    OPVTIslandLivenessTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+            dispatch_get_main_queue());
+    dispatch_source_set_timer(OPVTIslandLivenessTimer,
+            dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+            5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(OPVTIslandLivenessTimer, ^{
+        OPVTIslandCheckLiveness();
+    });
+    dispatch_resume(OPVTIslandLivenessTimer);
 }
 
 static void OPVTIslandNotificationCallback(int token) {
@@ -6936,6 +7475,10 @@ static void OPVTStartIslandStatusObserver(void) {
                 @"sequence": @(0)
             });
         }
+        // Guard against a frozen working pill left by a dead daemon: on boot
+        // (e.g. a respring that reloaded a stale snapshot) and continuously.
+        OPVTIslandCheckLiveness();
+        OPVTIslandStartLivenessTimer();
     });
 }
 

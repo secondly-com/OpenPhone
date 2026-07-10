@@ -49,8 +49,30 @@ extern int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags,
 #ifndef MEMORYSTATUS_CMD_SET_JETSAM_HIGH_WATER_MARK
 #define MEMORYSTATUS_CMD_SET_JETSAM_HIGH_WATER_MARK 5
 #endif
+// XNU command numbers (bsd/sys/kern_memorystatus.h). Command 6 sets the fatal
+// task limit as a bare int; command 7 sets the full memlimit_properties struct
+// (active + inactive limits with per-limit fatal/non-fatal flags). Earlier code
+// used 7 with a bare int, which is a struct-size mismatch: the kernel rejected
+// it with EINVAL and the discarded return hid the failure, so the launchd 6 MB
+// default was never actually lifted. We use 7 with the correct struct below.
 #ifndef MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT
-#define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT 7
+#define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT 6
+#endif
+#ifndef MEMORYSTATUS_CMD_SET_MEMLIMIT_PROPERTIES
+#define MEMORYSTATUS_CMD_SET_MEMLIMIT_PROPERTIES 7
+#endif
+// Command 8 reads the live memlimit_properties back from the kernel. We use it
+// immediately after SET to prove the limit actually took (rc=0 on SET only means
+// the call was accepted; the read-back reports the real kernel-enforced ceiling,
+// unlike `launchctl print` which shows the stale provisioning-time value).
+#ifndef MEMORYSTATUS_CMD_GET_MEMLIMIT_PROPERTIES
+#define MEMORYSTATUS_CMD_GET_MEMLIMIT_PROPERTIES 8
+#endif
+// Bit in memorystatus_memlimit_properties.memlimit_*_attr: when SET the limit
+// is *fatal* (exceed => SIGKILL). We clear it so exceeding the limit only makes
+// us a jetsam candidate under pressure rather than an instant kill.
+#ifndef MEMORYSTATUS_MEMLIMIT_ATTR_FATAL
+#define MEMORYSTATUS_MEMLIMIT_ATTR_FATAL 0x1
 #endif
 // xnu jetsam priority bands are small integers (0..JETSAM_PRIORITY_MAX==21):
 // 0=idle, 6=phone, 10=foreground app, 12=audio_and_accessory, 19=critical.
@@ -62,6 +84,14 @@ extern int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags,
 #endif
 #ifndef JETSAM_PRIORITY_AUDIO_AND_ACCESSORY
 #define JETSAM_PRIORITY_AUDIO_AND_ACCESSORY 12
+#endif
+// Highest band a userspace daemon can realistically hold. Bands 20/21 are
+// effectively kernel-reserved and memorystatus_control rejects them for a
+// mobile-uid process, so 19 (critical) is our practical ceiling. We pin here
+// so the daemon is never reaped as low-priority collateral when a heavy app
+// (e.g. Amazon) foregrounds and spikes system memory mid voice session.
+#ifndef JETSAM_PRIORITY_CRITICAL
+#define JETSAM_PRIORITY_CRITICAL 19
 #endif
 #ifndef JETSAM_PRIORITY_MAX
 #define JETSAM_PRIORITY_MAX 21
@@ -75,6 +105,16 @@ typedef struct {
     uint64_t user_data;
 } memorystatus_priority_properties_t;
 
+// XNU bsd/sys/kern_memorystatus.h layout for MEMORYSTATUS_CMD_SET_MEMLIMIT_PROPERTIES.
+// memlimit_*_attr carry the per-limit flags (bit 0 = fatal). Must match the
+// kernel's size exactly or the call is rejected with EINVAL.
+typedef struct {
+    int32_t memlimit_active;        // MB; <=0 means "no active limit"
+    uint32_t memlimit_active_attr;
+    int32_t memlimit_inactive;      // MB; <=0 means "no inactive limit"
+    uint32_t memlimit_inactive_attr;
+} memorystatus_memlimit_properties_t;
+
 static NSString *const OPAgentVersion = @"0.1.0-dev";
 static NSString *const OPDefaultStorePath = @"/var/mobile/Library/OpenPhone";
 static NSString *const OPVolumeTriggerPreferencesPath = @"/var/mobile/Library/Preferences/com.openphone.volumetrigger.plist";
@@ -82,6 +122,12 @@ static NSString *const OPDefaultHardwareTriggerGoal = @"Use the current phone co
 static NSString *const OPLegacyHardwareTriggerGoal = @"Handle the OpenPhone hardware volume trigger using the current phone context.";
 static NSString *const OPOpenAIRealtimeModel = @"gpt-realtime";
 static NSString *const OPOpenAIRealtime2Model = @"gpt-realtime-2";
+// OpenAI Realtime emits pcm16 model audio at 24 kHz; the output AudioQueue must
+// play back at the same rate.
+#define OP_RT_OUTPUT_SAMPLE_RATE_HZ 24000
+// Step-harness OpenAI model. Matches the Android agent's DEFAULT_MODEL so both
+// platforms drive the same backend from the same OpenAI key.
+static NSString *const OPOpenAIResponsesModel = @"gpt-5.5";
 
 static volatile sig_atomic_t OPRunning = 1;
 static int OPServerFd = -1;
@@ -91,6 +137,10 @@ static long long OPHardwareTriggerLastAcceptedMs = 0;
 static pthread_mutex_t OPVoiceTriggerMutex = PTHREAD_MUTEX_INITIALIZER;
 static BOOL OPVoiceTriggerRunning = NO;
 static volatile int OPVoiceCancelRequested = 0;
+// Push-to-talk: set by the `voice_stop` command when the user releases the
+// long-press. Unlike cancel, this keeps the audio captured so far and finishes
+// the STT/transcribe path — it just ends the mic capture immediately.
+static volatile int OPVoiceStopRequested = 0;
 static long long OPVoiceTriggerLastStartedMs = 0;
 static long long OPVoiceTriggerLastFinishedMs = 0;
 static NSString *OPVoiceTriggerLastState = nil;
@@ -131,6 +181,7 @@ static NSDictionary *OPReadJSONFile(NSString *path);
 static BOOL OPTaskCancellationRequested(NSString *taskId, NSString **reasonOut);
 static void OPRecordTrajectory(NSString *taskId, NSString *event, NSDictionary *payload);
 static BOOL OPModelModeIsOpenAIRealtime(NSString *mode);
+static NSString *OPVoiceCredentialValue(NSString **sourceOut);
 static NSDictionary *OPJetsamPrioritySet(NSDictionary *request);
 static NSString *OPExplicitURLFromText(NSString *text);
 static NSDictionary *OPError(NSString *reason);
@@ -928,6 +979,20 @@ static NSString *OPIslandDir(void) {
     return [OPStorePath() stringByAppendingPathComponent:@"springboard"];
 }
 
+// A "working" mode is a claim that a live daemon is mid-turn (recording,
+// transcribing, running a tool, or waiting on the user). The daemon proves it
+// still owns that claim by refreshing heartbeat_ms; if it dies, the heartbeat
+// stops and the SpringBoard tweak self-heals the stale pill back to idle.
+// Resting modes (idle/success/error/hidden) need no owner and never expire.
+static BOOL OPIslandModeIsWorking(NSString *mode) {
+    return [mode isEqualToString:@"listening"] ||
+            [mode isEqualToString:@"realtime"] ||
+            [mode isEqualToString:@"transcribing"] ||
+            [mode isEqualToString:@"thinking"] ||
+            [mode isEqualToString:@"action"] ||
+            [mode isEqualToString:@"needs_review"];
+}
+
 static void OPIslandEnsureState(void) {
     if (!OPIslandState) {
         OPIslandState = [NSMutableDictionary dictionary];
@@ -944,13 +1009,22 @@ static void OPIslandEnsureState(void) {
         OPIslandState[@"accent"] = @"cyan";
         OPIslandState[@"sequence"] = @0;
         OPIslandState[@"updated_at_ms"] = @0;
+        OPIslandState[@"heartbeat_ms"] = @0;
     }
 }
 
-static void OPIslandPublishLocked(void) {
-    OPIslandSequence += 1;
-    OPIslandState[@"sequence"] = @(OPIslandSequence);
-    OPIslandState[@"updated_at_ms"] = @(OPNowMs());
+// Write the current state to disk. Bumps the sequence and posts the Darwin
+// notification only on a real state change (bumpSequence=YES); the heartbeat
+// path writes with bumpSequence=NO so a liveness refresh doesn't churn the
+// tweak's sequence-gated re-render. Caller must hold OPIslandMutex.
+static void OPIslandWriteLocked(BOOL bumpSequence) {
+    long long now = OPNowMs();
+    if (bumpSequence) {
+        OPIslandSequence += 1;
+        OPIslandState[@"sequence"] = @(OPIslandSequence);
+        OPIslandState[@"updated_at_ms"] = @(now);
+    }
+    OPIslandState[@"heartbeat_ms"] = @(now);
     NSString *dir = OPIslandDir();
     [[NSFileManager defaultManager] createDirectoryAtPath:dir
                               withIntermediateDirectories:YES
@@ -959,7 +1033,34 @@ static void OPIslandPublishLocked(void) {
     if (OPWriteJSONFile(OPIslandStatusPath, snapshot)) {
         chmod(OPIslandStatusPath.UTF8String, 0644);
     }
-    notify_post(OPIslandStatusNotification);
+    if (bumpSequence) {
+        notify_post(OPIslandStatusNotification);
+    }
+}
+
+static void OPIslandPublishLocked(void) {
+    OPIslandWriteLocked(YES);
+}
+
+// Keeps heartbeat_ms fresh while a working state is showing, so the tweak can
+// tell a live long-running turn (e.g. a 45s voice recording) apart from a
+// frozen snapshot left by a crashed/jetsammed daemon.
+static void *OPIslandHeartbeatThread(void *unused) {
+    (void)unused;
+    while (true) {
+        usleep(5 * 1000 * 1000);
+        @autoreleasepool {
+            pthread_mutex_lock(&OPIslandMutex);
+            OPIslandEnsureState();
+            NSString *mode = [OPIslandState[@"mode"] isKindOfClass:[NSString class]]
+                    ? OPIslandState[@"mode"] : @"";
+            if (OPIslandModeIsWorking(mode)) {
+                OPIslandWriteLocked(NO);
+            }
+            pthread_mutex_unlock(&OPIslandMutex);
+        }
+    }
+    return NULL;
 }
 
 static void OPIslandUpdate(NSDictionary *patch) {
@@ -1525,7 +1626,31 @@ static BOOL OPSQLiteTableExists(sqlite3 *db, NSString *name) {
     return exists;
 }
 
+static BOOL OPSQLiteMigrationApplied(sqlite3 *db, const char *name) {
+    sqlite3_stmt *statement = NULL;
+    BOOL applied = NO;
+    if (sqlite3_prepare_v2(db,
+            "SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1",
+            -1, &statement, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT);
+        applied = sqlite3_step(statement) == SQLITE_ROW;
+    }
+    sqlite3_finalize(statement);
+    return applied;
+}
+
 static BOOL OPSQLiteMigrate(sqlite3 *db, NSString **errorOut) {
+    // Connection-level PRAGMAs don't dirty pages, but the schema bookkeeping below
+    // (ALTER TABLE + INSERT OR REPLACE into schema_migrations) writes on every call.
+    // This runs on every OPSQLiteOpen and the 5s scheduler opens the DB constantly;
+    // re-running the writes each tick dirtied ~4GB/day and got the daemon jetsam-killed
+    // mid-session. Once the final migration is recorded, skip all writes.
+    OPSQLiteExec(db, @"PRAGMA journal_mode=WAL", NULL);
+    OPSQLiteExec(db, @"PRAGMA synchronous=NORMAL", NULL);
+    if (OPSQLiteTableExists(db, @"schema_migrations") &&
+            OPSQLiteMigrationApplied(db, "openphone_store_v3_scheduler_enabled")) {
+        return YES;
+    }
     NSArray<NSString *> *statements = @[
         @"PRAGMA journal_mode=WAL",
         @"PRAGMA synchronous=NORMAL",
@@ -3723,12 +3848,19 @@ static BOOL OPModelModeIsOpenAIRealtime(NSString *mode) {
             [mode isEqualToString:@"openai_realtime2"];
 }
 
+static BOOL OPModelModeIsOpenAIResponses(NSString *mode) {
+    return [mode isEqualToString:@"openai_responses"];
+}
+
 static NSString *OPModelDefaultModelForMode(NSString *mode) {
     if ([mode isEqualToString:@"openai_realtime2"]) {
         return OPOpenAIRealtime2Model;
     }
     if ([mode isEqualToString:@"openai_realtime"]) {
         return OPOpenAIRealtimeModel;
+    }
+    if (OPModelModeIsOpenAIResponses(mode)) {
+        return OPOpenAIResponsesModel;
     }
     return @"";
 }
@@ -3746,6 +3878,7 @@ static NSString *OPModelEffectiveModel(NSDictionary *config) {
 
 static BOOL OPModelModeHasDefaultEndpoint(NSString *mode) {
     return [mode isEqualToString:@"bedrock_converse"] ||
+            OPModelModeIsOpenAIResponses(mode) ||
             OPModelModeIsOpenAIRealtime(mode);
 }
 
@@ -3753,6 +3886,7 @@ static BOOL OPModelModeIsValid(NSString *mode) {
     return [mode isEqualToString:@"broker"] ||
             [mode isEqualToString:@"direct_dev"] ||
             [mode isEqualToString:@"bedrock_converse"] ||
+            OPModelModeIsOpenAIResponses(mode) ||
             OPModelModeIsOpenAIRealtime(mode);
 }
 
@@ -3784,7 +3918,7 @@ static NSDictionary *OPModelConfig(void) {
     config[@"model"] = OPModelEffectiveModel(config) ?: @"";
     config[@"enabled"] = @(OPBoolFromRequest(config, @"enabled", NO));
     BOOL credentialRequired = OPBoolFromRequest(config, @"credential_required", YES);
-    if (OPModelModeIsOpenAIRealtime(mode)) {
+    if (OPModelModeIsOpenAIRealtime(mode) || OPModelModeIsOpenAIResponses(mode)) {
         credentialRequired = YES;
     }
     config[@"credential_required"] = @(credentialRequired);
@@ -3972,7 +4106,7 @@ static NSDictionary *OPModelConfigure(NSDictionary *request) {
     long long maxSteps = OPLongLongFromRequest(request, @"max_steps", 5, 1, 120);
     long long maxDurationMs = OPLongLongFromRequest(request, @"max_duration_ms", 120000, 1000, 3300000);
     BOOL credentialRequired = OPBoolFromRequest(request, @"credential_required", YES);
-    if (OPModelModeIsOpenAIRealtime(mode)) {
+    if (OPModelModeIsOpenAIRealtime(mode) || OPModelModeIsOpenAIResponses(mode)) {
         credentialRequired = YES;
     }
     // Preserve screenshot tuning across model config writes: the screenshot
@@ -6579,6 +6713,73 @@ static NSArray<NSDictionary *> *OPContactsSystemSearch(NSString *query, NSUInteg
     return contacts;
 }
 
+static NSString *OPTelURLForPhoneNumber(NSString *raw) {
+    if (![raw isKindOfClass:[NSString class]] || raw.length == 0) {
+        return nil;
+    }
+    NSMutableString *out = [NSMutableString string];
+    BOOL leadingPlus = NO;
+    for (NSUInteger i = 0; i < raw.length; i++) {
+        unichar c = [raw characterAtIndex:i];
+        if (c == '+' && out.length == 0) {
+            leadingPlus = YES;
+        } else if (c >= '0' && c <= '9') {
+            [out appendFormat:@"%C", c];
+        }
+    }
+    if (out.length == 0) {
+        return nil;
+    }
+    return leadingPlus ? [NSString stringWithFormat:@"tel:+%@", out]
+                       : [NSString stringWithFormat:@"tel:%@", out];
+}
+
+// Pick the single best contact to call for a name-based call goal and return a
+// ready tel: URL. gpt-5.5 cannot be trusted to translate contact rows into a
+// dial action (it blind-taps the current screen instead), so the daemon owns
+// this deterministically: skip the user's own "(me)" entry, require a dialable
+// number, and prefer a primary "Main" entry when a first-name query matches
+// several people. Returns nil when nothing dialable resolves.
+static NSString *OPBestCallDialURL(NSArray<NSDictionary *> *contacts, NSString *query) {
+    if (![contacts isKindOfClass:[NSArray class]] || contacts.count == 0) {
+        return nil;
+    }
+    NSString *q = [(query ?: @"") lowercaseString];
+    NSString *best = nil;
+    NSInteger bestScore = NSIntegerMin;
+    for (NSDictionary *c in contacts) {
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        NSString *name = [c[@"display_name"] isKindOfClass:[NSString class]]
+                ? c[@"display_name"] : @"";
+        NSString *nameLower = name.lowercaseString;
+        // Never dial the user's own record.
+        if ([nameLower containsString:@"(me)"]) {
+            continue;
+        }
+        NSArray *phones = [c[@"phone_numbers"] isKindOfClass:[NSArray class]]
+                ? c[@"phone_numbers"] : @[];
+        NSString *tel = nil;
+        for (id p in phones) {
+            if ([p isKindOfClass:[NSString class]]) {
+                tel = OPTelURLForPhoneNumber(p);
+                if (tel) break;
+            }
+        }
+        if (!tel) {
+            continue;
+        }
+        NSInteger score = 0;
+        if (q.length > 0 && [nameLower isEqualToString:q]) score += 100;
+        if (q.length > 0 && [nameLower containsString:q]) score += 40;
+        if ([nameLower containsString:@"main"]) score += 10;
+        if (score > bestScore) {
+            bestScore = score;
+            best = tel;
+        }
+    }
+    return best;
+}
+
 static NSArray *OPContactsSummaryContacts(NSArray<NSDictionary *> *contacts, NSUInteger limit) {
     NSMutableArray *summary = [NSMutableArray array];
     for (NSDictionary *contact in contacts) {
@@ -6594,7 +6795,18 @@ static NSArray *OPContactsSummaryContacts(NSArray<NSDictionary *> *contacts, NSU
         NSArray *emails = [contact[@"emails"] isKindOfClass:[NSArray class]]
                 ? contact[@"emails"] : @[];
         if (phones.count > 0) {
-            item[@"phone_numbers"] = phones.count > 4 ? [phones subarrayWithRange:NSMakeRange(0, 4)] : phones;
+            NSArray *keptPhones = phones.count > 4 ? [phones subarrayWithRange:NSMakeRange(0, 4)] : phones;
+            item[@"phone_numbers"] = keptPhones;
+            NSMutableArray *dialURLs = [NSMutableArray array];
+            for (NSString *phone in keptPhones) {
+                NSString *tel = OPTelURLForPhoneNumber(phone);
+                if (tel) {
+                    [dialURLs addObject:tel];
+                }
+            }
+            if (dialURLs.count > 0) {
+                item[@"dial_urls"] = dialURLs;
+            }
         }
         if (emails.count > 0) {
             item[@"emails"] = emails.count > 4 ? [emails subarrayWithRange:NSMakeRange(0, 4)] : emails;
@@ -11697,6 +11909,56 @@ static NSDictionary *OPInteractiveElementFromScreen(NSDictionary *screen, NSStri
     return nil;
 }
 
+static BOOL OPElementIsEditableField(NSDictionary *element) {
+    if (![element isKindOfClass:[NSDictionary class]]) {
+        return NO;
+    }
+    NSString *kind = [element[@"kind"] isKindOfClass:[NSString class]]
+            ? element[@"kind"] : @"";
+    if ([kind isEqualToString:@"text_field"] || [kind isEqualToString:@"text_area"] ||
+            [kind isEqualToString:@"search"]) {
+        return YES;
+    }
+    // Web/DOM editables report editable:true rather than a native kind.
+    if ([element[@"editable"] respondsToSelector:@selector(boolValue)] &&
+            [element[@"editable"] boolValue]) {
+        return YES;
+    }
+    return NO;
+}
+
+// Returns YES only when the current screen shows a focused, editable text
+// field. Blind daemon HID typing has no target of its own, so if nothing is
+// focused the keystrokes are dropped on the floor; callers use this to avoid
+// reporting a clean success for typing that went nowhere.
+static BOOL OPScreenHasFocusedEditableField(NSDictionary *screen) {
+    NSDictionary *context = [screen[@"context"] isKindOfClass:[NSDictionary class]]
+            ? screen[@"context"] : @{};
+    NSMutableArray *candidateArrays = [NSMutableArray array];
+    if ([context[@"interactive_elements"] isKindOfClass:[NSArray class]]) {
+        [candidateArrays addObject:context[@"interactive_elements"]];
+    }
+    NSDictionary *uiTree = [context[@"ui_tree"] isKindOfClass:[NSDictionary class]]
+            ? context[@"ui_tree"] : @{};
+    if ([uiTree[@"interactive_elements"] isKindOfClass:[NSArray class]]) {
+        [candidateArrays addObject:uiTree[@"interactive_elements"]];
+    }
+    for (NSArray *elements in candidateArrays) {
+        for (id object in elements) {
+            if (![object isKindOfClass:[NSDictionary class]]) {
+                continue;
+            }
+            NSDictionary *element = object;
+            BOOL focused = [element[@"focused"] respondsToSelector:@selector(boolValue)] &&
+                    [element[@"focused"] boolValue];
+            if (focused && OPElementIsEditableField(element)) {
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
 static NSDictionary *OPResolvedElementSummary(NSDictionary *element) {
     if (![element isKindOfClass:[NSDictionary class]]) {
         return @{};
@@ -12242,18 +12504,19 @@ static NSDictionary *OPExecuteAction(NSDictionary *request) {
                 id enabledValue = resolvedElement[@"enabled"];
                 BOOL enabled = ![enabledValue respondsToSelector:@selector(boolValue)] ||
                         [enabledValue boolValue];
-                if (!enabled) {
-                    result = @{
-                        @"state": @"action.denied.element_disabled",
-                        @"task_id": taskId,
-                        @"capability": capability,
-                        @"detail": [NSString stringWithFormat:@"element_disabled:%@", elementId],
-                        @"target": OPResolvedElementSummary(resolvedElement),
-                        @"source": @"openphone.agentd"
-                    };
-                } else if (OPCenterFromBoundsObject(resolvedElement[@"bounds"], &x, &y)) {
+                // Many real controls (e.g. Amazon's "Search Amazon.com" field,
+                // which is actually a button that expands the search UI) report
+                // accessibilityTraits without UIAccessibilityTrait* enabling, so
+                // our tree marks them enabled=false even though a human taps them
+                // fine. Hard-denying stalled the agent forever ("Looking at ..."
+                // with no path forward). So we no longer refuse a disabled element
+                // outright: if it has valid bounds we tap its center by coordinate
+                // and flag it, letting the next screen observation confirm whether
+                // the tap did anything. We only deny when there are no bounds at all.
+                if (OPCenterFromBoundsObject(resolvedElement[@"bounds"], &x, &y)) {
                     hasPoint = YES;
-                    coordinateSource = @"ui_tree.bounds_center";
+                    coordinateSource = enabled ? @"ui_tree.bounds_center"
+                            : @"ui_tree.bounds_center.disabled_override";
                 } else {
                     result = @{
                         @"state": @"action.denied.missing_coordinates",
@@ -12539,17 +12802,38 @@ static NSDictionary *OPExecuteAction(NSDictionary *request) {
                 }
             }
             if (!result) {
+                // Blind daemon HID typing has no target of its own: keystrokes
+                // land in whatever field currently holds keyboard focus, or are
+                // dropped entirely if nothing is focused. Reporting success here
+                // when no editable field is focused is how send-message flows
+                // "type" a body that never actually enters the field. Require a
+                // focused editable field before trusting the blind path.
+                BOOL hasFocusedField = OPScreenHasFocusedEditableField(screen);
                 NSDictionary *typed = OPPerformHIDTypeText(text);
+                BOOL dispatched = [typed[@"ok"] boolValue];
+                NSString *state;
+                NSString *detail;
+                if (!dispatched) {
+                    state = @"action.denied.input_failed";
+                    detail = [NSString stringWithFormat:@"type_text:%lu", (unsigned long)text.length];
+                } else if (!hasFocusedField) {
+                    state = @"action.denied.no_focused_field";
+                    detail = [NSString stringWithFormat:@"type_text:%lu:no_focused_field", (unsigned long)text.length];
+                } else {
+                    state = @"action.executed";
+                    detail = [NSString stringWithFormat:@"type_text:%lu", (unsigned long)text.length];
+                }
                 NSMutableDictionary *mutableResult = [@{
-                    @"state": [typed[@"ok"] boolValue]
-                            ? @"action.executed" : @"action.denied.input_failed",
+                    @"state": state,
                     @"task_id": taskId,
                     @"capability": capability,
-                    @"detail": [NSString stringWithFormat:@"type_text:%lu",
-                                 (unsigned long)text.length],
+                    @"detail": detail,
                     @"provider_result": typed,
                     @"source": @"openphone.agentd"
                 } mutableCopy];
+                if ([state isEqualToString:@"action.denied.no_focused_field"]) {
+                    mutableResult[@"reason"] = @"No editable text field is focused, so the typed text was not entered. Tap the text field first (to give it keyboard focus), then type again.";
+                }
                 NSMutableArray *providerAttempts = [NSMutableArray array];
                 if (appInput) {
                     [providerAttempts addObject:OPInputAttemptSummaryForAction(appInput, type)];
@@ -13200,6 +13484,87 @@ static BOOL OPStringContainsCaseInsensitive(NSString *haystack, NSString *needle
     return [haystack rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
+// A send-a-message goal must actually enter body text before it can be
+// finished. gpt-5.5 sometimes hallucinates a "Sent ..." finish_task after only
+// tapping/opening, so we gate finish_task on a real prior type_text for these
+// goals. Deliberately narrow: only trip on explicit send-message phrasing.
+static BOOL OPGoalIsSendMessage(NSString *goal) {
+    NSString *lower = [(goal ?: @"") lowercaseString];
+    if (lower.length == 0) {
+        return NO;
+    }
+    BOOL hasVerb = [lower containsString:@"send"] || [lower containsString:@"text "] ||
+            [lower hasPrefix:@"text"] || [lower containsString:@"message"] ||
+            [lower containsString:@"imessage"] || [lower containsString:@"reply"];
+    if (!hasVerb) {
+        return NO;
+    }
+    return [lower containsString:@"message"] || [lower containsString:@"imessage"] ||
+            [lower containsString:@"text"] || [lower containsString:@"say"] ||
+            [lower containsString:@"tell"] || [lower containsString:@"reply"] ||
+            [lower containsString:@"whatsapp"] || [lower containsString:@"sms"];
+}
+
+// A "call <name>" goal where the number is NOT already in the goal text. In
+// that case gpt-5.5 is unreliable at deciding to look the number up first —
+// it either blind-taps the current screen or refuses. So we deterministically
+// seed contacts_search as the first step and hand the resolved dial_urls back
+// to the model, which then only has to open_url the tel: link (which it does
+// reliably when the number is literally in front of it). Returns the contact
+// name to search for, or nil when the goal is not a name-based call request.
+static NSString *OPCallGoalContactName(NSString *goal) {
+    NSString *lower = [(goal ?: @"") lowercaseString];
+    NSString *trimmed = [(goal ?: @"") stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (lower.length == 0) {
+        return nil;
+    }
+    // If the goal already carries a phone number, the model dials fine on its
+    // own — do not seed a contact search.
+    NSUInteger digitRun = 0, maxDigitRun = 0;
+    for (NSUInteger i = 0; i < lower.length; i++) {
+        unichar c = [lower characterAtIndex:i];
+        if (c >= '0' && c <= '9') { digitRun++; if (digitRun > maxDigitRun) maxDigitRun = digitRun; }
+        else { digitRun = 0; }
+    }
+    if (maxDigitRun >= 5) {
+        return nil;
+    }
+    // Match a leading call verb.
+    NSArray<NSString *> *prefixes = @[@"call ", @"phone ", @"dial ", @"ring ",
+            @"give a call to ", @"place a call to ", @"call up "];
+    NSString *name = nil;
+    for (NSString *prefix in prefixes) {
+        if ([lower hasPrefix:prefix]) {
+            name = [trimmed substringFromIndex:prefix.length];
+            break;
+        }
+    }
+    if (name == nil) {
+        return nil;
+    }
+    name = [name stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // Strip a trailing "on his/her cell", "'s phone", etc. — keep the first
+    // 1-3 words which are almost always the contact name.
+    NSArray<NSString *> *words = [name componentsSeparatedByCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSMutableArray<NSString *> *kept = [NSMutableArray array];
+    for (NSString *w in words) {
+        if (w.length == 0) continue;
+        NSString *wl = w.lowercaseString;
+        if ([wl isEqualToString:@"on"] || [wl isEqualToString:@"at"] ||
+                [wl isEqualToString:@"please"] || [wl isEqualToString:@"now"] ||
+                [wl hasPrefix:@"'s"]) {
+            break;
+        }
+        [kept addObject:w];
+        if (kept.count >= 3) break;
+    }
+    NSString *result = [kept componentsJoinedByString:@" "];
+    return result.length > 0 ? result : nil;
+}
+
 static BOOL OPModelVerifiedTypeTextCompletesGoal(NSString *goal, NSDictionary *decision,
         NSDictionary *verification) {
     if (![decision[@"tool"] isEqualToString:@"type_text"] ||
@@ -13595,47 +13960,79 @@ static NSString *OPModelPromptText(NSDictionary *requestBody) {
     return [NSString stringWithFormat:
             @"You are OpenPhone — a voice assistant inside the user's iPhone.\n"
             @"Speak like a friend. Short. Human. Never recap raw context fields.\n\n"
+            @"You operate ONE STEP AT A TIME. Each turn you see the CURRENT screen and\n"
+            @"choose ONE next action. After it runs you get the NEW screen and choose\n"
+            @"again, until the goal is truly done. You are NOT planning the whole thing\n"
+            @"up front — decide the single best next step for the screen in front of you.\n\n"
             @"You route every request into ONE mode:\n\n"
-            @"  answer  — user asked a question you can answer from what's already visible or from common knowledge. Fill `reply` with a short human answer. Done in one turn.\n"
-            @"  act     — user wants something done on the phone. Fill `proposed_actions[]` with the exact tool calls needed, IN ORDER. If ONE tool call finishes the whole goal (open X, dial Y, open URL Z) put JUST that one call. Only include multiple actions if they are actually required for that goal (e.g. open Messages → tap Alex → type → send).\n"
+            @"  answer  — user asked a question you can answer from what's visible or from common knowledge. Fill `reply`. Done in one turn.\n"
+            @"  act     — user wants something done on the phone. Put the SINGLE next tool call in `proposed_actions[]` (exactly one). Do the next concrete step toward the goal based on what's on screen right now.\n"
             @"  stop    — user asked to cancel or stop the assistant.\n\n"
+            @"FINISHING (critical — do NOT lie about completion):\n"
+            @"- Only finish when the goal is ACTUALLY, VISIBLY complete on the current screen.\n"
+            @"- Opening an app is NOT completing a task. Typing text is NOT sending it.\n"
+            @"- To finish, put a single {\"tool\":\"finish_task\",\"arguments\":{\"summary\":\"...\"}} in proposed_actions[]. NEVER claim you sent/did something unless the screen proves it (e.g. the sent message now appears in the transcript).\n"
+            @"- If something clearly failed or is impossible, use {\"tool\":\"fail_task\",\"arguments\":{\"reason\":\"...\"}}.\n\n"
+            @"SENDING A MESSAGE (multi-step — follow in order, one step per turn):\n"
+            @"  1. open_app com.apple.MobileSMS.\n"
+            @"  2. Start a new message (tap the Compose element) OR tap the existing conversation with that contact if one is visible.\n"
+            @"  3. In a new message, type the recipient into the To field (type_text), then pick the matching contact suggestion (tap_element).\n"
+            @"  4. Tap the message/text field FIRST and confirm the keyboard appears — this is a SEPARATE step from typing. type_text ONLY works on a field that already has keyboard focus; typing into an unfocused screen silently drops every keystroke and the field stays empty. Then, on the NEXT turn, type the body with type_text.\n"
+            @"  5. Tap the Send button (the up-arrow, often labeled 'Send'). \n"
+            @"  6. Only AFTER the sent bubble appears in the transcript → finish_task.\n\n"
+            @"PLACING A CALL (multi-step — follow in order, one step per turn):\n"
+            @"  1. If you do not already have the phone number, use contacts_search to look it up. Do this AT MOST ONCE — if it returns a number, move on; never search the same contact twice.\n"
+            @"  2. open_url with a tel: URL. The contacts_search result gives each contact a ready-to-use `dial_urls` array — pass the FIRST entry straight into open_url, e.g. {\"url\":\"tel:+14155550123\"}. Do NOT reformat it, do NOT second-guess it, do NOT decide the number is unusable: if a `dial_urls` value exists, it IS the number to call. Only if `dial_urls` is absent, build the tel: URL yourself from the phone_numbers digits (strip spaces, dashes and parentheses; keep a leading + and country code). This launches the dialer and starts the call.\n"
+            @"  3. On the next turn the in-call screen should be visible → finish_task with a summary like \"Calling Adam.\". If the dialer never appears, fail_task — do NOT claim the call was placed.\n\n"
             @"HARD RULES:\n"
-            @"- The current phone context (foreground app, visible text, tappable elements) is ALREADY in this prompt. NEVER pick mode=inspect just to look again.\n"
-            @"- For questions like 'what app am I in', 'can you see my screen', 'what's on my calendar today' → mode=answer with a direct sentence in `reply`.\n"
-            @"- For 'open X', 'search Y on Z', 'call mom' → mode=act with the minimal proposed_actions[] to finish the goal.\n"
-            @"- Explicit URLs (goal contains http/https): the FIRST proposed_action MUST be open_url with that URL. Never tap Safari icons first.\n"
-            @"- Autonomy is full YOLO. Never ask permission. Never say 'I would' or 'shall I'. Just do it.\n\n"
+            @"- The current phone context (foreground app, visible text, tappable elements) is ALREADY in this prompt. Never ask to look again.\n"
+            @"- `loop.guidance` and `loop.last_tool` in the context tell you what you just did and what to do next — READ THEM before deciding. Never repeat the identical action twice.\n"
+            @"- Prefer tap_element with an exact element_id from the screen over raw tap coordinates.\n"
+            @"- For questions ('what app am I in', 'can you see my screen') → mode=answer with a direct sentence.\n"
+            @"- Explicit URLs (goal contains http/https): next action is open_url with that URL. Never tap Safari icons first.\n"
+            @"- Autonomy is full YOLO. Never ask permission. Never say 'I would' or 'shall I'. Just do the next step.\n\n"
             @"HOW TO WRITE `reply`:\n"
-            @"- Under 20 words. Talk TO the user. Never mention 'foreground_app', 'SpringBoard', 'element id', 'UI tree', 'metadata'.\n"
-            @"- For act mode: describe what you're doing right now, present tense. Example: \"Opening Wikipedia for Adam.\"\n"
-            @"- For answer mode: the direct answer. Example: \"Settings.\"\n\n"
-            @"EXAMPLES:\n"
+            @"- Under 20 words. Talk TO the user. Never mention 'foreground_app', 'element id', 'UI tree', 'metadata'.\n"
+            @"- act mode: describe what you're doing right now, present tense. Example: \"Typing your message to Alex.\"\n"
+            @"- answer mode: the direct answer. Example: \"Settings.\"\n\n"
+            @"EXAMPLES (each is ONE turn):\n"
             @"  User: \"Can you see my screen?\" →\n"
             @"    { \"mode\":\"answer\", \"reply\":\"Yes — you're on the Home screen.\" }\n"
-            @"  User: \"What app am I in?\" →\n"
-            @"    { \"mode\":\"answer\", \"reply\":\"Settings.\" }\n"
-            @"  User: \"Open Wikipedia\" →\n"
+            @"  User: \"Open Wikipedia\" (on Home screen) →\n"
             @"    { \"mode\":\"act\", \"reply\":\"Opening Wikipedia.\",\n"
             @"      \"proposed_actions\":[{\"tool\":\"open_url\",\"arguments\":{\"url\":\"https://en.wikipedia.org/\"}}] }\n"
-            @"  User: \"Search Adam on Wikipedia\" →\n"
-            @"    { \"mode\":\"act\", \"reply\":\"Opening the Wikipedia page for Adam.\",\n"
-            @"      \"proposed_actions\":[{\"tool\":\"open_url\",\"arguments\":{\"url\":\"https://en.wikipedia.org/wiki/Adam\"}}] }\n"
-            @"  User: \"Text Alex on my way\" →\n"
-            @"    { \"mode\":\"act\", \"reply\":\"Texting Alex 'on my way'.\", \"task_goal\":\"send SMS 'on my way' to contact Alex\",\n"
-            @"      \"proposed_actions\":[{\"tool\":\"open_app\",\"arguments\":{\"bundle_id\":\"com.apple.MobileSMS\"}}] }\n\n"
+            @"  User: \"Call Adam\" (found +14155550123 via contacts_search) →\n"
+            @"    { \"mode\":\"act\", \"reply\":\"Calling Adam.\",\n"
+            @"      \"proposed_actions\":[{\"tool\":\"open_url\",\"arguments\":{\"url\":\"tel:+14155550123\"}}] }\n"
+            @"  User: \"Text Alex 'on my way'\" (Home screen, step 1) →\n"
+            @"    { \"mode\":\"act\", \"reply\":\"Opening Messages.\", \"task_goal\":\"send 'on my way' to Alex\",\n"
+            @"      \"proposed_actions\":[{\"tool\":\"open_app\",\"arguments\":{\"bundle_id\":\"com.apple.MobileSMS\"}}] }\n"
+            @"  (next turn, Messages open, compose visible) →\n"
+            @"    { \"mode\":\"act\", \"reply\":\"Starting a new message.\",\n"
+            @"      \"proposed_actions\":[{\"tool\":\"tap_element\",\"arguments\":{\"element_id\":\"<compose id>\"}}] }\n"
+            @"  (next turn, To field focused) →\n"
+            @"    { \"mode\":\"act\", \"reply\":\"Adding Alex.\",\n"
+            @"      \"proposed_actions\":[{\"tool\":\"type_text\",\"arguments\":{\"text\":\"Alex\"}}] }\n"
+            @"  (…continue: pick contact, tap body, type 'on my way', tap Send…)\n"
+            @"  (final turn, sent bubble visible in transcript) →\n"
+            @"    { \"mode\":\"act\", \"reply\":\"Sent 'on my way' to Alex.\",\n"
+            @"      \"proposed_actions\":[{\"tool\":\"finish_task\",\"arguments\":{\"summary\":\"Sent 'on my way' to Alex.\"}}] }\n\n"
             @"TOOL SCHEMAS (for proposed_actions):\n"
             @"- open_url: {\"url\":\"https://...\"}\n"
             @"- open_app: {\"bundle_id\":\"com.example.App\"}\n"
             @"- tap_element: {\"element_id\":\"exact visible id from the screen context\"}\n"
             @"- tap: {\"x\":num,\"y\":num}\n"
-            @"- type_text: {\"text\":\"...\",\"element_id\":\"field id\"}\n"
+            @"- type_text: {\"text\":\"...\",\"element_id\":\"field id (optional)\"}\n"
             @"- swipe: {\"start_x\",\"start_y\",\"end_x\",\"end_y\"}\n"
-            @"- home: {}\n\n"
-            @"Return ONE JSON object matching this schema — no markdown, no prose outside JSON:\n"
+            @"- home: {}\n"
+            @"- finish_task: {\"summary\":\"what you actually accomplished\"}\n"
+            @"- fail_task: {\"reason\":\"why it can't be done\"}\n\n"
+            @"Return ONE JSON object matching this schema — no markdown, no prose outside JSON.\n"
+            @"In act mode, proposed_actions MUST contain EXACTLY ONE action (the next step):\n"
             @"{\"schema\":\"openphone.model_decision.v3\",\"mode\":\"answer|act|stop\",\"reply\":\"user-facing text\",\"task_goal\":\"only if multi-step\",\"proposed_actions\":[{\"tool\":\"...\",\"arguments\":{...}}],\"reason\":\"private, brief\"}\n\n"
             @"Allowed tools inside proposed_actions: %@\n"
-            @"User said: %@\n\n"
-            @"Current phone context:\n%@",
+            @"User's original goal: %@\n\n"
+            @"Current phone context (includes loop.guidance / loop.last_tool — read them):\n%@",
             toolList,
             goal,
             OPModelJSONStringForPrompt(context, 6000)];
@@ -13884,11 +14281,213 @@ static NSDictionary *OPModelBrokerDecision(NSDictionary *modelStatus, NSDictiona
     return result;
 }
 
+// Extract the assistant text from an OpenAI /v1/responses envelope. Mirrors the
+// Android adapter's extractOutputText: prefer the flattened "output_text", else
+// walk output[].content[].text.
+static NSString *OPModelOpenAIResponsesOutputText(NSDictionary *object) {
+    NSString *direct = [object[@"output_text"] isKindOfClass:[NSString class]]
+            ? object[@"output_text"] : @"";
+    if (direct.length > 0) {
+        return direct;
+    }
+    NSArray *output = [object[@"output"] isKindOfClass:[NSArray class]]
+            ? object[@"output"] : @[];
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (id itemValue in output) {
+        if (![itemValue isKindOfClass:[NSDictionary class]]) {
+            continue;
+        }
+        NSArray *content = [itemValue[@"content"] isKindOfClass:[NSArray class]]
+                ? itemValue[@"content"] : @[];
+        for (id blockValue in content) {
+            if (![blockValue isKindOfClass:[NSDictionary class]]) {
+                continue;
+            }
+            NSString *text = [blockValue[@"text"] isKindOfClass:[NSString class]]
+                    ? blockValue[@"text"] : @"";
+            if (text.length > 0) {
+                [parts addObject:text];
+            }
+        }
+    }
+    return [[parts componentsJoinedByString:@"\n"]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+// Read the current screenshot referenced by the prompt context and return it as
+// a base64 "data:image/jpeg;base64,..." URL for the Responses input_image block.
+// Returns @"" when no usable screenshot is available (model then runs text-only).
+static NSString *OPModelScreenshotDataURLFromRequestBody(NSDictionary *requestBody) {
+    NSDictionary *context = [requestBody[@"context"] isKindOfClass:[NSDictionary class]]
+            ? requestBody[@"context"] : @{};
+    NSDictionary *screen = [context[@"screen"] isKindOfClass:[NSDictionary class]]
+            ? context[@"screen"] : @{};
+    NSDictionary *shot = [screen[@"screenshot"] isKindOfClass:[NSDictionary class]]
+            ? screen[@"screenshot"] : @{};
+    if (![shot[@"status"] isEqualToString:@"ok"]) {
+        return @"";
+    }
+    NSString *path = [shot[@"path"] isKindOfClass:[NSString class]] ? shot[@"path"] : @"";
+    if (path.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        return @"";
+    }
+    NSData *imageData = [NSData dataWithContentsOfFile:path];
+    if (imageData.length == 0) {
+        return @"";
+    }
+    NSString *b64 = [imageData base64EncodedStringWithOptions:0];
+    if (b64.length == 0) {
+        return @"";
+    }
+    return [@"data:image/jpeg;base64," stringByAppendingString:b64];
+}
+
+// Step-harness decision via OpenAI's Responses API. Same backend and key as the
+// Android agent (OpenAiResponsesAgentAdapter). Reuses the OpenAI voice
+// credential so a single key drives transcription, realtime, and the harness.
+static NSDictionary *OPModelOpenAIResponsesDecision(NSDictionary *modelStatus,
+        NSDictionary *requestBody) {
+    NSDictionary *config = OPModelConfig();
+    NSString *model = [config[@"model"] isKindOfClass:[NSString class]] &&
+            [config[@"model"] length] > 0 ? config[@"model"] : OPOpenAIResponsesModel;
+    NSString *credential = OPVoiceCredentialValue(NULL);
+    if (credential.length == 0) {
+        credential = OPModelCredentialValue();
+    }
+    if (credential.length == 0) {
+        return OPError(@"model_credential_missing");
+    }
+    NSString *endpoint = [config[@"endpoint_url"] isKindOfClass:[NSString class]] &&
+            [config[@"endpoint_url"] length] > 0
+            ? config[@"endpoint_url"] : @"https://api.openai.com/v1/responses";
+    NSURL *url = [NSURL URLWithString:endpoint];
+    if (!url || !url.scheme || !url.host) {
+        return OPError(@"model_endpoint_invalid");
+    }
+    long long timeoutMs = [modelStatus[@"timeout_ms"] respondsToSelector:@selector(longLongValue)]
+            ? [modelStatus[@"timeout_ms"] longLongValue] : 30000;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+                                                           cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                       timeoutInterval:MAX(1.0, (NSTimeInterval)timeoutMs / 1000.0)];
+    request.HTTPMethod = @"POST";
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [request setValue:[NSString stringWithFormat:@"Bearer %@", credential]
+   forHTTPHeaderField:@"Authorization"];
+
+    NSString *instructions = [requestBody[@"instructions"] isKindOfClass:[NSString class]]
+            ? requestBody[@"instructions"] : @"Return exactly one JSON object.";
+    NSString *prompt = OPModelPromptText(requestBody);
+    // Build the user turn's content. Always include the text prompt; when a
+    // screenshot is available on disk, attach it as an input_image so the vision
+    // model can actually SEE the current screen (matches the Android adapter).
+    // Without this the model navigates UI blind and hallucinates completions.
+    NSMutableArray *content = [NSMutableArray arrayWithObject:@{
+        @"type": @"input_text",
+        @"text": prompt
+    }];
+    NSString *shotDataUrl = OPModelScreenshotDataURLFromRequestBody(requestBody);
+    if (shotDataUrl.length > 0) {
+        [content addObject:@{
+            @"type": @"input_image",
+            @"image_url": shotDataUrl
+        }];
+    }
+    // gpt-5.5 and other reasoning models spend part of max_output_tokens on
+    // internal reasoning before emitting the visible answer. With a small budget
+    // the reasoning can consume everything and the response comes back with
+    // empty output text, so keep a generous budget. Use medium reasoning effort:
+    // low effort produced sloppy refusals (e.g. claiming "no phone number" when
+    // the number was plainly in the prompt); medium gives the model enough to
+    // actually act on the data it was given.
+    NSDictionary *body = @{
+        @"model": model,
+        @"instructions": instructions,
+        @"input": @[@{
+            @"role": @"user",
+            @"content": content
+        }],
+        @"reasoning": @{@"effort": @"medium"},
+        @"max_output_tokens": @4000
+    };
+    request.HTTPBody = OPCanonicalJSONData(body);
+
+    NSURLResponse *response = nil;
+    NSError *error = nil;
+    long long startedMs = OPNowMs();
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    NSData *data = [NSURLConnection sendSynchronousRequest:request
+                                         returningResponse:&response
+                                                     error:&error];
+#pragma clang diagnostic pop
+    long long latencyMs = OPNowMs() - startedMs;
+    if (error || !data) {
+        return OPError([NSString stringWithFormat:@"openai_responses_request_failed:%@",
+                        error.localizedDescription ?: @"unknown"]);
+    }
+    NSInteger statusCode = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+        statusCode = [(NSHTTPURLResponse *)response statusCode];
+    }
+    if (statusCode < 200 || statusCode >= 300) {
+        return @{
+            @"status": @"error",
+            @"reason": [NSString stringWithFormat:@"openai_responses_http_status:%ld", (long)statusCode],
+            @"http_status": @(statusCode),
+            @"response_bytes": @(data.length),
+            @"source": @"openphone.agentd"
+        };
+    }
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![parsed isKindOfClass:[NSDictionary class]]) {
+        return @{
+            @"status": @"error",
+            @"reason": @"openai_responses_not_object",
+            @"http_status": @(statusCode),
+            @"response_bytes": @(data.length),
+            @"source": @"openphone.agentd"
+        };
+    }
+    NSDictionary *object = parsed;
+    NSString *decisionText = OPModelOpenAIResponsesOutputText(object);
+    if (decisionText.length == 0) {
+        return @{
+            @"status": @"error",
+            @"reason": @"openai_responses_empty_text",
+            @"http_status": @(statusCode),
+            @"response_bytes": @(data.length),
+            @"source": @"openphone.agentd"
+        };
+    }
+    NSMutableDictionary *result = [@{
+        @"status": @"ok",
+        @"provider": @"openai_responses",
+        @"http_status": @(statusCode),
+        @"response_bytes": @(data.length),
+        @"decision": decisionText,
+        @"source": @"openphone.agentd",
+        @"metadata": @{
+            @"provider": @"openai_responses",
+            @"provider_backed": @YES,
+            @"model": model,
+            @"latency_ms": @(latencyMs)
+        }
+    } mutableCopy];
+    if ([object[@"usage"] isKindOfClass:[NSDictionary class]]) {
+        result[@"usage"] = object[@"usage"];
+    }
+    return result;
+}
+
 static NSDictionary *OPModelProviderDecision(NSDictionary *modelStatus, NSDictionary *requestBody) {
     NSString *mode = [modelStatus[@"mode"] isKindOfClass:[NSString class]]
             ? modelStatus[@"mode"] : @"broker";
     if ([mode isEqualToString:@"bedrock_converse"]) {
         return OPModelBedrockConverseDecision(modelStatus, requestBody);
+    }
+    if (OPModelModeIsOpenAIResponses(mode)) {
+        return OPModelOpenAIResponsesDecision(modelStatus, requestBody);
     }
     return OPModelBrokerDecision(modelStatus, requestBody);
 }
@@ -14213,6 +14812,11 @@ static NSString *OPRealtimeInstructions(NSString *mode) {
             @"Use clipboard_read when the task depends on copied text, clipboard_write when the user asks to copy text, contacts_search when the task needs a saved person, organization, phone, or email, calendar_search when the task needs saved events or schedule context, calls_search when the task needs recent call-history context, and messages_search when the task needs saved SMS/iMessage context. "
             @"Do not narrate a plan or answer with plain text when a phone tool can progress the task. "
             @"For broad choices like random, any, best, or surprise me, choose a reasonable visible/default option yourself. "
+            @"This is a CONTINUOUS voice conversation, not a one-shot task. The live microphone session stays open the entire time and is ended ONLY by the user. "
+            @"Calling finish_task marks the CURRENT request complete but does NOT end the session — after it you keep listening for the user's next spoken instruction. "
+            @"Do not treat merely opening an app or a webpage as completion: carry the user's request all the way through (e.g. if asked to order a coffee, search for it, open a product, and proceed toward checkout) before considering that request done. "
+            @"SPEED RULES (critical — the user is listening live): (1) Do NOT use the wait tool. The runtime already paces actions and hands you a fresh screen after every action; inserting wait only adds dead air. (2) Do NOT call get_screen yourself between actions — a fresh screen observation is delivered automatically after each action, so just act on it. (3) Emit ONE decisive action per turn and keep moving; never stall re-observing the same screen. "
+            @"NAVIGATION RULE: stay inside the current native app and drive its real UI (tap the search field, type, tap a result). Do NOT escape to a web page via open_url to route around a sticky control — tap it by coordinate or retry in-app instead. "
             @"Call finish_task only when the visible screen or tool result verifies the requested outcome. "
             @"Never say Done unless finish_task has been called.%@",
             realtime2 ? @" Realtime 2 should use low reasoning effort and concise tool selection." : @""];
@@ -14268,15 +14872,16 @@ static NSDictionary *OPRealtimeSessionUpdateEvent(NSString *mode, NSString *mode
 
 // Streaming session config: accepts pcm16 mic audio and lets the server run
 // voice-activity detection so end-of-turn is decided server-side instead of by
-// our local record-then-transcribe VAD. Output stays text so the existing tool
-// loop is unchanged; the agent speaks through the island, not TTS.
+// our local record-then-transcribe VAD. Output is audio so the agent speaks
+// back through the phone speaker (voice in + voice out + screen); the audio
+// transcript still drives the island text and the tool loop is unchanged.
 static NSDictionary *OPRealtimeStreamingSessionUpdateEvent(NSString *mode, NSString *model,
         long long sampleRateHz) {
     NSMutableDictionary *session = [@{
         @"type": @"realtime",
         @"model": model ?: @"",
         @"instructions": OPRealtimeInstructions(mode ?: @"openai_realtime2"),
-        @"output_modalities": @[@"text"],
+        @"output_modalities": @[@"audio"],
         @"tool_choice": @"auto",
         @"tools": OPRealtimeToolDefinitions(),
         @"audio": @{
@@ -14285,6 +14890,14 @@ static NSDictionary *OPRealtimeStreamingSessionUpdateEvent(NSString *mode, NSStr
                     @"type": @"audio/pcm",
                     @"rate": @(sampleRateHz > 0 ? sampleRateHz : 16000)
                 },
+                // Ask the server to transcribe the user's own speech. Without
+                // this the loop never receives
+                // conversation.item.input_audio_transcription.completed events,
+                // so the island transcript stays blank and there's no way to
+                // confirm the mic stream actually carried intelligible audio.
+                @"transcription": @{
+                    @"model": @"gpt-4o-mini-transcribe"
+                },
                 @"turn_detection": @{
                     @"type": @"server_vad",
                     @"threshold": @0.5,
@@ -14292,6 +14905,13 @@ static NSDictionary *OPRealtimeStreamingSessionUpdateEvent(NSString *mode, NSStr
                     @"silence_duration_ms": @700,
                     @"create_response": @YES
                 }
+            },
+            @"output": @{
+                @"format": @{
+                    @"type": @"audio/pcm",
+                    @"rate": @(OP_RT_OUTPUT_SAMPLE_RATE_HZ)
+                },
+                @"voice": @"marin"
             }
         }
     } mutableCopy];
@@ -14497,10 +15117,145 @@ static NSDictionary *OPRealtimeWaitForEventType(OPRealtimeWebSocket *socket,
     return OPError([NSString stringWithFormat:@"realtime_wait_timeout:%@", expectedType ?: @""]);
 }
 
-static NSDictionary *OPRealtimeWaitForTurn(OPRealtimeWebSocket *socket, long long timeoutMs) {
+// Output audio player: the Realtime server streams pcm16 model speech as
+// base64 response.audio.delta events. We feed those bytes into a playback
+// AudioQueue so the agent literally speaks back through the phone speaker.
+// Buffers recycle through a free list; barge-in flushes the queue so the user
+// can interrupt mid-sentence.
+#define OP_RT_OUTPUT_BUFFER_BYTES 4800   // ~100ms of 24kHz mono pcm16
+#define OP_RT_OUTPUT_MAX_BUFFERS 32
+
+typedef struct {
+    AudioQueueRef queue;
+    pthread_mutex_t mutex;
+    AudioQueueBufferRef freeBuffers[OP_RT_OUTPUT_MAX_BUFFERS];
+    int freeCount;
+    int allocatedCount;
+    BOOL disposed;
+    UInt32 sampleRate;
+} OPRealtimeAudioPlayer;
+
+static void OPRealtimeAudioOutputCallback(void *userData, AudioQueueRef queue,
+        AudioQueueBufferRef buffer) {
+    (void)queue;
+    OPRealtimeAudioPlayer *player = (OPRealtimeAudioPlayer *)userData;
+    if (!player || !buffer) {
+        return;
+    }
+    pthread_mutex_lock(&player->mutex);
+    if (!player->disposed && player->freeCount < OP_RT_OUTPUT_MAX_BUFFERS) {
+        player->freeBuffers[player->freeCount++] = buffer;
+    }
+    pthread_mutex_unlock(&player->mutex);
+}
+
+static NSString *OPRealtimeAudioPlayerStart(OPRealtimeAudioPlayer *player, UInt32 sampleRate) {
+    memset(player, 0, sizeof(*player));
+    pthread_mutex_init(&player->mutex, NULL);
+    player->sampleRate = sampleRate > 0 ? sampleRate : OP_RT_OUTPUT_SAMPLE_RATE_HZ;
+    AudioStreamBasicDescription format;
+    memset(&format, 0, sizeof(format));
+    format.mSampleRate = player->sampleRate;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
+    format.mBytesPerPacket = 2;
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = 2;
+    format.mChannelsPerFrame = 1;
+    format.mBitsPerChannel = 16;
+    OSStatus status = AudioQueueNewOutput(&format, OPRealtimeAudioOutputCallback,
+            player, NULL, NULL, 0, &player->queue);
+    if (status != noErr || !player->queue) {
+        pthread_mutex_destroy(&player->mutex);
+        return [NSString stringWithFormat:@"audio_queue_new_output_failed:%d", (int)status];
+    }
+    status = AudioQueueStart(player->queue, NULL);
+    if (status != noErr) {
+        AudioQueueDispose(player->queue, true);
+        player->queue = NULL;
+        pthread_mutex_destroy(&player->mutex);
+        return [NSString stringWithFormat:@"audio_queue_output_start_failed:%d", (int)status];
+    }
+    return @"";
+}
+
+static void OPRealtimeAudioPlayerEnqueue(OPRealtimeAudioPlayer *player, NSData *pcm) {
+    if (!player || !player->queue || pcm.length == 0) {
+        return;
+    }
+    const uint8_t *bytes = (const uint8_t *)pcm.bytes;
+    NSUInteger remaining = pcm.length;
+    while (remaining > 0) {
+        pthread_mutex_lock(&player->mutex);
+        if (player->disposed) {
+            pthread_mutex_unlock(&player->mutex);
+            return;
+        }
+        AudioQueueBufferRef buffer = NULL;
+        if (player->freeCount > 0) {
+            buffer = player->freeBuffers[--player->freeCount];
+        } else if (player->allocatedCount < OP_RT_OUTPUT_MAX_BUFFERS) {
+            OSStatus st = AudioQueueAllocateBuffer(player->queue,
+                    OP_RT_OUTPUT_BUFFER_BYTES, &buffer);
+            if (st == noErr && buffer) {
+                player->allocatedCount += 1;
+            } else {
+                buffer = NULL;
+            }
+        }
+        pthread_mutex_unlock(&player->mutex);
+        if (!buffer) {
+            // All buffers in flight; wait briefly for the output callback to
+            // recycle one rather than dropping model speech.
+            usleep(5000);
+            continue;
+        }
+        UInt32 capacity = buffer->mAudioDataBytesCapacity;
+        UInt32 chunk = (UInt32)MIN((NSUInteger)capacity, remaining);
+        memcpy(buffer->mAudioData, bytes, chunk);
+        buffer->mAudioDataByteSize = chunk;
+        if (AudioQueueEnqueueBuffer(player->queue, buffer, 0, NULL) != noErr) {
+            pthread_mutex_lock(&player->mutex);
+            if (player->freeCount < OP_RT_OUTPUT_MAX_BUFFERS) {
+                player->freeBuffers[player->freeCount++] = buffer;
+            }
+            pthread_mutex_unlock(&player->mutex);
+            return;
+        }
+        bytes += chunk;
+        remaining -= chunk;
+    }
+}
+
+// Stop and drop any queued/playing model speech (barge-in or turn hand-off).
+static void OPRealtimeAudioPlayerFlush(OPRealtimeAudioPlayer *player) {
+    if (player && player->queue) {
+        AudioQueueReset(player->queue);
+    }
+}
+
+static void OPRealtimeAudioPlayerStop(OPRealtimeAudioPlayer *player) {
+    if (!player || !player->queue) {
+        return;
+    }
+    pthread_mutex_lock(&player->mutex);
+    player->disposed = YES;
+    pthread_mutex_unlock(&player->mutex);
+    AudioQueueStop(player->queue, true);
+    AudioQueueDispose(player->queue, true);
+    player->queue = NULL;
+    pthread_mutex_destroy(&player->mutex);
+}
+
+static NSDictionary *OPRealtimeWaitForTurn(OPRealtimeWebSocket *socket, long long timeoutMs,
+        OPRealtimeAudioPlayer *player) {
     NSMutableArray *calls = [NSMutableArray array];
     NSMutableString *finalText = [NSMutableString string];
     NSMutableString *inputTranscript = [NSMutableString string];
+    // timeoutMs is an *inactivity* window, not a total-turn budget: it resets
+    // every time an event arrives. A streaming model response (audio deltas
+    // every ~100ms) therefore never times out mid-sentence, while a fully
+    // silent socket returns after timeoutMs so the caller can re-check cancel.
     long long deadlineMs = OPNowMs() + timeoutMs;
     while (OPNowMs() < deadlineMs) {
         NSError *error = nil;
@@ -14510,6 +15265,9 @@ static NSDictionary *OPRealtimeWaitForTurn(OPRealtimeWebSocket *socket, long lon
             return OPError([NSString stringWithFormat:@"realtime_read_failed:%@",
                     error.localizedDescription ?: @"unknown"]);
         }
+        // An event arrived: reset the inactivity window so an in-progress
+        // response (streaming audio deltas) is never cut off mid-turn.
+        deadlineMs = OPNowMs() + timeoutMs;
         NSString *type = [event[@"type"] isKindOfClass:[NSString class]] ? event[@"type"] : @"";
         if ([type isEqualToString:@"error"]) {
             return @{
@@ -14531,15 +15289,35 @@ static NSDictionary *OPRealtimeWaitForTurn(OPRealtimeWebSocket *socket, long lon
                 [inputTranscript appendString:transcript];
             }
         }
+        // Model speech: base64 pcm16 chunks. Play them straight through the
+        // output AudioQueue so the agent talks back over the phone speaker.
+        if (player && ([type isEqualToString:@"response.audio.delta"] ||
+                [type isEqualToString:@"response.output_audio.delta"])) {
+            NSString *b64 = [event[@"delta"] isKindOfClass:[NSString class]]
+                    ? event[@"delta"] : @"";
+            if (b64.length > 0) {
+                NSData *pcm = [[NSData alloc] initWithBase64EncodedString:b64
+                        options:NSDataBase64DecodingIgnoreUnknownCharacters];
+                if (pcm.length > 0) {
+                    OPRealtimeAudioPlayerEnqueue(player, pcm);
+                }
+            }
+        }
         NSDictionary *call = OPRealtimeFunctionCallFromEvent(event);
         if (call) {
             OPRealtimeAddOrUpgradeCall(calls, call);
         }
+        // In audio-output mode the assistant's words arrive as the audio
+        // transcript rather than as output_text; collect both so the island
+        // still shows what the agent said.
         if ([type isEqualToString:@"response.output_text.done"] ||
-                [type isEqualToString:@"response.text.done"]) {
+                [type isEqualToString:@"response.text.done"] ||
+                [type isEqualToString:@"response.audio_transcript.done"] ||
+                [type isEqualToString:@"response.output_audio_transcript.done"]) {
             NSString *text = [event[@"text"] isKindOfClass:[NSString class]]
-                    ? event[@"text"] : ([event[@"content"] isKindOfClass:[NSString class]]
-                    ? event[@"content"] : @"");
+                    ? event[@"text"] : ([event[@"transcript"] isKindOfClass:[NSString class]]
+                    ? event[@"transcript"] : ([event[@"content"] isKindOfClass:[NSString class]]
+                    ? event[@"content"] : @""));
             if (text.length > 0) {
                 if (finalText.length > 0) {
                     [finalText appendString:@"\n"];
@@ -14609,9 +15387,13 @@ static NSDictionary *OPModelDecisionFromObject(id object, NSString **errorOut) {
         }
         return nil;
     }
-    // v3 router decisions don't need a `tool` field — they carry mode/reply
-    // instead. Short-circuit here so the tool validation below doesn't reject.
-    if ([schema isEqualToString:@"openphone.model_decision.v3"]) {
+    // Router decisions carry a `mode`/`reply` instead of a `tool`. Some models
+    // (e.g. gpt-5.5) emit the router shape but tag it with the v1/v2 schema, so
+    // key off the `mode` field rather than the schema string. The loop's router
+    // stage keys off `mode` too, so any mode-bearing decision belongs there.
+    NSString *routerMode = [decision[@"mode"] isKindOfClass:[NSString class]]
+            ? decision[@"mode"] : @"";
+    if ([schema isEqualToString:@"openphone.model_decision.v3"] || routerMode.length > 0) {
         return decision;
     }
     NSString *tool = [decision[@"tool"] isKindOfClass:[NSString class]] ? decision[@"tool"] : @"";
@@ -14751,8 +15533,78 @@ static NSDictionary *OPModelDecisionFromString(NSString *string, NSString **erro
     return decision;
 }
 
+// The vision model reads tap/swipe coordinates off the screenshot IMAGE, which
+// is the device framebuffer downscaled so its longest edge is
+// screenshot_max_dimension_px (default 1024). But the HID input layer expects
+// display POINTS (e.g. 430x932). Left unscaled, a y that points at the compose
+// field in a 1024-tall image lands ~80pt too low (in the dock), the field never
+// focuses, and the following type_text fails with target_not_found. Rescale the
+// model's raw image-pixel coordinates into points using the actual screenshot
+// dimensions the model was shown. tap_element is unaffected: it resolves via
+// ui_tree bounds, which are already in points.
+static NSDictionary *OPModelRescaleActionForScreenshot(NSDictionary *arguments,
+        NSString *tool, NSDictionary *screen) {
+    if (![arguments isKindOfClass:[NSDictionary class]] || arguments.count == 0) {
+        return arguments ?: @{};
+    }
+    if (![tool isEqualToString:@"tap"] && ![tool isEqualToString:@"long_press"] &&
+            ![tool isEqualToString:@"swipe"]) {
+        return arguments;
+    }
+    NSDictionary *screenshot = nil;
+    if ([screen isKindOfClass:[NSDictionary class]]) {
+        id direct = screen[@"screenshot"];
+        if ([direct isKindOfClass:[NSDictionary class]]) {
+            screenshot = direct;
+        } else {
+            NSDictionary *context = [screen[@"context"] isKindOfClass:[NSDictionary class]]
+                    ? screen[@"context"] : nil;
+            if ([context[@"screenshot"] isKindOfClass:[NSDictionary class]]) {
+                screenshot = context[@"screenshot"];
+            }
+        }
+    }
+    double imgWidth = [screenshot[@"width"] respondsToSelector:@selector(doubleValue)]
+            ? [screenshot[@"width"] doubleValue] : 0.0;
+    double imgHeight = [screenshot[@"height"] respondsToSelector:@selector(doubleValue)]
+            ? [screenshot[@"height"] doubleValue] : 0.0;
+    if (imgWidth <= 0.0 || imgHeight <= 0.0) {
+        return arguments;
+    }
+    NSDictionary *display = OPScreenDisplayInfo();
+    double pointWidth = [display[@"point_width"] doubleValue];
+    double pointHeight = [display[@"point_height"] doubleValue];
+    if (pointWidth <= 0.0 || pointHeight <= 0.0) {
+        return arguments;
+    }
+    // If the image already matches point space (within 2%), the model's numbers
+    // are already usable — don't touch them.
+    if (fabs(imgWidth - pointWidth) <= pointWidth * 0.02 &&
+            fabs(imgHeight - pointHeight) <= pointHeight * 0.02) {
+        return arguments;
+    }
+    double scaleX = pointWidth / imgWidth;
+    double scaleY = pointHeight / imgHeight;
+    NSMutableDictionary *scaled = [arguments mutableCopy];
+    NSArray *xKeys = @[@"x", @"start_x", @"end_x"];
+    NSArray *yKeys = @[@"y", @"start_y", @"end_y"];
+    for (NSString *key in xKeys) {
+        double v = 0.0;
+        if (OPDoubleForKey(scaled, key, &v)) {
+            scaled[key] = @(v * scaleX);
+        }
+    }
+    for (NSString *key in yKeys) {
+        double v = 0.0;
+        if (OPDoubleForKey(scaled, key, &v)) {
+            scaled[key] = @(v * scaleY);
+        }
+    }
+    return scaled;
+}
+
 static NSDictionary *OPModelExecuteDecision(NSDictionary *decision, NSString *taskId,
-        NSArray *approvedCapabilities) {
+        NSArray *approvedCapabilities, NSDictionary *screen) {
     NSString *tool = decision[@"tool"] ?: @"";
     NSString *capability = OPModelToolCapability(tool);
     if (![approvedCapabilities containsObject:capability]) {
@@ -14842,7 +15694,7 @@ static NSDictionary *OPModelExecuteDecision(NSDictionary *decision, NSString *ta
             @"source": @"openphone.agentd"
         };
     }
-    NSMutableDictionary *action = [arguments mutableCopy];
+    NSMutableDictionary *action = [OPModelRescaleActionForScreenshot(arguments, tool, screen) mutableCopy];
     action[@"type"] = tool;
     return OPExecuteAction(@{
         @"command": @"execute_action",
@@ -15128,7 +15980,7 @@ static NSDictionary *OPRunOpenAIRealtimeTask(NSDictionary *request) {
                             @"updated_at_ms": @(OPNowMs())
                         }
                     });
-                    NSDictionary *turn = OPRealtimeWaitForTurn(socket, timeoutMs);
+                    NSDictionary *turn = OPRealtimeWaitForTurn(socket, timeoutMs, NULL);
                     if (![turn[@"status"] isEqualToString:@"ok"]) {
                         toolErrors += 1;
                         stopReason = turn[@"reason"] ?: @"realtime_turn_failed";
@@ -15256,7 +16108,7 @@ static NSDictionary *OPRunOpenAIRealtimeTask(NSDictionary *request) {
                         });
                         OPIslandPublishToolStep(taskId, tool, @"tool_running", step, maxSteps);
 
-                        NSDictionary *toolResult = OPModelExecuteDecision(decision, taskId, approved);
+                        NSDictionary *toolResult = OPModelExecuteDecision(decision, taskId, approved, screen);
                         lastToolResult = toolResult ?: @{};
                         NSString *state = [toolResult[@"state"] isKindOfClass:[NSString class]]
                                 ? toolResult[@"state"] : @"";
@@ -15597,12 +16449,49 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
     // we drain them one by one *without* re-prompting the model. Massively
     // reduces roundtrips + eliminates the source of loop bugs.
     NSMutableArray *routerActionQueue = [NSMutableArray array];
+    long long providerRetries = 0;
     NSString *routerReply = @"";
     NSString *routerLastScreenSignature = @"";
     long long consecutiveNoProgress = 0;
     BOOL terminal = NO;
     BOOL succeeded = NO;
     BOOL cancelled = NO;
+    // For send-message goals: track whether the model has actually entered body
+    // text yet, so we can reject a hallucinated finish_task that claims the
+    // message was sent without ever typing it.
+    BOOL sendGoalTypedBody = NO;
+    BOOL isSendMessageGoal = OPGoalIsSendMessage(goal);
+    long long finishBlockedCount = 0;
+    // A type_text into an unfocused screen is a recoverable mistake (the model
+    // just needs to tap the field first), so give it a couple of soft retries
+    // that steer instead of instantly burning the hard tool-error budget.
+    long long noFocusedFieldCount = 0;
+    BOOL lastTypeTextNoFocusedField = NO;
+    // Hallucinated element_ids are likewise recoverable: re-prompt with the real
+    // element list rather than instantly failing the task.
+    long long elementNotFoundCount = 0;
+    BOOL lastElementNotFound = NO;
+
+    // Deterministically resolve the contact for a "call <name>" goal before we
+    // ever hit the model. gpt-5.5 is unreliable at deciding to look a number up
+    // (it blind-taps the current screen or refuses), but it dials reliably once
+    // the tel: URL is in front of it. So we seed contacts_search as step 1; the
+    // resolved dial_urls then flow back to the model via last_tool_result.
+    NSString *callContactName = OPCallGoalContactName(goal);
+    BOOL callDialEnqueued = NO;
+    if (callContactName.length > 0) {
+        [routerActionQueue addObject:@{
+            @"tool": @"contacts_search",
+            @"arguments": @{
+                @"query": callContactName,
+                @"limit": @(10),
+                @"reason": @"seeded: resolve number for call goal"
+            }
+        }];
+        OPRecordTrajectory(taskId, @"call_goal_contact_search_seeded", @{
+            @"query_length": @(callContactName.length)
+        });
+    }
 
     for (long long step = 1; step <= maxSteps; step++) {
         @autoreleasepool {
@@ -15651,15 +16540,30 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
             // Loop guidance: tell the model exactly what it did last and,
             // if that action already succeeded, that it should finish now.
             NSString *guidance = @"";
-            if ([lastModelTool isEqualToString:@"get_screen"]) {
+            if ([lastModelTool isEqualToString:@"same_action_nudged"]) {
+                guidance = @"HARD RULE: you just issued the EXACT same action twice in a row, which made zero progress. You already have the information/result you need from the previous identical call — it is in last_tool_result. Do NOT run that tool again. Choose a DIFFERENT action that actually advances the goal (e.g. to place a call, use open_url with a tel: URL of the number you already found). If the goal is truly complete and visible on screen, call finish_task. If you cannot proceed, call fail_task — never repeat the same action a third time.";
+            } else if ([lastModelTool isEqualToString:@"finish_task_rejected"]) {
+                guidance = @"HARD RULE: you tried to finish but you have NOT typed the message body yet, so nothing has been sent. Do the next REAL step: if the text field isn't focused, tap it; then type_text the message body; then tap the Send button (up-arrow); only call finish_task AFTER the sent bubble is visible in the transcript. Never claim you sent a message you didn't type.";
+            } else if (lastTypeTextNoFocusedField) {
+                guidance = @"HARD RULE: your last type_text did NOTHING because no text field was focused — the keystrokes were dropped and the field is still empty. You CANNOT type into a field you have not focused. Next step MUST be a tap on the message text field to give it keyboard focus (use tap with the field's x,y from the CURRENT screen, or tap_element on the text_field element). The keyboard must appear. Only AFTER the field is focused should you type_text the body. Do NOT call type_text again this step.";
+            } else if (lastElementNotFound) {
+                guidance = @"HARD RULE: your last tap_element used an element_id that does NOT exist on the current screen, so nothing happened. Do NOT invent element ids. Look at context.interactive_elements in THIS prompt and either use an EXACT id copied from that list, or if the target isn't listed, use a raw `tap` at the x,y of the visible target instead. Choose a different action than the one that just failed.";
+            } else if (isSendMessageGoal && !sendGoalTypedBody &&
+                    OPScreenHasFocusedEditableField(screen)) {
+                guidance = @"HARD RULE: the message text field is ALREADY focused and the keyboard is up. Do NOT tap it again. Your next action MUST be type_text with the message body. After the body text appears in the field, tap the Send button (up-arrow).";
+            } else if ([lastModelTool isEqualToString:@"get_screen"]) {
                 guidance = @"HARD RULE: last_tool was get_screen. You MUST choose an action tool (tap, tap_element, type_text, open_url, open_app, swipe, home, finish_task, fail_task) this step. Do NOT choose get_screen again — the observation is already in this prompt.";
+            } else if ([lastModelTool hasSuffix:@"_search"]) {
+                guidance = [NSString stringWithFormat:
+                        @"last_tool was %@ and its results are in last_tool_result. Do NOT search again — you already have the data. Use those results to take the NEXT real action toward the goal. If several contacts matched, PICK THE SINGLE BEST match by name and act on it — do NOT give up just because there is more than one result. Skip any contact that is the user themselves (e.g. a name containing 'me'). Prefer an entry whose name most closely matches the request (e.g. a 'Main'/primary entry over a labeled variant). To place a call, take that contact's `dial_urls[0]` value from last_tool_result and pass it VERBATIM into open_url (e.g. {\"url\":\"tel:+14155550123\"}) — the daemon already validated and formatted it, so a `dial_urls` value is ALWAYS a usable number; never declare it unusable. To send a message, open Messages and follow the send flow. Only call fail_task if the matched contact has NO phone_numbers and NO dial_urls at all.",
+                        lastModelTool];
             } else if (lastModelTool.length > 0) {
                 NSString *lastState = [lastToolResult[@"state"] isKindOfClass:[NSString class]]
                         ? lastToolResult[@"state"] : @"";
                 if ([lastState isEqualToString:@"action.executed"] ||
                         [lastState isEqualToString:@"task.finished"]) {
                     guidance = [NSString stringWithFormat:
-                            @"HARD RULE: last_tool was %@ and it EXECUTED SUCCESSFULLY. Do NOT repeat the same action. The user's request is now satisfied by that action. Call finish_task with a short human summary of what you did.",
+                            @"last_tool was %@ and it executed successfully. Look at the CURRENT screen in this prompt and decide the next step toward the goal. Do NOT repeat the identical action. If — and only if — the goal is now fully accomplished (e.g. a message was actually sent, not merely composed), call finish_task with a short human summary. Otherwise continue with the next action tool needed to complete the goal.",
                             lastModelTool];
                 }
             }
@@ -15716,6 +16620,22 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
                 @"reason": brokerResponse[@"reason"] ?: @""
             });
             if (![brokerResponse[@"status"] isEqualToString:@"ok"]) {
+                // Transient empty responses from reasoning models (all reasoning
+                // budget consumed, no visible text) are retryable — re-prompt
+                // instead of failing the whole task. Bounded by providerRetries.
+                NSString *provReason = [brokerResponse[@"reason"] isKindOfClass:[NSString class]]
+                        ? brokerResponse[@"reason"] : @"";
+                if ([provReason isEqualToString:@"openai_responses_empty_text"] &&
+                        providerRetries < 2) {
+                    providerRetries += 1;
+                    OPRecordTrajectory(taskId, @"model_provider_retry", @{
+                        @"step": @(step),
+                        @"reason": provReason,
+                        @"attempt": @(providerRetries)
+                    });
+                    step -= 1;
+                    continue;
+                }
                 toolErrors += 1;
                 lastToolResult = brokerResponse ?: @{};
                 stopReason = @"model_provider_error";
@@ -15799,10 +16719,15 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
                 synth[@"confidence"] = @(0.95);
                 decision = synth;
             } else {
-                // mode=act: pull first proposed_action as this step's decision,
-                // queue the rest, and ALWAYS append a synthetic finish_task at
-                // the end so the loop terminates after the last planned action
-                // — no re-prompting the model, which is where loops happen.
+                // mode=act: execute only the FIRST proposed action this step,
+                // then let the loop re-prompt the model with the resulting
+                // screen so it can decide the next step. We deliberately do NOT
+                // pre-plan the remaining proposed_actions: the model planned
+                // them blind (before observing the screens they act on), so
+                // tap/type coordinates for not-yet-visible UI would be wrong.
+                // Multi-step UI flows (e.g. compose + send a message) need the
+                // model to see each new screen. Loop safety comes from the
+                // no-progress, same-action, and step/duration guards below.
                 NSDictionary *first = proposed.firstObject;
                 if ([first isKindOfClass:[NSDictionary class]]) {
                     NSMutableDictionary *synth = [NSMutableDictionary dictionary];
@@ -15814,18 +16739,6 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
                     synth[@"confidence"] = @(0.95);
                     decision = synth;
                     [routerActionQueue removeAllObjects];
-                    for (NSUInteger i = 1; i < proposed.count; i++) {
-                        id a = proposed[i];
-                        if ([a isKindOfClass:[NSDictionary class]]) {
-                            [routerActionQueue addObject:a];
-                        }
-                    }
-                    // Sentinel finish_task at end of the queue.
-                    NSString *finishMsg = reply.length > 0 ? reply : @"Done.";
-                    [routerActionQueue addObject:@{
-                        @"tool": @"finish_task",
-                        @"arguments": @{@"summary": finishMsg}
-                    }];
                 }
             }
         }
@@ -15918,31 +16831,47 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
             lastDecisionRepeats = 0;
         }
         lastDecisionSig = sig;
-        if (lastDecisionRepeats >= 1) {
-            // 2nd identical action in a row → treat previous run as successful
-            // and finish. Better UX than looping forever.
-            NSString *msg = @"Done.";
-            NSString *url = [decArgs[@"url"] isKindOfClass:[NSString class]]
-                    ? decArgs[@"url"] : @"";
-            if (url.length > 0) {
-                msg = [NSString stringWithFormat:@"Opened %@.", url];
-            }
-            OPRecordTrajectory(taskId, @"model_loop_guard_same_action", @{
+        if (lastDecisionRepeats == 1) {
+            // First identical repeat: the model is stuck re-issuing the same
+            // action instead of advancing. Repeating it will not make progress,
+            // so nudge it with a corrective observation and let it choose a
+            // different move. Do NOT fabricate success here — a stuck agent has
+            // not completed the goal.
+            OPRecordTrajectory(taskId, @"model_loop_guard_same_action_nudge", @{
                 @"step": @(step),
                 @"tool": tool,
                 @"arguments": decArgs,
                 @"reason": @"same_action_repeated"
             });
             lastToolResult = @{
-                @"status": @"ok",
-                @"state": @"task.finished",
+                @"status": @"error",
+                @"state": @"action.no_progress",
                 @"task_id": taskId ?: @"",
-                @"summary": msg,
+                @"reason": @"You just issued this exact action again with no change. Repeating it will not make progress. Choose a DIFFERENT next step to actually advance the goal. If the goal is complete AND verified on screen, call finish_task. If you cannot make progress, call fail_task — do NOT claim the task is done when it is not.",
+                @"source": @"openphone.agentd"
+            };
+            lastModelTool = @"same_action_nudged";
+            continue;
+        }
+        if (lastDecisionRepeats >= 2) {
+            // Still repeating after the nudge: the agent is genuinely stuck.
+            // Report an honest failure rather than a fabricated "Done."
+            OPRecordTrajectory(taskId, @"model_loop_guard_same_action", @{
+                @"step": @(step),
+                @"tool": tool,
+                @"arguments": decArgs,
+                @"reason": @"stuck_repeated_action"
+            });
+            lastToolResult = @{
+                @"status": @"error",
+                @"state": @"task.failed",
+                @"task_id": taskId ?: @"",
+                @"reason": @"Stuck repeating the same action without progress; the goal was not completed.",
                 @"source": @"openphone.agentd"
             };
             terminal = YES;
-            succeeded = YES;
-            stopReason = @"same_action_repeated";
+            succeeded = NO;
+            stopReason = @"stuck_repeated_action";
             break;
         }
         OPRecordTrajectory(taskId, @"tool_call", @{
@@ -16019,7 +16948,7 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
                 @"tool": tool
             });
         } else {
-            toolResult = OPModelExecuteDecision(decision, taskId, approved);
+            toolResult = OPModelExecuteDecision(decision, taskId, approved, screen);
         }
         lastToolResult = toolResult ?: @{};
         NSString *state = [toolResult[@"state"] isKindOfClass:[NSString class]]
@@ -16028,7 +16957,19 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
                 [state isEqualToString:@"action.executed"] ||
                 [state isEqualToString:@"task.finished"] ||
                 [state isEqualToString:@"task.failed"];
-        if (!toolOK || [state hasPrefix:@"action.denied"] ||
+        BOOL noFocusedField = [state isEqualToString:@"action.denied.no_focused_field"];
+        BOOL elementNotFound = [state isEqualToString:@"action.denied.element_not_found"];
+        lastTypeTextNoFocusedField = noFocusedField;
+        lastElementNotFound = elementNotFound;
+        if (noFocusedField && noFocusedFieldCount < 2) {
+            // Soft error: steer the model to tap the field first without
+            // spending its hard error budget.
+            noFocusedFieldCount += 1;
+        } else if (elementNotFound && elementNotFoundCount < 2) {
+            // Soft error: the model guessed an element_id that isn't on screen.
+            // Re-prompt with the real element list instead of failing.
+            elementNotFoundCount += 1;
+        } else if (!toolOK || [state hasPrefix:@"action.denied"] ||
                 [toolResult[@"status"] isEqualToString:@"error"]) {
             toolErrors += 1;
         }
@@ -16094,6 +17035,68 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
         }
         lastModelTool = tool;
 
+        // Remember a successful body-text entry for send-message goals.
+        if (isSendMessageGoal && [tool isEqualToString:@"type_text"] && toolOK) {
+            NSDictionary *typeArgs = [decision[@"arguments"] isKindOfClass:[NSDictionary class]]
+                    ? decision[@"arguments"] : @{};
+            NSString *typed = [typeArgs[@"text"] isKindOfClass:[NSString class]]
+                    ? typeArgs[@"text"] : @"";
+            if (typed.length > 0) {
+                sendGoalTypedBody = YES;
+            }
+        }
+
+        // Guard against a hallucinated finish on send-message goals: if the
+        // model tries to finish before ever typing the body, reject it and push
+        // it to keep going. Give it two nudges before giving up.
+        if (isSendMessageGoal && [tool isEqualToString:@"finish_task"] &&
+                !sendGoalTypedBody && finishBlockedCount < 2) {
+            finishBlockedCount += 1;
+            OPRecordTrajectory(taskId, @"model_finish_blocked_no_body", @{
+                @"step": @(step),
+                @"attempt": @(finishBlockedCount),
+                @"reason": @"finish_task before body text was typed on a send-message goal"
+            });
+            lastToolResult = @{
+                @"status": @"error",
+                @"state": @"task.finish_rejected",
+                @"task_id": taskId ?: @"",
+                @"reason": @"You have not typed the message body yet. Tap the text field and type the message, tap Send, and only finish AFTER the sent bubble appears. Do NOT claim it was sent.",
+                @"source": @"openphone.agentd"
+            };
+            lastModelTool = @"finish_task_rejected";
+            continue;
+        }
+
+        // Daemon-owned dialing for name-based call goals: once our seeded
+        // contacts_search resolves, pick the best number and enqueue the
+        // open_url tel: action deterministically. gpt-5.5 will not translate
+        // contact rows into a dial on its own (it blind-taps the current
+        // screen), so we do not leave that decision to the model.
+        if (callContactName.length > 0 && !callDialEnqueued &&
+                [tool isEqualToString:@"contacts_search"] &&
+                [toolResult[@"status"] isEqualToString:@"ok"]) {
+            NSArray *resolved = [toolResult[@"contacts"] isKindOfClass:[NSArray class]]
+                    ? toolResult[@"contacts"] : @[];
+            NSString *dialURL = OPBestCallDialURL(resolved, callContactName);
+            if (dialURL.length > 0) {
+                callDialEnqueued = YES;
+                [routerActionQueue addObject:@{
+                    @"tool": @"open_url",
+                    @"arguments": @{
+                        @"url": dialURL,
+                        @"reason": @"seeded: dial resolved contact for call goal"
+                    }
+                }];
+                routerReply = [NSString stringWithFormat:@"Calling %@.", callContactName];
+                OPRecordTrajectory(taskId, @"call_goal_dial_enqueued", @{
+                    @"step": @(step),
+                    @"contact_count": @(resolved.count)
+                });
+                continue;
+            }
+        }
+
         if (OPModelVerifiedTypeTextCompletesGoal(goal, decision, verification)) {
             terminal = YES;
             succeeded = YES;
@@ -16144,9 +17147,25 @@ static NSDictionary *OPRunModelTask(NSDictionary *request) {
             if (consecutiveNoProgress >= 2) {
                 OPRecordTrajectory(taskId, @"model_no_progress_by_signature", @{
                     @"step": @(step),
-                    @"signature": newSig
+                    @"signature": newSig,
+                    @"send_goal_typed_body": @(sendGoalTypedBody)
                 });
                 terminal = YES;
+                // A send-message goal that stalls before the body was ever typed
+                // did NOT succeed — never report a message as sent when nothing
+                // was entered.
+                if (isSendMessageGoal && !sendGoalTypedBody) {
+                    succeeded = NO;
+                    stopReason = @"stalled_before_body_typed";
+                    lastToolResult = @{
+                        @"status": @"error",
+                        @"state": @"task.failed",
+                        @"task_id": taskId ?: @"",
+                        @"reason": @"Stalled without ever typing the message body, so nothing was sent.",
+                        @"source": @"openphone.agentd"
+                    };
+                    break;
+                }
                 succeeded = YES;
                 stopReason = @"no_progress_signature";
                 if (routerReply.length > 0) {
@@ -16612,7 +17631,7 @@ static NSDictionary *OPHardwareTrigger(NSDictionary *request) {
                 @"goal": goal,
                 @"reason": reason,
                 @"mode": @"model",
-                @"max_steps": @(OPLongLongFromRequest(request, @"max_steps", 5, 1, 25)),
+                @"max_steps": @(OPLongLongFromRequest(request, @"max_steps", 12, 1, 25)),
                 @"max_duration_ms": @(OPLongLongFromRequest(request, @"max_duration_ms", 120000, 1000, 600000)),
                 @"source": source ?: @"hardware_trigger",
                 @"trigger_task_id": taskId
@@ -16840,6 +17859,63 @@ static NSString *OPVoiceActivateAudioSession(void) {
 #endif
 }
 
+// Full-duplex audio session for realtime streaming voice (mic in + speaker out
+// at the same time). VoiceChat mode enables acoustic echo cancellation so the
+// agent's own speech does not feed back into the mic and falsely trigger
+// barge-in. Measurement mode (used by the record-then-transcribe path) has no
+// AEC and is wrong for simultaneous playback.
+static NSString *OPVoiceActivateDuplexAudioSession(void) {
+#if TARGET_OS_IPHONE
+    NSError *error = nil;
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    if (!session) {
+        return @"audio_session_unavailable";
+    }
+    AVAudioSessionCategoryOptions options =
+            AVAudioSessionCategoryOptionAllowBluetoothHFP |
+            AVAudioSessionCategoryOptionDefaultToSpeaker;
+    if (![session setCategory:AVAudioSessionCategoryPlayAndRecord
+                         mode:AVAudioSessionModeVoiceChat
+                      options:options
+                        error:&error]) {
+        return [NSString stringWithFormat:@"set_category_failed:%@",
+                error.localizedDescription ?: @"unknown"];
+    }
+    error = nil;
+    [session setPreferredSampleRate:24000.0 error:&error];
+    error = nil;
+    [session setActive:YES error:&error];
+    if (error) {
+        return [NSString stringWithFormat:@"set_active_failed:%@",
+                error.localizedDescription ?: @"unknown"];
+    }
+    return @"";
+#else
+    return @"audio_session_unavailable_on_macos";
+#endif
+}
+
+// Tear the shared audio session down after a capture/stream ends. Without this
+// the session stays active and holds the mic, so the NEXT trigger records near
+// silence (peak_rms ~= ambient floor, heard_speech=false). Notify other apps so
+// ducked audio resumes. Best-effort: errors are logged, not fatal.
+static void OPVoiceDeactivateAudioSession(void) {
+#if TARGET_OS_IPHONE
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    if (!session) {
+        return;
+    }
+    NSError *error = nil;
+    [session setActive:NO
+           withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                 error:&error];
+    if (error) {
+        OPLog(@"audio session deactivate failed: %@",
+                error.localizedDescription ?: @"unknown");
+    }
+#endif
+}
+
 static NSData *OPVoiceRecordWAV(NSDictionary *request, NSDictionary **metadataOut,
         NSString **errorOut) {
     NSString *sessionWarning = OPVoiceActivateAudioSession();
@@ -16949,6 +18025,11 @@ static NSData *OPVoiceRecordWAV(NSDictionary *request, NSDictionary **metadataOu
         if (OPVoiceCancelRequested) {
             OPVoiceSetDoneLocked(&state, "cancelled");
         }
+        // Push-to-talk: the user released the long-press. Stop the mic now and
+        // keep the audio for transcription (distinct from a cancel).
+        if (OPVoiceStopRequested && elapsedMs >= minRecordMs) {
+            OPVoiceSetDoneLocked(&state, "push_to_talk_release");
+        }
     }
     NSString *stopReason = [NSString stringWithUTF8String:state.stopReason];
     BOOL heardSpeech = state.heardSpeech;
@@ -16961,6 +18042,7 @@ static NSData *OPVoiceRecordWAV(NSDictionary *request, NSDictionary **metadataOu
     AudioQueueDispose(state.queue, true);
     pthread_mutex_destroy(&state.mutex);
     pthread_cond_destroy(&state.cond);
+    OPVoiceDeactivateAudioSession();
 
     NSData *wav = OPVoiceWAVDataFromPCM16(pcm, sampleRate);
     if (metadataOut) {
@@ -17362,8 +18444,16 @@ static void OPRealtimeStreamInputCallback(void *userData, AudioQueueRef queue,
 // Start a mic AudioQueue that streams pcm16 to the socket. Returns "" on
 // success or an error string. Caller owns the returned queue via state.
 static NSString *OPRealtimeStreamStart(OPRealtimeStreamState *state) {
-    NSString *sessionWarning = OPVoiceActivateAudioSession();
-    (void)sessionWarning;
+    NSString *sessionWarning = OPVoiceActivateDuplexAudioSession();
+    if (sessionWarning.length > 0) {
+        OPLog(@"realtime duplex audio session warning: %@", sessionWarning);
+    } else {
+        AVAudioSession *s = [AVAudioSession sharedInstance];
+        OPLog(@"realtime duplex audio session active: inputAvailable=%d inputs=%lu sampleRate=%.0f",
+                (int)s.isInputAvailable,
+                (unsigned long)s.availableInputs.count,
+                s.sampleRate);
+    }
     AudioStreamBasicDescription format;
     memset(&format, 0, sizeof(format));
     format.mSampleRate = state->sampleRate;
@@ -17412,6 +18502,7 @@ static void OPRealtimeStreamStop(OPRealtimeStreamState *state) {
     AudioQueueStop(state->queue, true);
     AudioQueueDispose(state->queue, true);
     state->queue = NULL;
+    OPVoiceDeactivateAudioSession();
 }
 
 // Drive the streaming realtime voice loop. Mirrors OPRunOpenAIRealtimeTask's
@@ -17426,6 +18517,17 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
     NSDictionary *config = OPModelConfig();
     NSString *model = [modelStatus[@"model"] isKindOfClass:[NSString class]]
             ? modelStatus[@"model"] : OPModelEffectiveModel(config);
+    // The short volume gesture forces streaming even when the configured model
+    // mode is a text harness (e.g. openai_responses/gpt-5.5). In that case the
+    // configured model is not a Realtime model, so hardwire the realtime2 model
+    // and mode here rather than trying to open a Realtime socket to gpt-5.5.
+    BOOL configuredRealtime = [mode isEqualToString:@"openai_realtime"] ||
+            [mode isEqualToString:@"openai_realtime2"];
+    if (!configuredRealtime) {
+        mode = @"openai_realtime2";
+        model = OPOpenAIRealtime2Model;
+        config = @{};  // ignore text-harness endpoint override; use default wss URL
+    }
     // Realtime is always OpenAI, so prefer the OpenAI voice credential. Only
     // fall back to the model credential when a realtime2 model mode is actually
     // configured (in which case model-credential.json holds the OpenAI key).
@@ -17436,8 +18538,11 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
     long long timeoutMs = [modelStatus[@"timeout_ms"] respondsToSelector:@selector(longLongValue)]
             ? [modelStatus[@"timeout_ms"] longLongValue] : 30000;
     long long maxSteps = OPLongLongFromRequest(request, @"max_steps", 25, 1, 120);
+    // Realtime is an open-ended conversation, not a one-shot task: it stays live
+    // until the user squeezes again (voice_cancel). maxDurationMs is only a
+    // safety ceiling so a lost cancel can't hold the mic forever.
     long long maxDurationMs = OPLongLongFromRequest(request, @"max_duration_ms",
-            600000, 1000, 3300000);
+            3300000, 1000, 3300000);
     // OpenAI Realtime requires the input PCM rate >= 24000 Hz.
     UInt32 sampleRate = (UInt32)OPLongLongFromRequest(request, @"sample_rate_hz",
             24000, 24000, 48000);
@@ -17506,6 +18611,16 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
         return OPError(streamStartError);
     }
 
+    // Output playback: the model's pcm16 speech is enqueued here as
+    // response.audio.delta events arrive during each turn.
+    OPRealtimeAudioPlayer player;
+    NSString *playerStartError = OPRealtimeAudioPlayerStart(&player, OP_RT_OUTPUT_SAMPLE_RATE_HZ);
+    BOOL playerActive = playerStartError.length == 0;
+    if (!playerActive) {
+        OPRecordTrajectory(taskId, @"realtime_audio_output_unavailable",
+                @{@"reason": playerStartError ?: @"unknown"});
+    }
+
     // Yellow realtime island: server-VAD is now listening on the live mic.
     OPIslandReset(@"realtime", @"Listening", @"yellow");
     OPIslandUpdate(@{@"task_id": taskId ?: @""});
@@ -17521,7 +18636,20 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
     NSDictionary *screen = @{};
     NSString *cancelReason = @"";
 
-    for (long long step = 1; step <= maxSteps; step++) {
+    // Open-ended conversation loop. There is no "conversation over" for a
+    // Realtime session: it keeps listening across silent gaps and only ends
+    // when the user squeezes again (voice_cancel), the socket genuinely drops,
+    // or the safety duration ceiling is hit. `step` counts model turns for
+    // island/trajectory display but never terminates the loop.
+    for (long long step = 1; ; step++) {
+      // Drain autoreleased per-turn allocations (screenshots, decoded PCM, JSON
+      // dicts, transcripts) at the end of every turn. Without this the
+      // open-ended session accumulates every turn's temporaries until it ends,
+      // crossing the daemon's per-process jetsam limit and getting SIGKILLed
+      // mid-conversation (JETSAM_REASON_MEMORY_PERPROCESSLIMIT). ARC keeps the
+      // outer __strong vars assigned inside (screen, lastTranscript, stopReason)
+      // alive across the drain, so only genuine per-turn garbage is freed.
+      @autoreleasepool {
         if (OPVoiceCancelRequested || OPTaskCancellationRequested(taskId, &cancelReason)) {
             cancelled = YES;
             stopReason = @"cancelled";
@@ -17533,30 +18661,47 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
         }
         stepsUsed = step;
 
-        // Wait for a server-VAD-delimited model turn. Long timeout: the user
-        // may take a while to start speaking.
+        // Wait for a server-VAD-delimited model turn. Short timeout so we
+        // re-check the cancel flag frequently; a timeout here just means the
+        // user was silent, so we loop and keep listening.
+        //
+        // Keep barge-in ARMED the whole time (not disarmed per turn). The mic
+        // callback streams pcm16 to the socket continuously regardless, so the
+        // server always hears the user; arming barge-in only controls whether a
+        // sustained loud RMS cancels the in-flight response and flushes queued
+        // agent speech. Leaving it armed through the wait AND through tool
+        // execution is what lets the user actually interrupt mid-action — the
+        // whole point of realtime. We only clear the *detection* state here so a
+        // stale detection from a prior turn doesn't fire.
         pthread_mutex_lock(&stream.mutex);
-        stream.bargeInArmed = NO;
+        stream.bargeInArmed = YES;
         stream.bargeInStartMs = 0;
         stream.bargeInDetected = 0;
         pthread_mutex_unlock(&stream.mutex);
 
-        NSDictionary *turn = OPRealtimeWaitForTurn(socket, MAX(timeoutMs, 60000));
+        // Short inactivity window: the wait resets on every socket event, so an
+        // active response never times out, but a silent socket returns quickly
+        // (~1.5s) so we can re-check the cancel flag and stay responsive to the
+        // user squeezing again to end the conversation.
+        NSDictionary *turn = OPRealtimeWaitForTurn(socket, 1500,
+                playerActive ? &player : NULL);
         if (![turn[@"status"] isEqualToString:@"ok"]) {
-            // A read/turn timeout with no speech is a natural end of conversation,
-            // not an error. The socket's own receive timeout surfaces as
-            // "realtime_read_failed:realtime_receive_timeout"; treat any timeout
-            // flavor as a graceful idle end.
             stopReason = [turn[@"reason"] isKindOfClass:[NSString class]]
                     ? turn[@"reason"] : @"realtime_turn_failed";
-            if ([stopReason isEqualToString:@"realtime_turn_timeout"] ||
-                    [stopReason rangeOfString:@"timeout"].location != NSNotFound) {
-                stopReason = @"conversation_idle_timeout";
-                terminal = YES;
-                succeeded = YES;
-            } else {
-                toolErrors += 1;
+            BOOL isTimeout = [stopReason isEqualToString:@"realtime_turn_timeout"] ||
+                    [stopReason rangeOfString:@"timeout"].location != NSNotFound;
+            if (isTimeout) {
+                // Silent gap, not an end of conversation. Re-arm the mic and
+                // keep the socket open so the user can speak again after a
+                // pause without the session closing under them.
+                step--;  // don't burn a "step" on an empty listen window
+                pthread_mutex_lock(&stream.mutex);
+                stream.bargeInArmed = YES;
+                pthread_mutex_unlock(&stream.mutex);
+                continue;
             }
+            // Non-timeout failure means the socket actually dropped.
+            toolErrors += 1;
             break;
         }
         NSString *transcript = [turn[@"input_transcript"] isKindOfClass:[NSString class]]
@@ -17583,12 +18728,31 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
             continue;
         }
 
+        BOOL bargedMidBatch = NO;
         for (id value in calls) {
             if (![value isKindOfClass:[NSDictionary class]]) continue;
             NSDictionary *call = value;
             if (OPVoiceCancelRequested || OPTaskCancellationRequested(taskId, &cancelReason)) {
                 cancelled = YES;
                 stopReason = @"cancelled";
+                break;
+            }
+            // Mid-batch interruption: if the user spoke over the agent while it
+            // was executing a previous action in this same batch, abort the
+            // remaining queued actions immediately and return to listening. This
+            // is what makes the agent feel interruptible — the user shouldn't
+            // have to wait for a multi-action plan to finish before being heard.
+            if (stream.bargeInDetected) {
+                OPRecordTrajectory(taskId, @"realtime_barge_in_midbatch", @{@"step": @(step)});
+                [socket sendEvent:@{@"type": @"response.cancel"} timeoutMs:timeoutMs error:&error];
+                if (playerActive) {
+                    OPRealtimeAudioPlayerFlush(&player);
+                }
+                pthread_mutex_lock(&stream.mutex);
+                stream.bargeInDetected = 0;
+                stream.bargeInStartMs = 0;
+                pthread_mutex_unlock(&stream.mutex);
+                bargedMidBatch = YES;
                 break;
             }
             NSDictionary *decision = OPRealtimeDecisionFromCall(call);
@@ -17620,7 +18784,22 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
                     @"reason": @"realtime stream pre-action observation"
                 }));
             }
-            NSDictionary *toolResult = OPModelExecuteDecision(decision, taskId, approved);
+            // Speed: neutralize `wait` in realtime. The runtime already hands the
+            // model a fresh screen after every action, so a model-inserted
+            // wait:800ms is pure dead air while the user is listening live. Treat
+            // it as an executed no-op instead of blocking the loop.
+            NSDictionary *toolResult;
+            if ([tool isEqualToString:@"wait"]) {
+                toolResult = @{
+                    @"state": @"action.executed",
+                    @"task_id": taskId ?: @"",
+                    @"capability": @"tasks.observe",
+                    @"detail": @"wait:skipped_realtime",
+                    @"source": @"openphone.agentd"
+                };
+            } else {
+                toolResult = OPModelExecuteDecision(decision, taskId, approved, screen);
+            }
             NSString *state = [toolResult[@"state"] isKindOfClass:[NSString class]]
                     ? toolResult[@"state"] : @"";
             NSError *outputError = nil;
@@ -17628,20 +18807,84 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
                     timeoutMs, &outputError);
             OPRealtimeSendScreenFollowupIfUseful(socket, tool, toolResult ?: @{},
                     timeoutMs, &outputError);
+            // Speed: auto-deliver a fresh screen after each UI-driving action and
+            // reuse it as the next turn's pre-action observation. Without this the
+            // model has to spend an entire extra turn calling get_screen to see
+            // the result of its own tap/type — a full socket round-trip of dead
+            // air on every step. Capturing it here (and caching into `screen`)
+            // lets the SPEED RULE "don't call get_screen yourself" actually hold:
+            // the model always has the current screen in hand. Non-UI tools and
+            // failed actions don't get a follow-up screen (nothing changed).
+            BOOL toolExecuted = [state isEqualToString:@"action.executed"] ||
+                    [toolResult[@"status"] isEqualToString:@"ok"];
+            if (OPModelToolDrivesUI(tool) && toolExecuted &&
+                    ![tool isEqualToString:@"get_screen"]) {
+                NSDictionary *afterScreen = OPModelCompactScreenForLoop(OPGetScreen(@{
+                    @"task_id": taskId ?: @"",
+                    @"include_screenshot": @YES,
+                    @"include_activity": @YES,
+                    @"include_ui_tree": @YES,
+                    @"compact_trajectory": @YES,
+                    @"reason": @"realtime stream post-action observation"
+                }));
+                if (afterScreen.count > 0) {
+                    screen = afterScreen;
+                    NSString *text = [NSString stringWithFormat:
+                            @"Latest iPhone screen observation (after your %@):\n%@",
+                            tool, OPJSONString(OPRedactedObject(afterScreen, 0))];
+                    OPRealtimeSendUserMessage(socket, text, timeoutMs, &outputError);
+                }
+            } else if (![tool isEqualToString:@"wait"]) {
+                // Non-UI or non-executed tool: next turn should re-observe fresh.
+                // (A skipped `wait` changed nothing, so keep the cached screen.)
+                screen = @{};
+            }
+            // In realtime voice mode the *conversation* owns the session, not the
+            // task. The model calling finish_task/fail_task means "this sub-task
+            // is done" — it MUST NOT tear down the live mic/socket. Only a user
+            // squeeze (voice_cancel), a dropped socket, or the safety duration
+            // ceiling ends a realtime session. So we record the model's terminal
+            // intent, mark this turn's outcome, and keep listening for the next
+            // spoken instruction instead of breaking the loop.
             if ([tool isEqualToString:@"finish_task"] || [state isEqualToString:@"task.finished"]) {
-                terminal = YES;
                 succeeded = YES;
-                stopReason = @"finish_task";
-                break;
+                OPRecordTrajectory(taskId, @"realtime_subtask_finished", @{
+                    @"step": @(step),
+                    @"summary": [decision[@"arguments"] isKindOfClass:[NSDictionary class]]
+                            ? (decision[@"arguments"][@"summary"] ?: @"") : @""
+                });
+                continue;
             }
             if ([tool isEqualToString:@"fail_task"] || [state isEqualToString:@"task.failed"]) {
-                terminal = YES;
-                stopReason = @"fail_task";
-                break;
+                OPRecordTrajectory(taskId, @"realtime_subtask_failed", @{
+                    @"step": @(step),
+                    @"reason": [decision[@"arguments"] isKindOfClass:[NSDictionary class]]
+                            ? (decision[@"arguments"][@"reason"] ?: @"") : @""
+                });
+                continue;
             }
         }
         if (terminal || cancelled) {
             break;
+        }
+        // We just submitted one or more function_call_output items (the loop
+        // above only runs when calls.count > 0). The Realtime API does NOT
+        // auto-continue after a tool result: without an explicit response.create
+        // the model goes silent and the conversation stalls until the user
+        // cancels. Prompt the model to produce its spoken follow-up turn. An
+        // empty response payload inherits the session's audio output modality.
+        //
+        // Skip this when the user barged in mid-batch: server-VAD will create a
+        // response for the user's new utterance on its own, and forcing our own
+        // response.create here would talk over the interruption we just honored.
+        if (!bargedMidBatch) {
+            NSError *continueError = nil;
+            if (![socket sendEvent:@{@"type": @"response.create"}
+                          timeoutMs:timeoutMs error:&continueError]) {
+                toolErrors += 1;
+                stopReason = @"realtime_response_create_failed";
+                break;
+            }
         }
         // Post-action: re-arm barge-in and keep the loop alive for follow-ups.
         pthread_mutex_lock(&stream.mutex);
@@ -17650,14 +18893,23 @@ static NSDictionary *OPRunStreamingRealtimeVoice(NSString *voiceTaskId,
         if (stream.bargeInDetected) {
             OPRecordTrajectory(taskId, @"realtime_barge_in", @{@"step": @(step)});
             [socket sendEvent:@{@"type": @"response.cancel"} timeoutMs:timeoutMs error:&error];
+            // Drop any queued/playing model speech so the user's interruption
+            // is heard immediately instead of talking over the agent.
+            if (playerActive) {
+                OPRealtimeAudioPlayerFlush(&player);
+            }
             pthread_mutex_lock(&stream.mutex);
             stream.bargeInDetected = 0;
             stream.bargeInStartMs = 0;
             pthread_mutex_unlock(&stream.mutex);
         }
+      }  // @autoreleasepool (per-turn drain)
     }
 
     OPRealtimeStreamStop(&stream);
+    if (playerActive) {
+        OPRealtimeAudioPlayerStop(&player);
+    }
     [socket close];
     pthread_mutex_destroy(&stream.mutex);
 
@@ -17704,8 +18956,29 @@ static void *OPAsyncVoiceTriggerMain(void *context) {
                 OPNowMs(), getpid()];
         NSString *source = OPStringFromRequest(request,
                 @"source", @"openphone_agentd_voice");
+
+        // Decide the route (realtime streaming vs record/transcribe harness)
+        // BEFORE painting the island, so the first state SpringBoard sees for a
+        // realtime trigger is already "realtime". Publishing "listening" first
+        // made SpringBoard hide the edge glow (mode != realtime) and then re-show
+        // it a beat later when the daemon wrote "realtime", causing the glow to
+        // flash for a frame instead of coming up cleanly on button release.
+        NSDictionary *voiceModelStatus = OPModelStatusDictionary();
+        NSString *voiceMode = [voiceModelStatus[@"mode"] isKindOfClass:[NSString class]]
+                ? voiceModelStatus[@"mode"] : @"";
+        BOOL wantStream = OPBoolFromRequest(request ?: @{}, @"stream", NO) ||
+                OPBoolFromRequest(request ?: @{}, @"require_realtime", NO);
+        // Long-press harness gesture sends stream:false explicitly; honor it so
+        // the text harness runs even when realtime2 is the configured mode.
+        BOOL streamOptOut = [request[@"stream"] respondsToSelector:@selector(boolValue)] &&
+                !OPBoolFromRequest(request ?: @{}, @"stream", YES) &&
+                !OPBoolFromRequest(request ?: @{}, @"require_realtime", NO);
+        BOOL willStream = !streamOptOut &&
+                ([voiceMode isEqualToString:@"openai_realtime2"] || wantStream);
+
         OPVoiceSetLast(@"voice.recording", @"", @"", @"", YES);
-        OPIslandReset(@"listening", @"Listening", @"red");
+        OPIslandReset(willStream ? @"realtime" : @"listening",
+                @"Listening", willStream ? @"yellow" : @"red");
         OPIslandUpdate(@{@"task_id": voiceTaskId ?: @""});
         OPRecordContextEvent(@"voice_trigger_started", source, voiceTaskId,
                 @"volume voice trigger", @"daemon microphone capture started", @{
@@ -17717,12 +18990,7 @@ static void *OPAsyncVoiceTriggerMain(void *context) {
 
         // Realtime-2 streaming path: hand the live mic to the OpenAI Realtime
         // WebSocket (server-VAD end-of-turn), skipping record-then-transcribe.
-        // Opt out per-request with stream:false for the legacy capture path.
-        NSDictionary *voiceModelStatus = OPModelStatusDictionary();
-        NSString *voiceMode = [voiceModelStatus[@"mode"] isKindOfClass:[NSString class]]
-                ? voiceModelStatus[@"mode"] : @"";
-        if ([voiceMode isEqualToString:@"openai_realtime2"] &&
-                OPBoolFromRequest(request ?: @{}, @"stream", YES)) {
+        if (willStream) {
             NSDictionary *streamSummary = OPRunStreamingRealtimeVoice(voiceTaskId, request ?: @{});
             OPRecordAudit(@"voice_trigger_finished", voiceTaskId, @"background.run",
                     [streamSummary[@"status"] isEqualToString:@"task.finished"] ? @"completed" : @"stopped",
@@ -17863,6 +19131,18 @@ static void *OPAsyncVoiceTriggerMain(void *context) {
         OPVoiceSetLast(finalState, transcript, started ? @"" :
                 (agentStart[@"model_loop_status"] ?: agentStart[@"state"] ?: @"agent_not_started"),
                 provider, NO);
+        // When the agent starts, its async model loop drives the island to a
+        // terminal state. When it does NOT start, the "Thinking" pill set above
+        // would otherwise hang forever, so clear it here.
+        if (!started) {
+            NSString *loopStatus = [agentStart[@"model_loop_status"] isKindOfClass:[NSString class]]
+                    ? agentStart[@"model_loop_status"] : @"";
+            if ([loopStatus isEqualToString:@"provider_not_ready"]) {
+                OPIslandReset(@"error", @"Model not configured", @"orange");
+            } else {
+                OPIslandReset(@"error", @"Agent failed to start", @"red");
+            }
+        }
         NSDictionary *result = @{
             @"status": @"ok",
             @"state": finalState,
@@ -17933,12 +19213,52 @@ static NSDictionary *OPVoiceTrigger(NSDictionary *request) {
         return result;
     }
 
+    // Realtime gesture (double-tap) demands the realtime model. If the daemon is
+    // not configured for it, fail synchronously with a distinct state so the
+    // SpringBoard island can surface "Realtime not configured" instead of
+    // silently falling back to the record/transcribe harness.
+    if (OPBoolFromRequest(request, @"require_realtime", NO)) {
+        NSDictionary *rtStatus = OPModelStatusDictionary();
+        NSString *rtMode = [rtStatus[@"mode"] isKindOfClass:[NSString class]]
+                ? rtStatus[@"mode"] : @"";
+        // The short gesture forces realtime regardless of the configured model
+        // mode, so the only hard requirement is a usable OpenAI credential (the
+        // voice credential, or the model credential when a realtime mode is
+        // already configured). Do not gate on the text-harness mode/status.
+        NSString *rtCredential = OPVoiceCredentialValue(NULL);
+        if (rtCredential.length == 0) {
+            rtCredential = OPModelCredentialValue();
+        }
+        if (rtCredential.length == 0) {
+            OPVoiceSetLast(@"voice.realtime_not_configured", @"",
+                    @"openai_credential_missing", @"openai_realtime2", NO);
+            OPIslandReset(@"error", @"Realtime not configured", @"orange");
+            NSDictionary *result = @{
+                @"status": @"error",
+                @"state": @"voice.realtime_not_configured",
+                @"reason": @"openai_credential_missing",
+                @"model_mode": rtMode ?: @"",
+                @"model_status": rtStatus[@"status"] ?: @"",
+                @"runtime_authority": @"phone_local",
+                @"microphone_owner": @"openphone-agentd",
+                @"source": @"openphone.agentd"
+            };
+            OPRecordContextEvent(@"voice_trigger_suppressed", @"openphone_agentd_voice",
+                    [NSString stringWithFormat:@"ios-voice-%lld-%d", OPNowMs(), getpid()],
+                    @"realtime gesture", @"openai_credential_missing", result);
+            OPLog(@"voice trigger suppressed reason=openai_credential_missing mode=%@ status=%@",
+                    rtMode ?: @"", rtStatus[@"status"] ?: @"");
+            return result;
+        }
+    }
+
     pthread_mutex_lock(&OPVoiceTriggerMutex);
     OPVoiceTriggerRunning = YES;
     OPVoiceTriggerLastStartedMs = OPNowMs();
     OPVoiceTriggerLastState = @"voice.starting";
     OPVoiceTriggerLastError = @"";
     OPVoiceCancelRequested = 0;
+    OPVoiceStopRequested = 0;
     pthread_mutex_unlock(&OPVoiceTriggerMutex);
 
     NSMutableDictionary *ownedRequest = [request mutableCopy] ?: [NSMutableDictionary dictionary];
@@ -17949,7 +19269,9 @@ static NSDictionary *OPVoiceTrigger(NSDictionary *request) {
         ownedRequest[@"max_steps"] = @25;
     }
     if (!ownedRequest[@"max_duration_ms"]) {
-        ownedRequest[@"max_duration_ms"] = @600000;
+        // Realtime voice is open-ended (stays live until the user squeezes to
+        // close); use the safety ceiling rather than a 10-minute task budget.
+        ownedRequest[@"max_duration_ms"] = @3300000;
     }
     pthread_t thread;
     int rc = pthread_create(&thread, NULL, OPAsyncVoiceTriggerMain,
@@ -18489,6 +19811,21 @@ static NSDictionary *OPHandleRequest(NSDictionary *request, NSDate *startedAt) {
             @"source": @"openphone.agentd"
         };
     }
+    if ([command isEqualToString:@"voice_stop"] ||
+            [command isEqualToString:@"openphone.voice.stop"]) {
+        // Push-to-talk release: end mic capture now but KEEP the audio and run
+        // the transcribe/STT path (unlike voice_cancel, which discards it).
+        pthread_mutex_lock(&OPVoiceTriggerMutex);
+        BOOL voiceRunning = OPVoiceTriggerRunning;
+        OPVoiceStopRequested = 1;
+        pthread_mutex_unlock(&OPVoiceTriggerMutex);
+        return @{
+            @"status": @"ok",
+            @"state": voiceRunning ? @"voice.stopping" : @"voice.stop_noop",
+            @"voice_was_running": @(voiceRunning),
+            @"source": @"openphone.agentd"
+        };
+    }
     if ([command isEqualToString:@"voice_cancel"] ||
             [command isEqualToString:@"openphone.voice.cancel"] ||
             [command isEqualToString:@"cancel_active"]) {
@@ -18708,22 +20045,68 @@ static void OPStartAppUIIntakeServer(void) {
 static int32_t OPApplyJetsamPriority(int32_t pid, int32_t requestedBand,
         int32_t limitMB, int *rcOut, int *errnoOut) {
     memorystatus_priority_properties_t props;
-    props.priority = requestedBand > 0 ? requestedBand : JETSAM_PRIORITY_AUDIO_AND_ACCESSORY;
     props.user_data = 0;
-    int rc = memorystatus_control(MEMORYSTATUS_CMD_SET_PRIORITY_PROPERTIES,
-            pid, 0, &props, sizeof(props));
-    if (rc != 0 && props.priority != JETSAM_PRIORITY_FOREGROUND) {
-        // Fall back to plain foreground band (100).
-        props.priority = JETSAM_PRIORITY_FOREGROUND;
+    // Descending ladder: try the requested (high) band first, then fall back to
+    // successively lower bands the kernel is more willing to grant a mobile-uid
+    // daemon. We must never end up *lower* than we asked for by accident, so the
+    // ladder is ordered and we stop at the first band that sticks.
+    int32_t ladder[] = {
+        requestedBand > 0 ? requestedBand : JETSAM_PRIORITY_CRITICAL,
+        JETSAM_PRIORITY_CRITICAL,
+        JETSAM_PRIORITY_AUDIO_AND_ACCESSORY,
+        JETSAM_PRIORITY_FOREGROUND
+    };
+    int rc = -1;
+    for (size_t i = 0; i < sizeof(ladder) / sizeof(ladder[0]); i++) {
+        // Skip a rung that is >= a band we already failed to set (the requested
+        // band may itself equal a later rung).
+        if (i > 0 && ladder[i] >= ladder[0]) continue;
+        props.priority = ladder[i];
         rc = memorystatus_control(MEMORYSTATUS_CMD_SET_PRIORITY_PROPERTIES,
                 pid, 0, &props, sizeof(props));
+        if (rc == 0) break;
     }
     if (rcOut) *rcOut = rc;
     if (errnoOut) *errnoOut = rc != 0 ? errno : 0;
     if (limitMB > 0) {
-        int32_t mb = limitMB;
-        (void)memorystatus_control(MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT,
-                pid, 0, &mb, sizeof(mb));
+        // Lift the per-process memory limit off launchd's fatal 6 MB default.
+        // Requires the com.apple.private.memorystatus entitlement (we have it).
+        // Set BOTH active and inactive limits and clear the FATAL bit so that
+        // exceeding the limit makes us a jetsam candidate under pressure rather
+        // than an instant SIGKILL. Try the full struct (cmd 7) first; if the
+        // kernel rejects it, fall back to the bare-int fatal task limit (cmd 6)
+        // so we at least raise the ceiling above 6 MB.
+        memorystatus_memlimit_properties_t limit;
+        memset(&limit, 0, sizeof(limit));
+        limit.memlimit_active = limitMB;
+        limit.memlimit_active_attr = 0;    // non-fatal
+        limit.memlimit_inactive = limitMB;
+        limit.memlimit_inactive_attr = 0;  // non-fatal
+        int limitRc = memorystatus_control(MEMORYSTATUS_CMD_SET_MEMLIMIT_PROPERTIES,
+                pid, 0, &limit, sizeof(limit));
+        int limitErrno = limitRc != 0 ? errno : 0;
+        if (limitRc != 0) {
+            int32_t mb = limitMB;
+            int taskRc = memorystatus_control(MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT,
+                    pid, 0, &mb, sizeof(mb));
+            OPLog(@"jetsam memlimit_properties rc=%d errno=%d; task_limit fallback rc=%d errno=%d limit_mb=%d",
+                    limitRc, limitErrno, taskRc, taskRc != 0 ? errno : 0, (int)limitMB);
+        } else {
+            OPLog(@"jetsam memlimit set rc=0 limit_mb=%d (active+inactive, non-fatal)", (int)limitMB);
+        }
+        // Read the live limit straight back from the kernel so the log carries
+        // authoritative proof of the enforced ceiling (not launchd's stale 6 MB).
+        memorystatus_memlimit_properties_t got;
+        memset(&got, 0, sizeof(got));
+        int getRc = memorystatus_control(MEMORYSTATUS_CMD_GET_MEMLIMIT_PROPERTIES,
+                pid, 0, &got, sizeof(got));
+        if (getRc == 0) {
+            OPLog(@"jetsam memlimit readback rc=0 active_mb=%d attr=0x%x inactive_mb=%d attr=0x%x",
+                    (int)got.memlimit_active, (unsigned)got.memlimit_active_attr,
+                    (int)got.memlimit_inactive, (unsigned)got.memlimit_inactive_attr);
+        } else {
+            OPLog(@"jetsam memlimit readback rc=%d errno=%d", getRc, errno);
+        }
     }
     return rc == 0 ? props.priority : 0;
 }
@@ -18753,13 +20136,22 @@ static NSDictionary *OPJetsamPrioritySet(NSDictionary *request) {
 }
 
 static void OPRaiseJetsamPriority(void) {
-    // Long model tasks temporarily hold screenshots + prompt text + HTTP body —
-    // 256 MB is conservative headroom, still below iPhone's per-process cap.
+    // Pin to the highest band we can hold (critical). The audio band (12) is
+    // not enough: when a heavy foreground app launches, iOS reaps band-12
+    // daemons as low-priority collateral. Critical keeps us above the reap line.
+    //
+    // The per-process task limit is the OTHER half of the fix: launchd was
+    // relaunching us with `last exit reason = JETSAM_REASON_MEMORY_PERPROCESSLIMIT`,
+    // i.e. we were crossing our OWN self-imposed 256 MB cap mid voice session.
+    // The real leak (missing per-turn autoreleasepool in the realtime loop) is
+    // fixed separately; 1024 MB here is generous headroom for a transient spike
+    // (screenshots + decoded PCM + HTTP body), still well below the device's
+    // multi-GB per-process ceiling.
     int rc = 0, err = 0;
     int32_t band = OPApplyJetsamPriority(getpid(),
-            JETSAM_PRIORITY_AUDIO_AND_ACCESSORY, 256, &rc, &err);
+            JETSAM_PRIORITY_CRITICAL, 1024, &rc, &err);
     if (band > 0) {
-        OPLog(@"jetsam priority raised band=%d rc=%d limit_mb=256 via=self", (int)band, rc);
+        OPLog(@"jetsam priority raised band=%d rc=%d limit_mb=1024 via=self", (int)band, rc);
         return;
     }
     OPLog(@"jetsam priority set failed rc=%d errno=%d; delegating to root helper", rc, err);
@@ -18768,8 +20160,8 @@ static void OPRaiseJetsamPriority(void) {
     NSDictionary *helper = OPProtectedDataHelperRequest(@{
         @"command": @"jetsam_priority_set",
         @"pid": @(getpid()),
-        @"band": @(JETSAM_PRIORITY_AUDIO_AND_ACCESSORY),
-        @"limit_mb": @256
+        @"band": @(JETSAM_PRIORITY_CRITICAL),
+        @"limit_mb": @1024
     });
     if ([helper[@"status"] isEqualToString:@"ok"]) {
         OPLog(@"jetsam priority raised band=%@ via=root_helper", helper[@"band"] ?: @0);
@@ -18791,6 +20183,30 @@ int main(int argc, char **argv) {
 
         OPRaiseJetsamPriority();
         OPEnsureDirectories();
+
+        // Reset the Dynamic Island to idle on startup. A crash/jetsam kill mid-run
+        // leaves a stale non-idle snapshot (e.g. "thinking") on disk; the tweak
+        // keeps rendering it and treats it as an active turn, so hardware gestures
+        // get swallowed as cancels. Seed our in-memory sequence from the existing
+        // file first so the idle write is strictly newer and the tweak accepts it.
+        if (!OPProtectedDataHelperRole()) {
+            NSDictionary *staleIsland = OPReadJSONFile(OPIslandStatusPath);
+            unsigned long long staleSeq = [staleIsland[@"sequence"] isKindOfClass:[NSNumber class]]
+                    ? [staleIsland[@"sequence"] unsignedLongLongValue] : 0;
+            pthread_mutex_lock(&OPIslandMutex);
+            if (staleSeq > OPIslandSequence) {
+                OPIslandSequence = staleSeq;
+            }
+            pthread_mutex_unlock(&OPIslandMutex);
+            OPIslandReset(@"idle", @"", @"cyan");
+
+            pthread_t heartbeatThread;
+            if (pthread_create(&heartbeatThread, NULL,
+                    OPIslandHeartbeatThread, NULL) == 0) {
+                pthread_detach(heartbeatThread);
+            }
+        }
+
         OPServerFd = OPCreateServerSocket();
         if (OPServerFd < 0) {
             return 1;
@@ -18830,12 +20246,49 @@ int main(int argc, char **argv) {
                         ? task[@"goal"] : @"";
                 NSString *taskId = [task[@"task_id"] isKindOfClass:[NSString class]]
                         ? task[@"task_id"] : @"";
+                // Never auto-resume interactive voice/streaming sessions. If the
+                // daemon dies mid-conversation the session is over; re-enqueueing
+                // the same "Voice conversation" goal just re-runs the path that
+                // crashed us, and launchd's KeepAlive turns that into a tight
+                // crash->restart->resume loop that saturates the device (SSH
+                // handshakes start failing). These are user-driven and cheap to
+                // just re-trigger by hand, so fail them instead of resuming.
+                BOOL isVoiceStreaming =
+                        [task[@"stream"] boolValue] ||
+                        [task[@"require_realtime"] boolValue] ||
+                        [goal rangeOfString:@"Voice conversation"
+                                    options:NSCaseInsensitiveSearch].location != NSNotFound;
+                // Safety net for every other task type: cap resume attempts so a
+                // task that reliably crashes the daemon on replay can't loop
+                // forever. One recovery resume is enough for a genuine jetsam.
+                long long priorResumes =
+                        [task[@"resume_count"] respondsToSelector:@selector(longLongValue)]
+                        ? [task[@"resume_count"] longLongValue] : 0;
+                if (isVoiceStreaming || priorResumes >= 1) {
+                    OPUpdateTask(taskId, @"failed", @{
+                        @"stop_reason": isVoiceStreaming
+                                ? @"voice_session_not_resumed_after_restart"
+                                : @"resume_attempts_exhausted",
+                        @"resume_count": @(priorResumes),
+                        @"result": @{
+                            @"status": @"error",
+                            @"state": @"task.failed",
+                            @"reason": isVoiceStreaming
+                                    ? @"voice_session_not_resumed_after_restart"
+                                    : @"resume_attempts_exhausted",
+                            @"task_id": taskId,
+                            @"source": @"openphone.agentd"
+                        }
+                    });
+                    continue;
+                }
                 if (ageMs <= 60000 && goal.length > 0 && taskId.length > 0) {
                     // Mark original task as resumed so the fail-repair sweep
                     // below skips it (status != "active"), and enqueue fresh
                     // work with the same goal.
                     OPUpdateTask(taskId, @"resumed_after_restart", @{
                         @"resumed_at_ms": @(nowMs),
+                        @"resume_count": @(priorResumes + 1),
                         @"stop_reason": @"resumed_after_daemon_restart",
                         @"result": @{
                             @"status": @"ok",
