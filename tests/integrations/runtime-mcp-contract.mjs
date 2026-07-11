@@ -46,6 +46,17 @@ const fakeTransport = {
     jsonrpc: "2.0",
     id: 1,
     method: "initialize",
+    params: { protocolVersion: "2025-11-25" },
+  }, { transport: fakeTransport });
+  assert.equal(response.result.protocolVersion, "2025-11-25");
+}
+
+{
+  // Older supported client protocolVersions are still echoed back.
+  const response = await handleRequest({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
     params: { protocolVersion: "2025-06-18" },
   }, { transport: fakeTransport });
   assert.equal(response.result.protocolVersion, "2025-06-18");
@@ -206,14 +217,14 @@ const fakeTransport = {
       id: 1,
       method: "initialize",
       params: {
-        protocolVersion: "2025-06-18",
+        protocolVersion: "2025-11-25",
         capabilities: {},
         clientInfo: { name: "contract-test", version: "0.0.0" },
       },
     });
     const initialize = await nextResponse();
     assert.equal(initialize.id, 1);
-    assert.equal(initialize.result.protocolVersion, "2025-06-18");
+    assert.equal(initialize.result.protocolVersion, "2025-11-25");
     assert.equal(initialize.result.serverInfo.name, "openphone-runtime");
     assert.equal(initialize.result.serverInfo.runtimeProtocol.name, "openphone-runtime-protocol");
     assert.equal(initialize.result.serverInfo.runtimeProtocol.min_version, 1);

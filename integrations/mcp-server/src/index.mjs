@@ -9,7 +9,7 @@ import {
   textContent,
 } from "../runtime/protocol/openphone-runtime-tools.mjs";
 
-export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18"];
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18"];
 const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 export const RUNTIME_PROTOCOL_INFO = runtimeProtocolInfo();
 const SERVER_INFO = {
