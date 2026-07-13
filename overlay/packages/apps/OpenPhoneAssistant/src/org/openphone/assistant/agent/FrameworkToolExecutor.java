@@ -2425,6 +2425,7 @@ public final class FrameworkToolExecutor {
             return error("bad_background_job_stop");
         }
         boolean stopped = mAgentJobStore.stop(id);
+        OpenPhoneAgentJobScheduler.cancelJob(id);
         OpenPhoneAgentJobScheduler.scheduleNext(mContext);
         return new JSONObject()
                 .put("status", stopped ? "background_job.stopped"
