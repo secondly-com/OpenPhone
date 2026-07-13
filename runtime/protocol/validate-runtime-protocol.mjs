@@ -4,6 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  RUNTIME_PROTOCOL_VERSION_RANGE,
+  isSupportedRuntimeProtocolVersion,
+} from "./openphone-runtime-tools.mjs";
+
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const commandsPath = path.join(root, "runtime/protocol/openphone-commands.json");
 const eventsPath = path.join(root, "runtime/protocol/openphone-events.json");
@@ -72,8 +77,12 @@ function extractPluginCommandBuckets(source, label) {
 }
 
 const manifest = readJson(commandsPath);
-if (manifest.version !== 1 || !Array.isArray(manifest.commands)) {
-  fail("openphone-commands.json must contain version=1 and commands[]");
+if (!isSupportedRuntimeProtocolVersion(manifest.version) || !Array.isArray(manifest.commands)) {
+  fail(
+    "openphone-commands.json must contain commands[] and a supported version "
+      + `(range: ${RUNTIME_PROTOCOL_VERSION_RANGE.min_version}..`
+      + `${RUNTIME_PROTOCOL_VERSION_RANGE.max_version}, got: ${manifest.version})`,
+  );
 }
 
 const runtimeSchema = readJson(schemaPath);
@@ -119,6 +128,29 @@ for (const entry of manifestEntries) {
   manifestCommands.push(entry.name, ...(entry.aliases ?? []));
 }
 const manifestSet = unique(manifestCommands, "manifest command or alias");
+
+for (const entry of manifestEntries) {
+  if (entry.deprecated !== undefined && typeof entry.deprecated !== "boolean") {
+    fail(`manifest command has non-boolean deprecated field: ${entry.name}`);
+  }
+  if (entry.superseded_by !== undefined) {
+    if (typeof entry.superseded_by !== "string" || !entry.superseded_by) {
+      fail(`manifest command has invalid superseded_by field: ${entry.name}`);
+    }
+    if (entry.deprecated !== true) {
+      fail(`manifest command sets superseded_by without deprecated=true: ${entry.name}`);
+    }
+    if (!manifestSet.has(entry.superseded_by)) {
+      fail(
+        `manifest command superseded_by references missing command: `
+          + `${entry.name} -> ${entry.superseded_by}`,
+      );
+    }
+    if (entry.superseded_by === entry.name || (entry.aliases ?? []).includes(entry.superseded_by)) {
+      fail(`manifest command superseded_by must reference another command: ${entry.name}`);
+    }
+  }
+}
 
 const pluginBuckets = extractPluginCommandBuckets(
   fs.readFileSync(pluginSourcePath, "utf8"),

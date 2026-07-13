@@ -19,6 +19,16 @@ on:
         description: "Comma-separated runtime intents"
         required: true
         default: "local"
+      lane:
+        description: "Lab lane"
+        required: true
+        default: "incremental-emulator"
+        type: choice
+        options:
+          - incremental-emulator
+          - smoke-only
+          - export-emulator-image
+          - custom
       arch:
         description: "Emulator architecture"
         required: true
@@ -65,7 +75,7 @@ on:
           - "false"
           - "true"
       export_emulator_image:
-        description: "Upload sdk-repo-linux-system-images.zip for local SDK/AVD use"
+        description: "Custom lane only: upload sdk-repo-linux-system-images.zip"
         required: true
         default: "false"
         type: choice
@@ -73,13 +83,21 @@ on:
           - "false"
           - "true"
       run_smoke:
-        description: "Boot emulator and run smoke after build/export"
+        description: "Custom lane only: boot emulator and run smoke after build/export"
         required: true
         default: "true"
         type: choice
         options:
           - "true"
           - "false"
+      skip_build:
+        description: "Custom lane only: reuse existing build outputs from a warm cache image"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   pull_request_target:
     types:
       - labeled
@@ -94,8 +112,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gcp-lab-smoke:
-    name: GCP emulator lab smoke
+  gcp-emulator-lab:
+    name: GCP emulator lab
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -167,7 +185,14 @@ jobs:
             machine_type="${OPENPHONE_GCP_MACHINE_TYPE}"
             boot_disk_size="${OPENPHONE_GCP_BOOT_DISK_SIZE}"
             boot_disk_type="${OPENPHONE_GCP_BOOT_DISK_TYPE}"
-            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            cache_source_snapshot="$(
+              scripts/lab/gcp/latest-cache-snapshot.sh \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --arch "$arch" || true
+            )"
+            if [[ -z "$cache_source_snapshot" ]]; then
+              cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+            fi
             if [[ -n "$cache_source_snapshot" ]]; then
               cache_mode="snapshot"
             else
@@ -175,6 +200,10 @@ jobs:
             fi
             cache_disk=""
             keep_vm="false"
+            lane="incremental-emulator"
+            export_emulator_image="false"
+            run_smoke="true"
+            skip_build="false"
           else
             pr_number="${{ inputs.pr_number }}"
             ref="${{ inputs.ref }}"
@@ -194,7 +223,41 @@ jobs:
             cache_mode="${{ inputs.cache_mode }}"
             cache_disk="${{ inputs.cache_disk }}"
             cache_source_snapshot="${{ inputs.cache_source_snapshot }}"
+            if [[ -z "$cache_source_snapshot" ]]; then
+              cache_source_snapshot="$(
+                scripts/lab/gcp/latest-cache-snapshot.sh \
+                  --project "${OPENPHONE_GCP_PROJECT}" \
+                  --arch "$arch" || true
+              )"
+            fi
             keep_vm="${{ inputs.keep_vm }}"
+            lane="${{ inputs.lane }}"
+            case "$lane" in
+              incremental-emulator)
+                export_emulator_image="false"
+                run_smoke="true"
+                skip_build="false"
+                ;;
+              smoke-only)
+                export_emulator_image="false"
+                run_smoke="true"
+                skip_build="true"
+                ;;
+              export-emulator-image)
+                export_emulator_image="true"
+                run_smoke="false"
+                skip_build="false"
+                ;;
+              custom)
+                export_emulator_image="${{ inputs.export_emulator_image }}"
+                run_smoke="${{ inputs.run_smoke }}"
+                skip_build="${{ inputs.skip_build }}"
+                ;;
+              *)
+                echo "::error::Unsupported GCP lab lane: $lane"
+                exit 1
+                ;;
+            esac
           fi
 
           {
@@ -202,6 +265,7 @@ jobs:
             echo "ref=$ref"
             echo "repo_url=$repo_url"
             echo "runtime=$runtime"
+            echo "lane=$lane"
             echo "arch=$arch"
             echo "machine_type=$machine_type"
             echo "boot_disk_size=$boot_disk_size"
@@ -210,9 +274,12 @@ jobs:
             echo "cache_disk=$cache_disk"
             echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
+            echo "export_emulator_image=$export_emulator_image"
+            echo "run_smoke=$run_smoke"
+            echo "skip_build=$skip_build"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Run GCP lab smoke
+      - name: Run GCP emulator lab
         shell: bash
         run: |
           set -euxo pipefail
@@ -237,11 +304,14 @@ jobs:
           if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
             args+=(--keep-vm)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.export_emulator_image }}" == "true" ]]; then
+          if [[ "${{ steps.target.outputs.export_emulator_image }}" == "true" ]]; then
             args+=(--export-emulator-image)
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.run_smoke }}" != "true" ]]; then
+          if [[ "${{ steps.target.outputs.run_smoke }}" != "true" ]]; then
             args+=(--skip-smoke)
+          fi
+          if [[ "${{ steps.target.outputs.skip_build }}" == "true" ]]; then
+            args+=(--skip-build)
           fi
           IFS=',' read -r -a runtimes <<< "${{ steps.target.outputs.runtime }}"
           for runtime in "${runtimes[@]}"; do
@@ -249,6 +319,34 @@ jobs:
             args+=(--runtime "$runtime")
           done
           ./scripts/lab/gcp/run-smoke.sh "${args[@]}"
+
+      - name: Summarize GCP emulator lab
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## GCP emulator lab"
+            echo
+            echo "- Cloud provider: \`GCP\`"
+            echo "- Project: \`${OPENPHONE_GCP_PROJECT}\`"
+            echo "- Zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- VM: \`${{ steps.target.outputs.name }}\`"
+            echo "- Source ref: \`${{ steps.target.outputs.ref }}\`"
+            echo "- Source repo: \`${{ steps.target.outputs.repo_url }}\`"
+            echo "- Runtime intents: \`${{ steps.target.outputs.runtime }}\`"
+            echo "- Lane: \`${{ steps.target.outputs.lane }}\`"
+            echo "- Emulator arch: \`${{ steps.target.outputs.arch }}\`"
+            echo "- Machine type: \`${{ steps.target.outputs.machine_type }}\`"
+            echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
+            echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
+            echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
+            echo "- Export emulator image: \`${{ steps.target.outputs.export_emulator_image }}\`"
+            echo "- Run smoke: \`${{ steps.target.outputs.run_smoke }}\`"
+            echo "- Skip build: \`${{ steps.target.outputs.skip_build }}\`"
+            echo "- VM service account: \`disabled\`"
+            echo "- VM OAuth scopes: \`disabled\`"
+            echo "- Keep VM: \`${{ steps.target.outputs.keep_vm }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload GCP lab artifacts
         if: always()

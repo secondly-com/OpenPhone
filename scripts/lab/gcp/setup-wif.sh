@@ -77,6 +77,7 @@ need_gcloud
 info "Using GCP project: $project"
 gcloud services enable \
   compute.googleapis.com \
+  iap.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
   cloudresourcemanager.googleapis.com \
@@ -88,6 +89,11 @@ gcloud services enable \
 
 project_number="$(gcloud projects describe "$project" --format='value(projectNumber)')"
 sa_email="${service_account_id}@${project}.iam.gserviceaccount.com"
+wif_attribute_mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.workflow=assertion.workflow,attribute.workflow_ref=assertion.workflow_ref"
+wif_release_workflow_ref="${repo}/.github/workflows/release.yml@refs/heads/main"
+wif_lab_workflow_ref="${repo}/.github/workflows/gcp-lab.yml@refs/heads/main"
+wif_cache_refresh_workflow_ref="${repo}/.github/workflows/gcp-cache-refresh.yml@refs/heads/main"
+wif_attribute_condition="assertion.repository == '${repo}' && (assertion.workflow_ref == '${wif_release_workflow_ref}' || assertion.workflow_ref == '${wif_lab_workflow_ref}' || assertion.workflow_ref == '${wif_cache_refresh_workflow_ref}')"
 
 if ! gcloud iam service-accounts describe "$sa_email" --project "$project" >/dev/null 2>&1; then
   info "Creating service account: $sa_email"
@@ -121,10 +127,18 @@ if ! gcloud iam workload-identity-pools providers describe "$provider_id" \
     --workload-identity-pool "$pool_id" \
     --display-name "$repo" \
     --issuer-uri "https://token.actions.githubusercontent.com" \
-    --attribute-mapping "google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.workflow=assertion.workflow" \
-    --attribute-condition "assertion.repository == '${repo}'"
+    --attribute-mapping "$wif_attribute_mapping" \
+    --attribute-condition "$wif_attribute_condition"
 else
-  info "WIF provider already exists: $provider_id"
+  info "Updating WIF provider condition: $provider_id"
+  gcloud iam workload-identity-pools providers update-oidc "$provider_id" \
+    --project "$project" \
+    --location global \
+    --workload-identity-pool "$pool_id" \
+    --display-name "$repo" \
+    --issuer-uri "https://token.actions.githubusercontent.com" \
+    --attribute-mapping "$wif_attribute_mapping" \
+    --attribute-condition "$wif_attribute_condition" >/dev/null
 fi
 
 principal="principalSet://iam.googleapis.com/projects/${project_number}/locations/global/workloadIdentityPools/${pool_id}/attribute.repository/${repo}"
@@ -139,6 +153,7 @@ gcloud iam service-accounts add-iam-policy-binding "$sa_email" \
 roles=(
   roles/compute.instanceAdmin.v1
   roles/iam.serviceAccountUser
+  roles/iap.tunnelResourceAccessor
   roles/serviceusage.serviceUsageConsumer
 )
 
@@ -147,6 +162,39 @@ for role in "${roles[@]}"; do
   gcloud projects add-iam-policy-binding "$project" \
     --member "serviceAccount:$sa_email" \
     --role "$role" >/dev/null
+done
+
+iap_firewall_rule="openphone-lab-allow-iap-ssh"
+if gcloud compute firewall-rules describe "$iap_firewall_rule" \
+  --project "$project" >/dev/null 2>&1; then
+  info "Ensuring IAP SSH firewall rule: $iap_firewall_rule"
+  gcloud compute firewall-rules update "$iap_firewall_rule" \
+    --project "$project" \
+    --rules tcp:22 \
+    --source-ranges 35.235.240.0/20 \
+    --target-tags openphone-lab >/dev/null
+else
+  info "Creating IAP SSH firewall rule: $iap_firewall_rule"
+  gcloud compute firewall-rules create "$iap_firewall_rule" \
+    --project "$project" \
+    --network "$OPENPHONE_GCP_NETWORK" \
+    --direction INGRESS \
+    --priority 1000 \
+    --action ALLOW \
+    --rules tcp:22 \
+    --source-ranges 35.235.240.0/20 \
+    --target-tags openphone-lab \
+    --description "Allow SSH to OpenPhone lab VMs only through Google Cloud IAP" >/dev/null
+fi
+
+for broad_rule in default-allow-ssh default-allow-rdp; do
+  if gcloud compute firewall-rules describe "$broad_rule" \
+    --project "$project" >/dev/null 2>&1; then
+    info "Disabling broad default ingress rule: $broad_rule"
+    gcloud compute firewall-rules update "$broad_rule" \
+      --project "$project" \
+      --disabled >/dev/null
+  fi
 done
 
 if [[ "$set_github_vars" == true ]]; then
@@ -160,6 +208,7 @@ if [[ "$set_github_vars" == true ]]; then
   gh variable set OPENPHONE_GCP_MACHINE_TYPE --repo "$repo" --body "$OPENPHONE_GCP_MACHINE_TYPE"
   gh variable set OPENPHONE_GCP_BOOT_DISK_SIZE --repo "$repo" --body "$OPENPHONE_GCP_BOOT_DISK_SIZE"
   gh variable set OPENPHONE_GCP_BOOT_DISK_TYPE --repo "$repo" --body "$OPENPHONE_GCP_BOOT_DISK_TYPE"
+  gh variable set OPENPHONE_GCP_TUNNEL_THROUGH_IAP --repo "$repo" --body "$OPENPHONE_GCP_TUNNEL_THROUGH_IAP"
 fi
 
 cat <<EOF

@@ -76,8 +76,18 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-sudo apt-get update
-sudo apt-get install -y \
+apt_get() {
+  sudo env DEBIAN_FRONTEND=noninteractive timeout --foreground "${OPENPHONE_APT_TIMEOUT_SECONDS:-1800}" \
+    apt-get \
+      -o "Acquire::Retries=${OPENPHONE_APT_RETRIES:-5}" \
+      -o "Acquire::http::Timeout=${OPENPHONE_APT_HTTP_TIMEOUT_SECONDS:-30}" \
+      -o "Acquire::https::Timeout=${OPENPHONE_APT_HTTPS_TIMEOUT_SECONDS:-30}" \
+      -o "DPkg::Lock::Timeout=${OPENPHONE_APT_LOCK_TIMEOUT_SECONDS:-120}" \
+      "$@"
+}
+
+apt_get update
+apt_get install --no-install-recommends -y \
   acl \
   ca-certificates \
   curl \
@@ -86,7 +96,6 @@ sudo apt-get install -y \
   jq \
   kmod \
   lsof \
-  qemu-kvm \
   rsync \
   unzip \
   zip
@@ -100,15 +109,14 @@ if [[ -e /dev/kvm ]]; then
 fi
 
 git lfs install --skip-repo
+git config --global user.name "${OPENPHONE_LAB_GIT_NAME:-OpenPhone Lab}"
+git config --global user.email "${OPENPHONE_LAB_GIT_EMAIL:-openphone-lab@example.invalid}"
 mkdir -p "$HOME/openphone-lab" "$HOME/openphone-android"
 printf 'OpenPhone GCP VM bootstrap complete.\n'
 REMOTE
 
 deadline=$((SECONDS + timeout_seconds))
-until gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
-  --command "true" >/dev/null 2>&1; do
+until gcp_compute_ssh "$name" "$project" "$zone" --command "true" >/dev/null 2>&1; do
   if [[ "$SECONDS" -ge "$deadline" ]]; then
     die "SSH was not ready for $name within ${timeout_seconds}s"
   fi
@@ -116,12 +124,9 @@ until gcloud compute ssh "$name" \
 done
 
 info "Copying bootstrap script to $name"
-gcloud compute scp "$tmp_script" "$name:/tmp/openphone-bootstrap-vm.sh" \
-  --project "$project" \
-  --zone "$zone" >/dev/null
+gcp_compute_scp "$project" "$zone" \
+  "$tmp_script" "$name:/tmp/openphone-bootstrap-vm.sh" >/dev/null
 
 info "Bootstrapping $name"
-gcloud compute ssh "$name" \
-  --project "$project" \
-  --zone "$zone" \
+gcp_compute_ssh "$name" "$project" "$zone" \
   --command "bash /tmp/openphone-bootstrap-vm.sh"

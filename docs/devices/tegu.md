@@ -75,14 +75,17 @@ OPENPHONE_ANDROID_DIR="$PWD/.worktree/OpenPhoneAndroid/android" \
 ./scripts/apply-patches.sh
 
 OPENPHONE_ANDROID_DIR="$PWD/.worktree/OpenPhoneAndroid/android" \
-OPENPHONE_BUILD_GOAL=bacon \
+OPENPHONE_BUILD_GOAL="target-files-package ota_from_target_files" \
 ./scripts/build.sh openphone_tegu
 ```
 
-For Pixel 9a OTA-producing build goals, `scripts/build.sh` automatically
-prepares `device/google/tegu-kernels/6.1/tegu.dtb` from the upstream prebuilt
-`vendor_kernel_boot.img` and verifies the generated `vendor_kernel_boot.img`
-contains the known-good DTB. The same checks can be run manually with:
+For Pixel 9a OTA-producing build goals,
+`scripts/prepare-tegu-device-repos.sh` prepares the required kernel prebuilts
+including `device/google/tegu-kernels/6.1/boot.img`, and `scripts/build.sh`
+automatically prepares `tegu.dtb` from the upstream prebuilt
+`vendor_kernel_boot.img`. The build fails fast if `boot.img` is missing and
+verifies the generated `vendor_kernel_boot.img` contains the known-good DTB.
+The same checks can be run manually with:
 
 ```bash
 OPENPHONE_ANDROID_DIR="$PWD/.worktree/OpenPhoneAndroid/android" \
@@ -101,12 +104,13 @@ Expected output directory:
 Expected release artifacts after a successful device build:
 
 ```text
+boot.img
 vendor_boot.img
-lineage-*-UNOFFICIAL-tegu.zip
+obj/PACKAGING/target_files_intermediates/openphone_tegu-target_files.zip
 ```
 
-The zip name may still use Lineage's package naming until OpenPhone release
-packaging is customized.
+The GitHub release workflow turns the target-files package into an
+`openphone_tegu-<version>-ota.zip` artifact with `scripts/stage-release-ota.sh`.
 
 ## Unlock and Flash
 
@@ -312,7 +316,8 @@ rows out of `pending`.
 ## Known Issues
 
 - Play Integrity behavior is expected to change after bootloader unlock.
-- OTA/release signing is not implemented yet.
+- Production OTA/release signing is not implemented yet for public preview
+  artifacts.
 - Privileged assistant APK push is validated for assistant-only iteration, but
   framework, sepolicy, Settings/SystemUI, boot-chain, and first-install changes
   still require full target-files/OTA builds.

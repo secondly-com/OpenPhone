@@ -43,14 +43,6 @@ on:
         options:
           - "true"
           - "false"
-      run_emulator_smoke:
-        description: "Require GCP lab emulator smoke before publishing"
-        required: true
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
       keep_gcp_lab_vm:
         description: "Leave GCP lab VM running for debugging"
         required: true
@@ -64,95 +56,14 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-${{ inputs.version }}-${{ inputs.device }}
+  cancel-in-progress: false
+
 jobs:
-  gcp-lab-smoke:
-    name: Release GCP lab smoke
-    if: ${{ inputs.run_emulator_smoke == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 480
-    env:
-      OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
-      OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
-      OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
-      OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
-      OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
-      OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
-      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-35"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Validate repository scaffold
-        run: |
-          set -euxo pipefail
-          ./scripts/check.sh
-          ./scripts/check-release-notes.sh "${{ inputs.version }}" "${{ inputs.release_notes }}"
-          git diff --check
-          test -f "${{ inputs.release_notes }}"
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.OPENPHONE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.OPENPHONE_GCP_SERVICE_ACCOUNT }}
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Run release GCP lab smoke
-        run: |
-          set -euxo pipefail
-          arch="${{ vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
-          args=(
-            --name "openphone-lab-release-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}"
-            --repo-url "https://github.com/secondly-com/OpenPhone.git"
-            --ref "${GITHUB_SHA}"
-            --project "${OPENPHONE_GCP_PROJECT}"
-            --zone "${OPENPHONE_GCP_ZONE}"
-            --machine-type "${OPENPHONE_GCP_MACHINE_TYPE}"
-            --boot-disk-size "${OPENPHONE_GCP_BOOT_DISK_SIZE}"
-            --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
-            --arch "$arch"
-            --runtime local
-          )
-          if [[ -n "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}" ]]; then
-            args+=(--cache-mode snapshot --cache-source-snapshot "${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}")
-          else
-            args+=(--cache-mode scratch)
-          fi
-          if [[ "${{ inputs.keep_gcp_lab_vm }}" == "true" ]]; then
-            args+=(--keep-vm)
-          fi
-          ./scripts/lab/gcp/run-smoke.sh "${args[@]}"
-
-      - name: Upload GCP lab artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openphone-release-gcp-lab
-          path: .worktree/gcp-lab/
-          if-no-files-found: warn
-
   release-dry-run:
     name: Release dry run
-    needs: gcp-lab-smoke
-    if: ${{ always() && inputs.dry_run == 'true' && (inputs.run_emulator_smoke != 'true' || needs.gcp-lab-smoke.result == 'success') }}
+    if: ${{ inputs.dry_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -191,24 +102,28 @@ jobs:
             echo "- Version: \`${{ inputs.version }}\`"
             echo "- Device: \`${{ inputs.device }}\`"
             echo "- Release notes: \`${{ inputs.release_notes }}\`"
-            echo "- GCP lab smoke required: \`${{ inputs.run_emulator_smoke }}\`"
-            echo "- OTA build skipped: \`true\`"
+            echo "- Cloud release build: \`skipped by dry_run\`"
+            echo "- Emulator gate skipped: \`true\`"
             echo "- GitHub Release publish skipped: \`true\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  build-device-preview:
-    name: Build device preview
-    needs: gcp-lab-smoke
-    if: ${{ always() && inputs.dry_run != 'true' && (inputs.run_emulator_smoke != 'true' || needs.gcp-lab-smoke.result == 'success') }}
-    runs-on: [self-hosted, openphone-build]
-    timeout-minutes: 180
+  gcp-release-build:
+    name: GCP release build, emulator gate, and publish
+    if: ${{ inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
     env:
-      OPENPHONE_ANDROID_DIR: ${{ vars.OPENPHONE_BUILD_ANDROID_DIR || vars.OPENPHONE_ANDROID_DIR || '/opt/openphone-build/android' }}
-      OPENPHONE_BUILD_CACHE_DIR: ${{ vars.OPENPHONE_BUILD_CACHE_DIR || '/opt/openphone-build/cache' }}
+      OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
+      OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
+      OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
+      OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
+      OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
+      OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT: ${{ vars.OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_URL: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_URL || '' }}
       OPENPHONE_TEGU_VENDOR_ZIP_SHA256: ${{ vars.OPENPHONE_TEGU_VENDOR_ZIP_SHA256 || '' }}
-      OPENPHONE_RELEASE: bp4a
-      OPENPHONE_BUILD_GOAL: otapackage
+      OPENPHONE_RELEASE_BUILD_GOAL: ${{ vars.OPENPHONE_RELEASE_BUILD_GOAL || 'target-files-package ota_from_target_files' }}
+      OPENPHONE_EMULATOR_BUILD_GOAL: ${{ vars.OPENPHONE_EMULATOR_BUILD_GOAL || 'droid emu_img_zip' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -224,6 +139,11 @@ jobs:
         with:
           packages: "platforms;android-35"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Validate repository
         run: |
           set -euxo pipefail
@@ -232,71 +152,152 @@ jobs:
           git diff --check
           test -f "${{ inputs.release_notes }}"
 
-      - name: Prepare Android tree
+      - name: Reject duplicate GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-
-          candidates=()
-          add_candidate() {
-            local path="$1"
-            [[ -n "$path" ]] || return 0
-            candidates+=("$path")
-          }
-
-          add_candidate "$OPENPHONE_ANDROID_DIR"
-          add_candidate "${OPENPHONE_BUILD_ANDROID_DIR:-}"
-          add_candidate "${HOME}/openphone-android"
-          add_candidate "${RUNNER_WORKSPACE}/OpenPhoneAndroid/android"
-
-          selected=""
-          for candidate in "${candidates[@]}"; do
-            if [[ -f "$candidate/build/envsetup.sh" ]]; then
-              selected="$candidate"
-              break
-            fi
-          done
-          selected="${selected:-$OPENPHONE_ANDROID_DIR}"
-          if ! mkdir -p "$selected"; then
-            selected="${HOME}/openphone-android"
-            mkdir -p "$selected"
+          if gh release view "${{ inputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::GitHub Release ${{ inputs.version }} already exists; refusing to rebuild or overwrite it."
+            exit 1
           fi
 
-          echo "OPENPHONE_ANDROID_DIR=$selected" >> "$GITHUB_ENV"
-          export OPENPHONE_ANDROID_DIR="$selected"
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.OPENPHONE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.OPENPHONE_GCP_SERVICE_ACCOUNT }}
 
-          ./scripts/sync.sh -j"$(nproc)" --detach
-          if [[ -d "$OPENPHONE_ANDROID_DIR/.repo" ]]; then
-            OPENPHONE_RESET_PATCH_TARGETS=1 ./scripts/apply-patches.sh
-          else
-            ./scripts/apply-patches.sh
-          fi
-          if [[ "${{ inputs.device }}" == "tegu" ]]; then
-            ./scripts/prepare-tegu-device-repos.sh
-          fi
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build OTA
+      - name: Plan GCP release lab
+        id: target
         run: |
           set -euxo pipefail
-          ./scripts/build.sh openphone_${{ inputs.device }}
+          version="${{ inputs.version }}"
+          safe_version="$(
+            printf '%s' "$version" \
+              | tr '[:upper:]' '[:lower:]' \
+              | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//'
+          )"
+          lab_name="openphone-release-${safe_version}-${{ github.run_id }}-${{ github.run_attempt }}"
+          arch="${{ vars.OPENPHONE_EMULATOR_ARCH || 'x86_64' }}"
+          cache_source_snapshot="$(
+            scripts/lab/gcp/latest-cache-snapshot.sh \
+              --project "${OPENPHONE_GCP_PROJECT}" \
+              --arch "$arch" || true
+          )"
+          if [[ -z "$cache_source_snapshot" ]]; then
+            cache_source_snapshot="${OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT}"
+          fi
+          cache_mode="scratch"
+          if [[ -n "$cache_source_snapshot" ]]; then
+            cache_mode="snapshot"
+          fi
+          echo "lab_name=$lab_name" >> "$GITHUB_OUTPUT"
+          echo "emulator_arch=$arch" >> "$GITHUB_OUTPUT"
+          echo "cache_mode=$cache_mode" >> "$GITHUB_OUTPUT"
+          echo "cache_source_snapshot=$cache_source_snapshot" >> "$GITHUB_OUTPUT"
 
-      - name: Stage release artifacts
+      - name: Run GCP release build and stage artifacts
         id: stage
         run: |
           set -euxo pipefail
-          staging=".worktree/releases/${{ inputs.version }}"
-          product_dir="${OPENPHONE_ANDROID_DIR}/out/target/product/${{ inputs.device }}"
-          src="${product_dir}/openphone_${{ inputs.device }}-ota.zip"
-          dst="${staging}/openphone_${{ inputs.device }}-${{ inputs.version }}-ota.zip"
+          version="${{ inputs.version }}"
+          lab_name="${{ steps.target.outputs.lab_name }}"
+          arch="${{ steps.target.outputs.emulator_arch }}"
+          cache_mode="${{ steps.target.outputs.cache_mode }}"
+          cache_source_snapshot="${{ steps.target.outputs.cache_source_snapshot }}"
+          cleanup_behavior="delete-vm"
+          args=(
+            --name "$lab_name"
+            --repo-url "https://github.com/secondly-com/OpenPhone.git"
+            --ref "${GITHUB_SHA}"
+            --version "$version"
+            --device "${{ inputs.device }}"
+            --release-notes "${{ inputs.release_notes }}"
+            --project "${OPENPHONE_GCP_PROJECT}"
+            --zone "${OPENPHONE_GCP_ZONE}"
+            --machine-type "${OPENPHONE_GCP_MACHINE_TYPE}"
+            --boot-disk-size "${OPENPHONE_GCP_BOOT_DISK_SIZE}"
+            --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
+            --build-goal "${OPENPHONE_RELEASE_BUILD_GOAL}"
+            --emulator-arch "$arch"
+            --emulator-build-goal "${OPENPHONE_EMULATOR_BUILD_GOAL}"
+          )
+          if [[ "$cache_mode" == "snapshot" ]]; then
+            args+=(--cache-mode snapshot --cache-source-snapshot "$cache_source_snapshot")
+          else
+            args+=(--cache-mode scratch)
+          fi
+          if [[ "${{ inputs.keep_gcp_lab_vm }}" == "true" ]]; then
+            cleanup_behavior="keep-vm"
+            args+=(--keep-vm)
+          fi
+          ./scripts/lab/gcp/run-release.sh "${args[@]}"
 
-          mkdir -p "$staging"
-          cp "$src" "$dst"
-          scripts/generate-release-manifest.sh "${{ inputs.version }}" "$staging" "$staging"
-          scripts/validate-release-artifacts.sh "$staging"
+          staging=".worktree/gcp-lab/${lab_name}/artifacts/release/${version}"
+          scripts/validate-release-artifacts.sh "$staging" "$staging"
 
           echo "staging=$staging" >> "$GITHUB_OUTPUT"
-          echo "ota_path=$dst" >> "$GITHUB_OUTPUT"
+          echo "ota_path=${staging}/openphone_${{ inputs.device }}-${{ inputs.version }}-ota.zip" >> "$GITHUB_OUTPUT"
           echo "sha_path=${staging}/SHA256SUMS" >> "$GITHUB_OUTPUT"
           echo "artifacts_path=${staging}/ARTIFACTS.md" >> "$GITHUB_OUTPUT"
+          {
+            echo "## GCP release build"
+            echo
+            echo "- Cloud provider: \`GCP\`"
+            echo "- Project: \`${OPENPHONE_GCP_PROJECT}\`"
+            echo "- Zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- VM: \`${lab_name}\`"
+            echo "- Source SHA: \`${GITHUB_SHA}\`"
+            echo "- Cache mode: \`${cache_mode}\`"
+            echo "- Cache snapshot: \`${cache_source_snapshot:-none}\`"
+            echo "- Emulator gate: \`required\`"
+            echo "- Artifact validation: \`passed\`"
+            echo "- Artifact directory: \`${staging}\`"
+            echo "- Cleanup: \`${cleanup_behavior}\`"
+            echo "- VM service account: \`disabled\`"
+            echo "- VM OAuth scopes: \`disabled\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload GCP release lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openphone-release-gcp-lab
+          path: .worktree/gcp-lab/
+          if-no-files-found: warn
+
+      - name: Cleanup GCP release lab
+        if: ${{ always() && inputs.keep_gcp_lab_vm != 'true' && steps.target.outputs.lab_name != '' }}
+        run: |
+          set -euxo pipefail
+          lab_name="${{ steps.target.outputs.lab_name }}"
+          scripts/lab/gcp/delete-vm.sh \
+            --name "$lab_name" \
+            --project "${OPENPHONE_GCP_PROJECT}" \
+            --zone "${OPENPHONE_GCP_ZONE}" || true
+          cache_disk="${lab_name}-cache"
+          if gcloud compute disks describe "$cache_disk" \
+            --project "${OPENPHONE_GCP_PROJECT}" \
+            --zone "${OPENPHONE_GCP_ZONE}" >/dev/null 2>&1; then
+            users="$(
+              gcloud compute disks describe "$cache_disk" \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --zone "${OPENPHONE_GCP_ZONE}" \
+                --format='value(users)'
+            )"
+            if [[ -z "$users" ]]; then
+              gcloud compute disks delete "$cache_disk" \
+                --project "${OPENPHONE_GCP_PROJECT}" \
+                --zone "${OPENPHONE_GCP_ZONE}" \
+                --quiet || true
+            else
+              echo "::warning::GCP cache disk $cache_disk is still attached; leaving it for inspection."
+            fi
+          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -307,6 +308,4 @@ jobs:
           prerelease: ${{ inputs.prerelease == 'true' }}
           make_latest: ${{ inputs.make_latest }}
           files: |
-            ${{ steps.stage.outputs.ota_path }}
-            ${{ steps.stage.outputs.sha_path }}
-            ${{ steps.stage.outputs.artifacts_path }}
+            ${{ steps.stage.outputs.staging }}/*

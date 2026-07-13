@@ -265,7 +265,7 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean mComposeClipboardGrant;
     private boolean mComposeShareGrant;
     private boolean mComposeNetworkGrant;
-    private String mAutonomyMode = "yolo";
+    private String mAutonomyMode = "reviewed";
     private boolean mComposeAdvancedVisible;
     private ComposeStateCallbacks mComposeStateCallbacks;
 
@@ -1039,7 +1039,7 @@ public class AssistantActivityBackend extends ComponentActivity {
     }
 
     private String autonomyModeDefault() {
-        String fallback = grantPrefs().getString(PREF_AUTONOMY_MODE, "yolo");
+        String fallback = grantPrefs().getString(PREF_AUTONOMY_MODE, "reviewed");
         String secure = Settings.Secure.getString(getContentResolver(), SECURE_AUTONOMY_MODE);
         return cleanAutonomyMode(secure == null || secure.trim().isEmpty() ? fallback : secure);
     }

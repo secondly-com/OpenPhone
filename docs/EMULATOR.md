@@ -26,9 +26,8 @@ Choose the target that matches the workstation that will run the UI:
 - Intel Mac or x86_64 Linux workstation: `--arch x86_64`, output directory
   `emu64x`.
 
-The build can run on a Linux Android build host. A build-only EC2 host is
-usually useful for producing the image zip, but it is not a good place to view
-the UI unless it has a GUI stack and hardware acceleration.
+The build can run in the GCP lab. The lab is the preferred remote path because
+it uses the same warm Android cache and emulator smoke flow as trusted CI.
 
 ## Build The Image
 

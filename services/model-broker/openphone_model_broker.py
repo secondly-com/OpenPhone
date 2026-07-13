@@ -53,42 +53,72 @@ class BrokerConfig:
 
 
 class RateLimiter:
+    _EVICTION_INTERVAL_SECONDS = 60.0
+
     def __init__(self, max_events: int, window_seconds: int = 60) -> None:
         self._max_events = max_events
         self._window_seconds = window_seconds
         self._events: dict[str, Deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._last_eviction = time.monotonic()
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
-        events = self._events[key]
         cutoff = now - self._window_seconds
-        while events and events[0] < cutoff:
-            events.popleft()
-        if len(events) >= self._max_events:
-            return False
-        events.append(now)
-        return True
+        with self._lock:
+            self._maybe_evict_stale_keys(now, cutoff)
+            events = self._events[key]
+            while events and events[0] < cutoff:
+                events.popleft()
+            if len(events) >= self._max_events:
+                return False
+            events.append(now)
+            return True
+
+    def _maybe_evict_stale_keys(self, now: float, cutoff: float) -> None:
+        """Drop keys whose newest event fell out of the window. Caller holds lock."""
+        if now - self._last_eviction < self._EVICTION_INTERVAL_SECONDS:
+            return
+        self._last_eviction = now
+        stale = [key for key, events in self._events.items() if not events or events[-1] < cutoff]
+        for key in stale:
+            del self._events[key]
 
 
 class ByteRateLimiter:
+    _EVICTION_INTERVAL_SECONDS = 60.0
+
     def __init__(self, max_bytes: int, window_seconds: int = 60) -> None:
         self._max_bytes = max_bytes
         self._window_seconds = window_seconds
         self._events: dict[str, Deque[tuple[float, int]]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._last_eviction = time.monotonic()
 
     def allow(self, key: str, size: int) -> bool:
         if self._max_bytes <= 0:
             return True
         now = time.monotonic()
-        events = self._events[key]
         cutoff = now - self._window_seconds
-        while events and events[0][0] < cutoff:
-            events.popleft()
-        total = sum(event_size for _, event_size in events)
-        if total + size > self._max_bytes:
-            return False
-        events.append((now, size))
-        return True
+        with self._lock:
+            self._maybe_evict_stale_keys(now, cutoff)
+            events = self._events[key]
+            while events and events[0][0] < cutoff:
+                events.popleft()
+            total = sum(event_size for _, event_size in events)
+            if total + size > self._max_bytes:
+                return False
+            events.append((now, size))
+            return True
+
+    def _maybe_evict_stale_keys(self, now: float, cutoff: float) -> None:
+        """Drop keys whose newest event fell out of the window. Caller holds lock."""
+        if now - self._last_eviction < self._EVICTION_INTERVAL_SECONDS:
+            return
+        self._last_eviction = now
+        stale = [key for key, events in self._events.items() if not events or events[-1][0] < cutoff]
+        for key in stale:
+            del self._events[key]
 
 
 class BrokerHandler(http.server.BaseHTTPRequestHandler):
@@ -181,6 +211,7 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
                 body_size,
                 started_at,
                 model,
+                stream=self._wants_stream(payload),
             )
             return
 
@@ -296,6 +327,7 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
         body_size: int,
         started_at: float,
         model: str | None,
+        stream: bool = False,
     ) -> None:
         headers = {
             "Authorization": f"Bearer {self.server.config.api_key}",
@@ -308,6 +340,17 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
             attempts += 1
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
+                    if stream:
+                        self._stream_provider_response(
+                            response,
+                            token_subject,
+                            body_size,
+                            started_at,
+                            endpoint,
+                            model,
+                            attempts,
+                        )
+                        return
                     response_body = response.read()
                     self._audit_request(
                         "proxied",
@@ -373,6 +416,53 @@ class BrokerHandler(http.server.BaseHTTPRequestHandler):
                     {"error": "provider_unavailable", "detail": str(error.reason)},
                 )
                 return
+
+    def _wants_stream(self, payload: dict[str, object]) -> bool:
+        accept = self.headers.get("Accept", "")
+        if "text/event-stream" in accept.lower():
+            return True
+        return payload.get("stream") is True
+
+    def _stream_provider_response(
+        self,
+        response: object,
+        token_subject: str,
+        body_size: int,
+        started_at: float,
+        endpoint: str,
+        model: str | None,
+        attempts: int,
+    ) -> None:
+        """Relay the upstream body chunk-by-chunk instead of buffering it.
+
+        The response is delimited by connection close (HTTP/1.0 semantics),
+        which every SSE-capable client handles; no Content-Length is sent.
+        """
+        self._audit_request(
+            "proxied",
+            token_subject,
+            response.status,
+            body_size,
+            started_at,
+            endpoint,
+            model,
+            provider_attempts=attempts,
+        )
+        self.send_response(response.status)
+        self.send_header(
+            "Content-Type",
+            response.headers.get("Content-Type", "text/event-stream"),
+        )
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        while True:
+            chunk = response.read1(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
 
     def _should_retry_provider(self, status: int, attempts: int) -> bool:
         if attempts > self.server.config.provider_max_retries:
@@ -470,7 +560,12 @@ class BrokerServer(http.server.ThreadingHTTPServer):
     def validate_token(self, token: str | None) -> str | None:
         if token is None:
             return None
-        if token in self.config.session_tokens:
+        token_matches = False
+        for session_token in self.config.session_tokens:
+            # Check every configured token so the comparison time does not
+            # depend on where (or whether) the match occurs.
+            token_matches |= hmac.compare_digest(token, session_token)
+        if token_matches:
             digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
             return f"static:{digest}"
         if self.config.token_secret is None:

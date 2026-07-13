@@ -8,6 +8,12 @@ If you just want to read about the system, jump to
 [Architecture](/docs/ARCHITECTURE). If you want to flash an actual Pixel 9a,
 see [Build](/docs/BUILD).
 
+> **Minimum build-host specs: 64 GB RAM, ~700 GB fast disk, x86_64 Linux.**
+> The build host is the machine that produces the image, not the one that
+> runs the emulator. If no machine you have meets the bar, see the
+> [no-build contribution path](/docs/contributing/no-build) — schemas,
+> broker, integrations, protocol, and docs work needs no Android build.
+
 ## What you get
 
 After this quickstart you will have:

@@ -92,6 +92,18 @@ tegu_unpack_bootimg() {
   printf '%s/out/host/linux-x86/bin/unpack_bootimg' "$OPENPHONE_ANDROID_DIR"
 }
 
+ensure_tegu_boot_prebuilt() {
+  local kernel_dir boot_image
+  kernel_dir="$(tegu_kernel_dir)"
+  boot_image="$kernel_dir/boot.img"
+
+  [[ -s "$boot_image" ]] || {
+    die "missing Pixel 9a prebuilt boot image: $boot_image; run scripts/prepare-tegu-device-repos.sh before building target-files"
+  }
+
+  info "Pixel 9a prebuilt boot image ready: $boot_image"
+}
+
 file_sha256() {
   local path="$1"
   sha256sum "$path" | awk '{print $1}'

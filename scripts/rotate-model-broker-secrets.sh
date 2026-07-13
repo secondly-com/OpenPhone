@@ -106,16 +106,22 @@ else
   mode="broker"
 fi
 
-python3 - <<'PY' "$env_file" "$tmp" "$mode" "$token_secret" "$admin_token" "$provider_key"
+# Secrets are passed via the environment rather than argv so they never show
+# up in `ps` process listings on the host.
+ROTATE_TOKEN_SECRET="$token_secret" \
+ROTATE_ADMIN_TOKEN="$admin_token" \
+ROTATE_PROVIDER_KEY="$provider_key" \
+python3 - <<'PY' "$env_file" "$tmp" "$mode"
+import os
 import pathlib
 import sys
 
 source = pathlib.Path(sys.argv[1])
 target = pathlib.Path(sys.argv[2])
 mode = sys.argv[3]
-token_secret = sys.argv[4]
-admin_token = sys.argv[5]
-provider_key = sys.argv[6]
+token_secret = os.environ["ROTATE_TOKEN_SECRET"]
+admin_token = os.environ["ROTATE_ADMIN_TOKEN"]
+provider_key = os.environ["ROTATE_PROVIDER_KEY"]
 
 if mode == "provider":
     updates = {"OPENAI_API_KEY": provider_key}
@@ -149,7 +155,7 @@ chmod 0600 "$env_file"
 printf 'Updated %s\n' "$env_file"
 printf 'Backup written to %s\n' "$backup"
 if [[ "$mode" == "broker" ]]; then
-  printf 'New admin token: %s\n' "$admin_token"
+  printf 'New admin token written to %s (OPENPHONE_BROKER_ADMIN_TOKENS)\n' "$env_file"
 else
   printf 'Updated provider key: OPENAI_API_KEY\n'
 fi

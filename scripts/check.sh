@@ -4,6 +4,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# All temp files/dirs created by this script live under one root so the EXIT
+# trap guarantees cleanup even when an assertion fails under `set -e`
+# (rendered signing keys and env files must never be left behind).
+check_tmp_root="$(mktemp -d)"
+trap 'rm -rf "$check_tmp_root"' EXIT
+
 required=(
   AGENTS.md
   README.md
@@ -55,6 +61,7 @@ required=(
   .github/workflows/ci.yml
   .github/workflows/emulator.yml
   .github/workflows/eval.yml
+  .github/workflows/gcp-cache-refresh.yml
   .github/workflows/gcp-lab.yml
   .github/workflows/release.yml
   .github/RUNNERS.md
@@ -68,6 +75,7 @@ required=(
   scripts/prepare-tegu-device-repos.sh
   scripts/prepare-tegu-dtb.sh
   scripts/generate-release-manifest.sh
+  scripts/stage-release-ota.sh
   scripts/check-release-notes.sh
   scripts/generate-ota-feed.sh
   scripts/prepare-github-release.sh
@@ -115,8 +123,10 @@ required=(
   integrations/cli/package.json
   integrations/cli/src/index.mjs
   tests/README.md
+  tests/integrations/adb-stateful-gating-contract.mjs
   tests/integrations/runtime-cli-contract.mjs
   tests/integrations/runtime-mcp-contract.mjs
+  tests/integrations/runtime-protocol-versioning-contract.mjs
   tests/integrations/openclaw-plugin-policy-contract.mjs
   tests/integrations/runtime-package-contract.mjs
   integrations/mcp-server/README.md
@@ -154,11 +164,13 @@ required=(
   scripts/lab/prepare-local.sh
   scripts/lab/install-android-sdk-tools.sh
   scripts/lab/gcp/common.sh
+  scripts/lab/gcp/latest-cache-snapshot.sh
   scripts/lab/gcp/setup-wif.sh
   scripts/lab/gcp/create-vm.sh
   scripts/lab/gcp/delete-vm.sh
   scripts/lab/gcp/bootstrap-vm.sh
   scripts/lab/gcp/prewarm-cache.sh
+  scripts/lab/gcp/run-release.sh
   scripts/lab/gcp/run-smoke.sh
   scripts/lab/gcp/seed-cache-from-boot-disk.sh
   overlay/packages/apps/OpenPhoneAssistant/Android.bp
@@ -210,6 +222,140 @@ for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/
   [[ -e "$script" ]] || continue
   bash -n "$script"
 done
+
+tegu_prep="$root/scripts/prepare-tegu-device-repos.sh"
+grep -q 'tegu_boot_image=.*boot[.]img' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must track the prebuilt boot.img path\n' >&2
+  exit 1
+}
+grep -q 'extract_tegu_boot' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must extract boot.img for target-files\n' >&2
+  exit 1
+}
+grep -q 'Pixel 9a boot image ready' "$tegu_prep" || {
+  printf 'Pixel 9a preparation must report boot.img readiness\n' >&2
+  exit 1
+}
+grep -q 'ensure_tegu_boot_prebuilt' "$root/scripts/common.sh" || {
+  printf 'Pixel 9a build helpers must provide a boot.img prebuilt guard\n' >&2
+  exit 1
+}
+grep -q 'ensure_tegu_boot_prebuilt' "$root/scripts/build.sh" || {
+  printf 'Pixel 9a target-files builds must fail fast when boot.img is missing\n' >&2
+  exit 1
+}
+
+gcp_bootstrap="$root/scripts/lab/gcp/bootstrap-vm.sh"
+grep -q 'git config --global user.name' "$gcp_bootstrap" || {
+  printf 'GCP VM bootstrap must configure a lab git user.name for vendor extraction\n' >&2
+  exit 1
+}
+grep -q 'git config --global user.email' "$gcp_bootstrap" || {
+  printf 'GCP VM bootstrap must configure a lab git user.email for vendor extraction\n' >&2
+  exit 1
+}
+for apt_bootstrap in \
+  "$root/scripts/lab/gcp/bootstrap-vm.sh" \
+  "$root/scripts/bootstrap-android-build-host.sh"; do
+  grep -q -- '--no-install-recommends' "$apt_bootstrap" || {
+    printf 'bootstrap apt install commands must avoid recommended package bloat: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'OPENPHONE_APT_TIMEOUT_SECONDS:-1800' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must default to an 1800s timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'Acquire::Retries' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure Acquire::Retries: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'Acquire::http::Timeout' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure an HTTP timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+  grep -q 'DPkg::Lock::Timeout' "$apt_bootstrap" || {
+    printf 'bootstrap apt commands must configure a dpkg lock timeout: %s\n' "$apt_bootstrap" >&2
+    exit 1
+  }
+done
+if grep -q 'qemu-kvm' "$gcp_bootstrap"; then
+  printf 'GCP VM bootstrap must not install Ubuntu qemu-kvm; Android SDK emulator provides its own QEMU\n' >&2
+  exit 1
+fi
+gcp_common="$root/scripts/lab/gcp/common.sh"
+grep -q 'OPENPHONE_GCP_TUNNEL_THROUGH_IAP' "$gcp_common" || {
+  printf 'GCP lab helpers must default to IAP tunneling for SSH/SCP\n' >&2
+  exit 1
+}
+grep -q -- '--tunnel-through-iap' "$gcp_common" || {
+  printf 'GCP lab SSH/SCP helpers must pass --tunnel-through-iap\n' >&2
+  exit 1
+}
+for gcp_script in \
+  "$root/scripts/lab/gcp/bootstrap-vm.sh" \
+  "$root/scripts/lab/gcp/run-release.sh" \
+  "$root/scripts/lab/gcp/run-smoke.sh" \
+  "$root/scripts/lab/gcp/seed-cache-from-boot-disk.sh"; do
+  if grep -qE 'gcloud compute (ssh|scp)' "$gcp_script"; then
+    printf 'GCP lab script must use IAP-aware SSH/SCP helpers: %s\n' "$gcp_script" >&2
+    exit 1
+  fi
+done
+grep -q 'roles/iap.tunnelResourceAccessor' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must grant IAP tunnel access to the lab service account\n' >&2
+  exit 1
+}
+grep -q 'assertion.workflow_ref' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must scope federation to trusted lab/release workflow refs\n' >&2
+  exit 1
+}
+grep -q '.github/workflows/gcp-lab.yml@refs/heads/main' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must include the trusted GCP lab workflow ref\n' >&2
+  exit 1
+}
+grep -q '.github/workflows/gcp-cache-refresh.yml@refs/heads/main' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must include the trusted GCP cache refresh workflow ref\n' >&2
+  exit 1
+}
+grep -q 'openphone-lab-allow-iap-ssh' "$root/scripts/lab/gcp/setup-wif.sh" || {
+  printf 'GCP WIF setup must create the IAP-only SSH firewall rule\n' >&2
+  exit 1
+}
+grep -q 'scripts/lab/gcp/prewarm-cache.sh' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must call the cache prewarm script\n' >&2
+  exit 1
+}
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must discover source snapshots from GCP labels\n' >&2
+  exit 1
+}
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must discover the latest warm snapshot from GCP labels\n' >&2
+  exit 1
+}
+grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/release.yml" || {
+  printf 'release workflow must discover the latest warm snapshot from GCP labels\n' >&2
+  exit 1
+}
+grep -q 'lane:' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must expose explicit lab lanes\n' >&2
+  exit 1
+}
+if grep -q '^  push:' "$root/.github/workflows/emulator.yml"; then
+  printf 'legacy self-hosted emulator workflow must be manual-only; use GCP Lab for trusted gates\n' >&2
+  exit 1
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck_targets=()
+  for script in "$root"/scripts/*.sh "$root"/scripts/lab/*.sh "$root"/scripts/lab/gcp/*.sh; do
+    [[ -e "$script" ]] || continue
+    shellcheck_targets+=("$script")
+  done
+  shellcheck --severity=error "${shellcheck_targets[@]}"
+else
+  printf 'shellcheck not found; skipping shell script lint (bash -n only)\n' >&2
+fi
 
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$root/manifests/openphone.xml"
@@ -614,7 +760,7 @@ path = pathlib.Path(sys.argv[1])
 compile(path.read_text(encoding="utf-8"), str(path), "exec")
 PY
   "$root/scripts/smoke-test-model-broker.sh"
-  tmp_env="$(mktemp)"
+  tmp_env="$(mktemp "$check_tmp_root/env.XXXXXX")"
   cp "$root/services/model-broker/deploy/openphone-model-broker.env.example" "$tmp_env"
   "$root/scripts/rotate-model-broker-secrets.sh" --env-file "$tmp_env" >/dev/null
   python3 - <<'PY' "$tmp_env"
@@ -634,7 +780,7 @@ if values.get("OPENAI_API_KEY") != "":
     raise SystemExit("rotation changed OPENAI_API_KEY")
 PY
   rm -f "$tmp_env" "$tmp_env".bak.*
-  tmp_env="$(mktemp)"
+  tmp_env="$(mktemp "$check_tmp_root/env.XXXXXX")"
   cp "$root/services/model-broker/deploy/openphone-model-broker.env.example" "$tmp_env"
   "$root/scripts/rotate-model-broker-secrets.sh" \
     --env-file "$tmp_env" \
@@ -656,8 +802,8 @@ if values.get("OPENPHONE_BROKER_ADMIN_TOKENS") != "":
     raise SystemExit("provider rotation changed OPENPHONE_BROKER_ADMIN_TOKENS")
 PY
   rm -f "$tmp_env" "$tmp_env".bak.*
-  tmp_nginx="$(mktemp)"
-  tmp_tls_stderr="$(mktemp)"
+  tmp_nginx="$(mktemp "$check_tmp_root/nginx.XXXXXX")"
+  tmp_tls_stderr="$(mktemp "$check_tmp_root/tls-stderr.XXXXXX")"
   "$root/scripts/setup-model-broker-tls.sh" \
     --domain broker.example.com \
     --email ops@example.com \
@@ -671,7 +817,7 @@ PY
     exit 1
   }
   rm -f "$tmp_nginx" "$tmp_tls_stderr"
-  tmp_signing="$(mktemp -d)"
+  tmp_signing="$(mktemp -d "$check_tmp_root/signing.XXXXXX")"
   "$root/scripts/prepare-release-signing.sh" \
     --keys-dir "$tmp_signing/openphone-keys" >/dev/null
   mkdir -p "$tmp_signing/android/build/make/tools/releasetools" "$tmp_signing/out"
@@ -700,7 +846,7 @@ PY
     exit 1
   }
   rm -rf "$tmp_signing"
-  tmp_feed="$(mktemp -d)"
+  tmp_feed="$(mktemp -d "$check_tmp_root/feed.XXXXXX")"
   printf 'fake zip payload' > "$tmp_feed/openphone-check-ota.zip"
   "$root/scripts/generate-ota-feed.sh" \
     --version 0.0.1-check \
@@ -713,7 +859,7 @@ PY
     --requires-wipe >/dev/null
   "$root/scripts/validate-ota-feed.sh" "$tmp_feed/ota-feed.json" "$tmp_feed" >/dev/null
   rm -rf "$tmp_feed"
-  tmp_policy="$(mktemp -d)"
+  tmp_policy="$(mktemp -d "$check_tmp_root/policy.XXXXXX")"
   "$root/scripts/generate-app-policy-override.sh" \
     --package com.example.sensitive \
     --match prefix \
@@ -751,7 +897,7 @@ if unknown:
     raise SystemExit("override references unknown capabilities: " + ", ".join(unknown))
 PY
   rm -rf "$tmp_policy"
-  tmp_trace="$(mktemp -d)"
+  tmp_trace="$(mktemp -d "$check_tmp_root/trace.XXXXXX")"
   mkdir -p "$tmp_trace/session"
   printf '\xff\xd8\xff\xd9' > "$tmp_trace/session/screenshot_000.jpg"
   cat > "$tmp_trace/session/events.jsonl" <<'EOF'
@@ -775,7 +921,7 @@ with zipfile.ZipFile(target, "w") as archive:
 PY
   "$root/scripts/validate-trajectory-export.sh" "$tmp_trace/session.zip" >/dev/null
   rm -rf "$tmp_trace"
-  tmp_audit="$(mktemp -d)"
+  tmp_audit="$(mktemp -d "$check_tmp_root/audit.XXXXXX")"
   cat > "$tmp_audit/openphone-audit.json" <<'EOF'
 {
   "schema": "openphone.audit_evidence.v1",
@@ -805,7 +951,7 @@ PY
 EOF
   "$root/scripts/validate-audit-evidence-export.sh" "$tmp_audit/openphone-audit.json" >/dev/null
   rm -rf "$tmp_audit"
-  tmp_eval="$(mktemp -d)"
+  tmp_eval="$(mktemp -d "$check_tmp_root/eval.XXXXXX")"
   mkdir -p "$tmp_eval/session"
   printf '\xff\xd8\xff\xd9' > "$tmp_eval/session/screenshot_000.jpg"
   cat > "$tmp_eval/session/events.jsonl" <<'EOF'

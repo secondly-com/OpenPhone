@@ -1,7 +1,7 @@
 // Compile-check stub. The real class is added to frameworks/base by the
 // OpenPhone patch stack and is only available in the full Android tree.
 // scripts/check-assistant-java.sh compiles assistant sources against this
-// stub to catch syntax/reference breaks without an EC2 build.
+// stub to catch syntax/reference breaks without a full Android build.
 package android.openphone;
 
 public final class OpenPhoneAgentManager {

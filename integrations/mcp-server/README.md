@@ -13,8 +13,24 @@ Run:
 node integrations/mcp-server/src/index.mjs
 ```
 
-Set `ANDROID_SERIAL` to target a specific ADB device or emulator. Set
-`OPENPHONE_DRY_RUN=1` for parser/protocol tests without ADB.
+Set `ANDROID_SERIAL` to target a specific ADB device or emulator.
+
+Safety defaults:
+
+- `OPENPHONE_DRY_RUN=1` is the safe default for exploration: every tool call is
+  echoed back without touching ADB or the device at all.
+- Without dry-run, the ADB transport still refuses state-changing tools (tap,
+  type, clipboard, open-url, and anything else the runtime manifest marks with
+  a `confirmation` requirement) because ADB has no on-device confirmation UI.
+  Read-only tools such as `openphone.screen.get` work normally.
+- Set `OPENPHONE_ADB_ALLOW_STATEFUL=1` to opt in to real device driving for the
+  session. Programmatic users can pass `allowStateful: true` to
+  `OpenPhoneAdbTransport` instead. Only enable this when you trust every MCP
+  client connected to the server, since confirmation prompts are not enforced.
+
+The server speaks the MCP stdio transport: newline-delimited JSON-RPC (one
+message per line, no `Content-Length` headers) and negotiates
+`protocolVersion` during `initialize` (latest supported: `2025-11-25`).
 
 The same ADB transport works with the OpenPhone SDK phone emulator:
 

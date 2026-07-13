@@ -22,8 +22,10 @@ Options:
   --wait <seconds>     Seconds to wait after launching. Defaults to 30.
   -h, --help           Show this help.
 
-The API key is copied into the assistant's in-memory dev key field only. It is
-not written by OpenPhone, and this harness is ignored on production user builds.
+The API key is delivered through the Settings.Secure debug slot the assistant
+already reads on userdebug/eng builds (openphone_dev_openai_api_key). It is
+never passed as an intent extra, so it does not show up in logcat intent dumps
+or dumpsys activity. This harness is ignored on production user builds.
 EOF
 }
 
@@ -101,6 +103,20 @@ PY
 )"
 
 adb wait-for-device >/dev/null
+
+if [[ "$use_local" != true ]]; then
+  # Deliver the key through the Settings.Secure debug slot the assistant reads
+  # at startup on userdebug/eng builds (SECURE_DEV_OPENAI_API_KEY). Passing it
+  # as an `am start` intent extra would leave it visible in logcat intent
+  # dumps and `dumpsys activity`. The key is piped over stdin so it never
+  # appears in host argv.
+  printf '%s\n' "$api_key" |
+    adb shell 'IFS= read -r key; settings put secure openphone_dev_openai_api_key "$key"'
+  # The assistant loads this setting in onCreate; restart it so a running
+  # instance does not keep stale model config.
+  adb shell am force-stop org.openphone.assistant >/dev/null 2>&1 || true
+fi
+
 adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
 adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
 adb shell input swipe 540 2100 540 650 250 >/dev/null 2>&1 || true
@@ -116,12 +132,6 @@ cmd=(
   --es org.openphone.assistant.extra.GOAL_BASE64 "$goal_b64"
   --ez org.openphone.assistant.extra.RUN true
 )
-
-if [[ "$use_local" != true ]]; then
-  cmd+=(
-    --es org.openphone.assistant.extra.DEV_OPENAI_API_KEY "$api_key"
-  )
-fi
 
 "${cmd[@]}"
 

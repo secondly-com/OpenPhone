@@ -6,6 +6,7 @@ import {
   mcpTools,
   parseJsonObject,
   resolveCommand,
+  runtimeProtocolInfo,
 } from "../runtime/protocol/openphone-runtime-tools.mjs";
 
 const commands = loadCommands();
@@ -23,7 +24,9 @@ export async function main(argv = process.argv.slice(2), io = process) {
       io.stdout.write(usage());
       return 0;
     }
-    if (group === "runtime") {
+    if (group === "info") {
+      result = infoCommand();
+    } else if (group === "runtime") {
       result = await runtimeCommand(command, rest, transport);
     } else if (group === "screen" && command === "get") {
       result = await toolInvoke("openphone.screen.get", flagsToToolArgs(rest), transport);
@@ -57,6 +60,15 @@ async function importRuntimeMcpServer() {
     }
     return import("../../mcp-server/src/index.mjs");
   }
+}
+
+function infoCommand() {
+  return {
+    name: "openphone-runtime-cli",
+    version: "0.1.0",
+    runtime_protocol: runtimeProtocolInfo(),
+    commands: commands.length,
+  };
 }
 
 function runtimeCommand(command, args, transport) {
@@ -175,6 +187,7 @@ function usage() {
   return `Usage: openphone <command> [options]
 
 Commands:
+  info
   runtime status
   runtime list
   runtime select --chat <phone|openclaw> [--volume <phone|openclaw>] [--background <phone|openclaw>]
