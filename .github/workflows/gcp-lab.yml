@@ -28,6 +28,7 @@ on:
           - incremental-emulator
           - smoke-only
           - export-emulator-image
+          - assistant-apk
           - custom
       arch:
         description: "Emulator architecture"
@@ -202,6 +203,7 @@ jobs:
             keep_vm="false"
             lane="incremental-emulator"
             export_emulator_image="false"
+            build_assistant_apk="false"
             run_smoke="true"
             skip_build="false"
           else
@@ -235,21 +237,31 @@ jobs:
             case "$lane" in
               incremental-emulator)
                 export_emulator_image="false"
+                build_assistant_apk="false"
                 run_smoke="true"
                 skip_build="false"
                 ;;
               smoke-only)
                 export_emulator_image="false"
+                build_assistant_apk="false"
                 run_smoke="true"
                 skip_build="true"
                 ;;
               export-emulator-image)
                 export_emulator_image="true"
+                build_assistant_apk="false"
+                run_smoke="false"
+                skip_build="false"
+                ;;
+              assistant-apk)
+                export_emulator_image="false"
+                build_assistant_apk="true"
                 run_smoke="false"
                 skip_build="false"
                 ;;
               custom)
                 export_emulator_image="${{ inputs.export_emulator_image }}"
+                build_assistant_apk="false"
                 run_smoke="${{ inputs.run_smoke }}"
                 skip_build="${{ inputs.skip_build }}"
                 ;;
@@ -275,6 +287,7 @@ jobs:
             echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
             echo "export_emulator_image=$export_emulator_image"
+            echo "build_assistant_apk=$build_assistant_apk"
             echo "run_smoke=$run_smoke"
             echo "skip_build=$skip_build"
           } >> "$GITHUB_OUTPUT"
@@ -306,6 +319,9 @@ jobs:
           fi
           if [[ "${{ steps.target.outputs.export_emulator_image }}" == "true" ]]; then
             args+=(--export-emulator-image)
+          fi
+          if [[ "${{ steps.target.outputs.build_assistant_apk }}" == "true" ]]; then
+            args+=(--device tegu --build-assistant-apk)
           fi
           if [[ "${{ steps.target.outputs.run_smoke }}" != "true" ]]; then
             args+=(--skip-smoke)
@@ -341,6 +357,7 @@ jobs:
             echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
             echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
             echo "- Export emulator image: \`${{ steps.target.outputs.export_emulator_image }}\`"
+            echo "- Build assistant APK: \`${{ steps.target.outputs.build_assistant_apk }}\`"
             echo "- Run smoke: \`${{ steps.target.outputs.run_smoke }}\`"
             echo "- Skip build: \`${{ steps.target.outputs.skip_build }}\`"
             echo "- VM service account: \`disabled\`"

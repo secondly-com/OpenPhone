@@ -33,6 +33,7 @@ Options:
                               $HOME/openphone-android for stable build paths.
   --arch arm64|x86_64         Emulator arch. Default: x86_64.
   --variant eng|userdebug     Emulator variant. Default: eng.
+  --device <codename>         Device codename for focused APK builds. Default: tegu.
   --runtime <name>            Runtime intent: local, openclaw, or hermes.
                              May be repeated. Default: local.
   --timeout <seconds>         Emulator boot timeout. Default: 900.
@@ -41,6 +42,8 @@ Options:
   --skip-build                Reuse existing Android build outputs on the VM.
   --export-emulator-image     Copy sdk-repo-linux-system-images.zip into lab
                               artifacts for local Mac/SDK installation.
+  --build-assistant-apk       Build and upload OpenPhoneAssistant.apk for the
+                              selected device without requiring a release OTA.
   --skip-smoke                Build/export artifacts but do not boot the
                               emulator. Intended for cross-arch image exports.
   -h, --help                  Show this help.
@@ -70,11 +73,13 @@ cache_source_snapshot="$OPENPHONE_GCP_CACHE_SOURCE_SNAPSHOT"
 cache_mount="$OPENPHONE_GCP_CACHE_MOUNT"
 arch="x86_64"
 variant="eng"
+device="tegu"
 timeout_seconds=900
 repo_sync_jobs=""
 keep_vm=false
 skip_build=false
 export_emulator_image=false
+build_assistant_apk=false
 skip_smoke=false
 runtimes=()
 
@@ -155,6 +160,11 @@ while [[ $# -gt 0 ]]; do
       variant="$2"
       shift 2
       ;;
+    --device)
+      [[ $# -ge 2 ]] || die "--device requires a value"
+      device="$2"
+      shift 2
+      ;;
     --runtime)
       [[ $# -ge 2 ]] || die "--runtime requires a value"
       runtimes+=("$2")
@@ -182,6 +192,10 @@ while [[ $# -gt 0 ]]; do
       export_emulator_image=true
       shift
       ;;
+    --build-assistant-apk)
+      build_assistant_apk=true
+      shift
+      ;;
     --skip-smoke)
       skip_smoke=true
       shift
@@ -206,6 +220,11 @@ esac
 case "$variant" in
   eng|userdebug) ;;
   *) die "unsupported emulator variant: $variant" ;;
+esac
+
+case "$device" in
+  tegu) ;;
+  *) die "unsupported assistant APK device: $device" ;;
 esac
 
 case "$cache_mode" in
@@ -297,10 +316,12 @@ ref="${OPENPHONE_REF:?}"
 slot="${OPENPHONE_LAB_SLOT:?}"
 arch="${OPENPHONE_EMULATOR_ARCH:?}"
 variant="${OPENPHONE_EMULATOR_VARIANT:?}"
+device="${OPENPHONE_DEVICE:?}"
 timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
 repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
 skip_build="${OPENPHONE_SKIP_BUILD:-0}"
 export_emulator_image="${OPENPHONE_EXPORT_EMULATOR_IMAGE:-0}"
+build_assistant_apk="${OPENPHONE_BUILD_ASSISTANT_APK:-0}"
 skip_smoke="${OPENPHONE_SKIP_SMOKE:-0}"
 runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
 cache_mode="${OPENPHONE_GCP_CACHE_MODE:-scratch}"
@@ -444,6 +465,36 @@ if [[ "$export_emulator_image" == "1" ]]; then
   )
 fi
 
+if [[ "$build_assistant_apk" == "1" && "$skip_build" != "1" ]]; then
+  OPENPHONE_BUILD_GOAL=OpenPhoneAssistant \
+    ./scripts/build.sh "openphone_${device}-${OPENPHONE_RELEASE:-bp4a}-userdebug"
+fi
+
+if [[ "$build_assistant_apk" == "1" ]]; then
+  product_dir="$OPENPHONE_ANDROID_DIR/out/target/product/$device"
+  apk=""
+  for candidate in \
+    "$product_dir/system_ext/priv-app/OpenPhoneAssistant/OpenPhoneAssistant.apk" \
+    "$product_dir/obj/APPS/OpenPhoneAssistant_intermediates/package.apk"; do
+    if [[ -f "$candidate" ]]; then
+      apk="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$apk" ]]; then
+    printf 'error: OpenPhoneAssistant.apk not found under %s\n' "$product_dir" >&2
+    exit 1
+  fi
+  artifact_apk_dir="$HOME/openphone-src/.worktree/lab/$slot/artifacts/assistant-apk"
+  mkdir -p "$artifact_apk_dir"
+  cp "$apk" "$artifact_apk_dir/OpenPhoneAssistant-${device}.apk"
+  (
+    cd "$artifact_apk_dir"
+    sha256sum "OpenPhoneAssistant-${device}.apk" \
+      > "OpenPhoneAssistant-${device}.apk.sha256"
+  )
+fi
+
 if [[ "$skip_smoke" == "1" ]]; then
   printf '==> Skipping emulator smoke by request after build/export\n'
   exit 0
@@ -484,10 +535,16 @@ remote_command+=" OPENPHONE_REF=$(shell_quote "$ref")"
 remote_command+=" OPENPHONE_LAB_SLOT=$(shell_quote "$slot")"
 remote_command+=" OPENPHONE_EMULATOR_ARCH=$(shell_quote "$arch")"
 remote_command+=" OPENPHONE_EMULATOR_VARIANT=$(shell_quote "$variant")"
+remote_command+=" OPENPHONE_DEVICE=$(shell_quote "$device")"
 remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
 remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
 remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
 remote_command+=" OPENPHONE_EXPORT_EMULATOR_IMAGE=$(shell_quote "$export_emulator_image_value")"
+build_assistant_apk_value=0
+if [[ "$build_assistant_apk" == true ]]; then
+  build_assistant_apk_value=1
+fi
+remote_command+=" OPENPHONE_BUILD_ASSISTANT_APK=$(shell_quote "$build_assistant_apk_value")"
 remote_command+=" OPENPHONE_SKIP_SMOKE=$(shell_quote "$skip_smoke_value")"
 remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"
 remote_command+=" OPENPHONE_GCP_CACHE_MODE=$(shell_quote "$cache_mode")"
