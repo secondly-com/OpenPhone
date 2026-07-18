@@ -63,6 +63,7 @@ jobs:
       OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
       OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
       OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_FALLBACK_ZONES: ${{ vars.OPENPHONE_GCP_FALLBACK_ZONES || '' }}
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
@@ -150,11 +151,22 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          result_file="${RUNNER_TEMP}/openphone-gcp-cache-refresh-result.json"
+          rm -f "$result_file"
+          capture_selection() {
+            if [[ -s "$result_file" ]]; then
+              jq -r \
+                '"selected_zone=\(.selected_zone)", "selected_cache_disk=\(.selected_cache_disk)"' \
+                "$result_file" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          trap capture_selection EXIT
           args=(
             --repo-url "https://github.com/secondly-com/OpenPhone.git"
             --ref "${{ steps.plan.outputs.ref }}"
             --project "${OPENPHONE_GCP_PROJECT}"
             --zone "${OPENPHONE_GCP_ZONE}"
+            --fallback-zones "${OPENPHONE_GCP_FALLBACK_ZONES}"
             --machine-type "${OPENPHONE_GCP_MACHINE_TYPE}"
             --boot-disk-size "${OPENPHONE_GCP_BOOT_DISK_SIZE}"
             --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"
@@ -162,6 +174,7 @@ jobs:
             --snapshot "${{ steps.plan.outputs.snapshot }}"
             --arch "${{ steps.plan.outputs.arch }}"
             --variant "${{ steps.plan.outputs.variant }}"
+            --result-file "$result_file"
           )
           if [[ -n "${{ steps.plan.outputs.source_snapshot }}" ]]; then
             args+=(--source-snapshot "${{ steps.plan.outputs.source_snapshot }}")
@@ -201,13 +214,19 @@ jobs:
         if: always()
         shell: bash
         run: |
+          selected_zone="${{ steps.refresh.outputs.selected_zone }}"
+          selected_zone="${selected_zone:-$OPENPHONE_GCP_ZONE}"
+          selected_cache_disk="${{ steps.refresh.outputs.selected_cache_disk }}"
+          selected_cache_disk="${selected_cache_disk:-${{ steps.plan.outputs.cache_disk }}}"
           {
             echo "## GCP cache refresh"
             echo
             echo "- Ref: \`${{ steps.plan.outputs.ref }}\`"
             echo "- Arch: \`${{ steps.plan.outputs.arch }}\`"
             echo "- Variant: \`${{ steps.plan.outputs.variant }}\`"
-            echo "- Cache disk: \`${{ steps.plan.outputs.cache_disk }}\`"
+            echo "- Primary zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- Selected zone: \`${selected_zone}\`"
+            echo "- Cache disk: \`${selected_cache_disk}\`"
             echo "- Snapshot: \`${{ steps.plan.outputs.snapshot }}\`"
             echo "- Source snapshot: \`${{ steps.plan.outputs.source_snapshot || 'none' }}\`"
             echo "- Latest snapshot discovery: \`GCP labels\`"

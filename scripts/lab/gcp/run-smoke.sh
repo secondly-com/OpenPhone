@@ -21,6 +21,8 @@ Options:
   --slot <name>               Lab slot name on the VM. Default: VM name.
   --project <id>              GCP project. Default: OPENPHONE_GCP_PROJECT.
   --zone <zone>               GCP zone. Default: OPENPHONE_GCP_ZONE.
+  --fallback-zones <zones>    Comma-separated zones tried after a capacity
+                              stockout. Default: OPENPHONE_GCP_FALLBACK_ZONES.
   --machine-type <type>       Machine type. Default: c3-standard-22.
   --boot-disk-size <size>     Boot disk size. Default: 1000GB.
   --boot-disk-type <type>     Boot disk type. Default: pd-ssd.
@@ -37,8 +39,11 @@ Options:
                              May be repeated. Default: local.
   --timeout <seconds>         Emulator boot timeout. Default: 900.
   --repo-sync-jobs <n>        repo sync jobs. Default: nproc.
+  --result-file <path>        Write selected VM zone/disk metadata as JSON.
   --keep-vm                   Leave VM running for debug.
   --skip-build                Reuse existing Android build outputs on the VM.
+  --export-assistant-apk      Build OpenPhoneAssistant only and copy the APK
+                              into lab artifacts for fast device/emulator pushes.
   --export-emulator-image     Copy sdk-repo-linux-system-images.zip into lab
                               artifacts for local Mac/SDK installation.
   --skip-smoke                Build/export artifacts but do not boot the
@@ -61,6 +66,7 @@ ref="$default_ref"
 slot=""
 project="$OPENPHONE_GCP_PROJECT"
 zone="$OPENPHONE_GCP_ZONE"
+fallback_zones="$OPENPHONE_GCP_FALLBACK_ZONES"
 machine_type="$OPENPHONE_GCP_MACHINE_TYPE"
 boot_disk_size="$OPENPHONE_GCP_BOOT_DISK_SIZE"
 boot_disk_type="$OPENPHONE_GCP_BOOT_DISK_TYPE"
@@ -72,8 +78,10 @@ arch="x86_64"
 variant="eng"
 timeout_seconds=900
 repo_sync_jobs=""
+result_file=""
 keep_vm=false
 skip_build=false
+export_assistant_apk=false
 export_emulator_image=false
 skip_smoke=false
 runtimes=()
@@ -108,6 +116,11 @@ while [[ $# -gt 0 ]]; do
     --zone)
       [[ $# -ge 2 ]] || die "--zone requires a value"
       zone="$2"
+      shift 2
+      ;;
+    --fallback-zones)
+      [[ $# -ge 2 ]] || die "--fallback-zones requires a value"
+      fallback_zones="$2"
       shift 2
       ;;
     --machine-type)
@@ -170,12 +183,21 @@ while [[ $# -gt 0 ]]; do
       repo_sync_jobs="$2"
       shift 2
       ;;
+    --result-file)
+      [[ $# -ge 2 ]] || die "--result-file requires a value"
+      result_file="$2"
+      shift 2
+      ;;
     --keep-vm)
       keep_vm=true
       shift
       ;;
     --skip-build)
       skip_build=true
+      shift
+      ;;
+    --export-assistant-apk)
+      export_assistant_apk=true
       shift
       ;;
     --export-emulator-image)
@@ -232,6 +254,9 @@ slot="$(printf '%s' "$slot" | tr -c 'A-Za-z0-9_.-' '-')"
 artifact_root="$root/.worktree/gcp-lab/$name"
 artifact_dir="$artifact_root/artifacts"
 mkdir -p "$artifact_dir"
+if [[ -n "$result_file" ]]; then
+  rm -f "$result_file"
+fi
 
 info "GCP lab target: name=$name project=$project zone=$zone ref=$ref"
 info "GCP lab shape: machine=$machine_type disk=$boot_disk_size/$boot_disk_type cache_mode=$cache_mode"
@@ -245,7 +270,7 @@ remote_script="$(mktemp "${TMPDIR:-/tmp}/openphone-gcp-remote.XXXXXX")"
 copy_remote_artifacts() {
   mkdir -p "$artifact_dir"
   if gcp_compute_scp "$project" "$zone" --recurse \
-    "$name:~/openphone-src/.worktree/lab/$slot/artifacts" \
+    "$name:~/openphone-src/.worktree/lab/$slot/artifacts/." \
     "$artifact_dir/" >/dev/null; then
     artifacts_copied=true
     return 0
@@ -267,24 +292,52 @@ cleanup() {
 }
 trap cleanup EXIT
 
-create_args=(
-  --name "$name"
-  --project "$project"
-  --zone "$zone"
-  --machine-type "$machine_type"
-  --boot-disk-size "$boot_disk_size"
-  --boot-disk-type "$boot_disk_type"
-  --cache-mode "$cache_mode"
-)
-if [[ -n "$cache_disk" ]]; then
-  create_args+=(--cache-disk "$cache_disk")
-fi
-if [[ -n "$cache_source_snapshot" ]]; then
-  create_args+=(--cache-source-snapshot "$cache_source_snapshot")
+if [[ "$cache_mode" == "attach-disk" ]]; then
+  fallback_zones=""
 fi
 
-"$script_dir/create-vm.sh" "${create_args[@]}"
+selected_zone=""
+while IFS= read -r candidate_zone; do
+  create_args=(
+    --name "$name"
+    --project "$project"
+    --zone "$candidate_zone"
+    --machine-type "$machine_type"
+    --boot-disk-size "$boot_disk_size"
+    --boot-disk-type "$boot_disk_type"
+    --cache-mode "$cache_mode"
+  )
+  if [[ -n "$cache_disk" ]]; then
+    create_args+=(--cache-disk "$cache_disk")
+  fi
+  if [[ -n "$cache_source_snapshot" ]]; then
+    create_args+=(--cache-source-snapshot "$cache_source_snapshot")
+  fi
+
+  if "$script_dir/create-vm.sh" "${create_args[@]}"; then
+    selected_zone="$candidate_zone"
+    break
+  else
+    create_status=$?
+  fi
+  if [[ "$create_status" -ne 75 ]]; then
+    exit "$create_status"
+  fi
+  info "Retrying GCP lab VM in the next fallback zone"
+done < <(gcp_zone_candidates "$zone" "$fallback_zones")
+
+if [[ -z "$selected_zone" ]]; then
+  printf 'error: GCP VM capacity unavailable in every configured zone\n' >&2
+  exit 75
+fi
+zone="$selected_zone"
 vm_created=true
+info "GCP lab selected zone: $zone"
+selected_cache_disk="$cache_disk"
+if [[ "$cache_mode" == "snapshot" && -z "$selected_cache_disk" ]]; then
+  selected_cache_disk="$(sanitize_gcp_name "${name}-cache")"
+fi
+gcp_write_selection_result "$result_file" "$name" "$zone" "$selected_cache_disk"
 
 "$script_dir/bootstrap-vm.sh" --name "$name" --project "$project" --zone "$zone"
 
@@ -300,6 +353,7 @@ variant="${OPENPHONE_EMULATOR_VARIANT:?}"
 timeout_seconds="${OPENPHONE_EMULATOR_TIMEOUT:?}"
 repo_sync_jobs="${OPENPHONE_REPO_SYNC_JOBS:-}"
 skip_build="${OPENPHONE_SKIP_BUILD:-0}"
+export_assistant_apk="${OPENPHONE_EXPORT_ASSISTANT_APK:-0}"
 export_emulator_image="${OPENPHONE_EXPORT_EMULATOR_IMAGE:-0}"
 skip_smoke="${OPENPHONE_SKIP_SMOKE:-0}"
 runtime_csv="${OPENPHONE_LAB_RUNTIMES:-local}"
@@ -427,6 +481,28 @@ if [[ "$export_emulator_image" == "1" && "$skip_build" != "1" ]]; then
   skip_build=1
 fi
 
+if [[ "$export_assistant_apk" == "1" ]]; then
+  if [[ "$skip_build" != "1" ]]; then
+    OPENPHONE_BUILD_GOAL=OpenPhoneAssistant \
+      ./scripts/build-emulator.sh --arch "$arch" --variant "$variant"
+  fi
+
+  product_dir="$(emulator_product_dir)"
+  assistant_apk="$OPENPHONE_ANDROID_DIR/out/target/product/$product_dir/system_ext/priv-app/OpenPhoneAssistant/OpenPhoneAssistant.apk"
+  artifact_apk_dir="$HOME/openphone-src/.worktree/lab/$slot/artifacts/assistant-apk"
+  mkdir -p "$artifact_apk_dir"
+  if [[ ! -f "$assistant_apk" ]]; then
+    printf 'error: focused assistant APK not found: %s\n' "$assistant_apk" >&2
+    exit 1
+  fi
+  cp "$assistant_apk" "$artifact_apk_dir/OpenPhoneAssistant.apk"
+  (
+    cd "$artifact_apk_dir"
+    sha256sum OpenPhoneAssistant.apk > OpenPhoneAssistant.apk.sha256
+    git -C "$HOME/openphone-src" rev-parse HEAD > source-ref.txt
+  )
+fi
+
 if [[ "$export_emulator_image" == "1" ]]; then
   product_dir="$(emulator_product_dir)"
   image_zip="$OPENPHONE_ANDROID_DIR/out/target/product/$product_dir/sdk-repo-linux-system-images.zip"
@@ -475,6 +551,10 @@ export_emulator_image_value=0
 if [[ "$export_emulator_image" == true ]]; then
   export_emulator_image_value=1
 fi
+export_assistant_apk_value=0
+if [[ "$export_assistant_apk" == true ]]; then
+  export_assistant_apk_value=1
+fi
 skip_smoke_value=0
 if [[ "$skip_smoke" == true ]]; then
   skip_smoke_value=1
@@ -487,6 +567,7 @@ remote_command+=" OPENPHONE_EMULATOR_VARIANT=$(shell_quote "$variant")"
 remote_command+=" OPENPHONE_EMULATOR_TIMEOUT=$(shell_quote "$timeout_seconds")"
 remote_command+=" OPENPHONE_REPO_SYNC_JOBS=$(shell_quote "$repo_sync_jobs")"
 remote_command+=" OPENPHONE_SKIP_BUILD=$(shell_quote "$skip_build_value")"
+remote_command+=" OPENPHONE_EXPORT_ASSISTANT_APK=$(shell_quote "$export_assistant_apk_value")"
 remote_command+=" OPENPHONE_EXPORT_EMULATOR_IMAGE=$(shell_quote "$export_emulator_image_value")"
 remote_command+=" OPENPHONE_SKIP_SMOKE=$(shell_quote "$skip_smoke_value")"
 remote_command+=" OPENPHONE_LAB_RUNTIMES=$(shell_quote "$runtime_csv")"

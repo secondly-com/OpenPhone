@@ -44,12 +44,15 @@ jobs:
       - name: Run trajectory smoke suite
         env:
           INPUT_GOALS: ${{ inputs.goals }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euxo pipefail
           ./scripts/run-eval-suite.sh
 
       - name: Run agent benchmark
         if: ${{ github.event_name == 'schedule' || inputs.run_benchmark == 'true' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euxo pipefail
           ./scripts/run-agent-benchmark.sh \

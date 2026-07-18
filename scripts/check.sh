@@ -291,6 +291,41 @@ grep -q -- '--tunnel-through-iap' "$gcp_common" || {
   printf 'GCP lab SSH/SCP helpers must pass --tunnel-through-iap\n' >&2
   exit 1
 }
+OPENPHONE_GCP_TUNNEL_THROUGH_IAP=TRUE \
+  bash -c 'source "$1"; gcp_use_iap_tunnel' _ "$gcp_common" || {
+  printf 'GCP IAP setting parsing must work with the host Bash version\n' >&2
+  exit 1
+}
+zone_candidates="$(
+  bash -c 'source "$1"; gcp_zone_candidates us-central1-c "us-central1-a,us-central1-c us-central1-b"' \
+    _ "$gcp_common"
+)"
+[[ "$zone_candidates" == $'us-central1-c\nus-central1-a\nus-central1-b' ]] || {
+  printf 'GCP fallback zone planning must preserve order and remove duplicates\n' >&2
+  exit 1
+}
+bash -c 'source "$1"; gcp_is_capacity_error "code: ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS"' \
+  _ "$gcp_common" || {
+  printf 'GCP capacity-error detection must recognize zone stockouts\n' >&2
+  exit 1
+}
+"$root/scripts/test-gcp-lab-retries.sh"
+grep -q 'OPENPHONE_GCP_FALLBACK_ZONES' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must pass configured fallback zones\n' >&2
+  exit 1
+}
+grep -q 'OPENPHONE_GCP_FALLBACK_ZONES' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must pass configured fallback zones\n' >&2
+  exit 1
+}
+grep -q 'steps.lab.outputs.selected_zone' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must summarize the selected fallback zone\n' >&2
+  exit 1
+}
+grep -q 'steps.refresh.outputs.selected_zone' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must summarize the selected fallback zone\n' >&2
+  exit 1
+}
 for gcp_script in \
   "$root/scripts/lab/gcp/bootstrap-vm.sh" \
   "$root/scripts/lab/gcp/run-release.sh" \
@@ -339,6 +374,22 @@ grep -q 'latest-cache-snapshot.sh' "$root/.github/workflows/release.yml" || {
 }
 grep -q 'lane:' "$root/.github/workflows/gcp-lab.yml" || {
   printf 'GCP lab workflow must expose explicit lab lanes\n' >&2
+  exit 1
+}
+grep -q 'assistant-apk' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must expose the focused assistant APK lane\n' >&2
+  exit 1
+}
+grep -q -- '--export-assistant-apk' "$root/scripts/lab/gcp/run-smoke.sh" || {
+  printf 'GCP lab smoke helper must support focused assistant APK export\n' >&2
+  exit 1
+}
+grep -Fq 'artifacts/.' "$root/scripts/lab/gcp/run-smoke.sh" || {
+  printf 'GCP lab smoke helper must copy artifact contents without an extra directory level\n' >&2
+  exit 1
+}
+grep -q 'exit 75' "$root/scripts/lab/gcp/run-smoke.sh" || {
+  printf 'GCP lab smoke helper must preserve retryable capacity status for its callers\n' >&2
   exit 1
 }
 if grep -q '^  push:' "$root/.github/workflows/emulator.yml"; then

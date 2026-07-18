@@ -224,6 +224,11 @@ setting.
 The pre-sync scaffold check may skip the standalone Java check when the full
 Android build provides the authoritative compiler/toolchain validation.
 
+When the primary Compute zone is temporarily out of the configured machine
+type, set `OPENPHONE_GCP_FALLBACK_ZONES` to a comma-separated list of alternate
+zones. Disposable snapshot labs and scheduled cache refreshes retry only
+capacity-stockout failures. Other failures remain fail-fast.
+
 Current generic-target status:
 
 - `OPENPHONE_BUILD_GOAL=droid ./scripts/build.sh openphone_arm64` has been
@@ -279,6 +284,16 @@ Build only the assistant module on the Linux Android build host:
 ```bash
 OPENPHONE_BUILD_GOAL=OpenPhoneAssistant \
 ./scripts/build.sh openphone_tegu-bp4a-userdebug
+```
+
+When a persistent build host is not available, dispatch the `GCP Lab` workflow
+with lane `assistant-apk`. It restores the warm Android snapshot, builds only
+`OpenPhoneAssistant`, and uploads:
+
+```text
+artifacts/assistant-apk/OpenPhoneAssistant.apk
+artifacts/assistant-apk/OpenPhoneAssistant.apk.sha256
+artifacts/assistant-apk/source-ref.txt
 ```
 
 Copy the resulting APK back to the host, then push it into `/system_ext` without

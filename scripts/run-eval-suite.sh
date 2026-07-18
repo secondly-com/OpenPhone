@@ -28,9 +28,9 @@ if ! adb get-state >/dev/null 2>&1; then
   exit 1
 fi
 
-api_key_file="$root/.worktree/secrets/openai_api_key"
-if [[ ! -s "$api_key_file" ]]; then
-  echo "run-eval-suite: FAIL — missing $api_key_file" >&2
+api_key_file="${OPENPHONE_API_KEY_FILE:-$root/.worktree/secrets/openai_api_key}"
+if [[ -z "${OPENAI_API_KEY:-}" && ! -s "$api_key_file" ]]; then
+  echo "run-eval-suite: FAIL — set OPENAI_API_KEY or provide $api_key_file" >&2
   exit 1
 fi
 
@@ -62,12 +62,13 @@ for goal in "${GOALS[@]}"; do
   echo
   echo "===== smoke $i/${#GOALS[@]} ====="
   echo "goal: $goal"
-  ./scripts/run-assistant-task.sh \
-    --goal "$goal" \
-    --api-key-file "$api_key_file" \
-    --wait 35 || {
-      echo "run-eval-suite: task $i failed; continuing"
-    }
+  run_args=(--goal "$goal" --wait 35)
+  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    run_args+=(--api-key-file "$api_key_file")
+  fi
+  ./scripts/run-assistant-task.sh "${run_args[@]}" || {
+    echo "run-eval-suite: task $i failed; continuing"
+  }
 
   # Pull the latest trajectory from the device into the artifact dir.
   # `pull-latest-trajectory.sh` requires an explicit Export Trace from the

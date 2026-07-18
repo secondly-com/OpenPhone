@@ -161,6 +161,10 @@ the legacy self-hosted runner.
   boots the emulator, and runs smoke.
 - `smoke-only`: fastest manual lane. Restores the newest warm snapshot and
   boots/smokes already-built outputs without rebuilding.
+- `assistant-apk`: builds only the privileged assistant module and uploads
+  `OpenPhoneAssistant.apk`, its SHA-256 sidecar, and the source ref. Push the
+  result to an already-booted userdebug device with
+  `scripts/push-assistant-apk.sh`.
 - `export-emulator-image`: rebuilds and uploads the SDK system image zip
   without booting the emulator.
 - `custom`: exposes the lower-level export, smoke, and skip-build switches.
@@ -168,6 +172,12 @@ the legacy self-hosted runner.
 Automatic maintainer-approved PR lab runs use `incremental-emulator`. Use
 `smoke-only` only when you intentionally want to test an already-built warm
 image rather than PR build output.
+
+Set the repository variable `OPENPHONE_GCP_FALLBACK_ZONES` to a comma-separated
+list such as `us-central1-a,us-central1-b,us-central1-f`. Lab runs retry those
+zones only when Compute reports a capacity stockout; build, test, permission,
+and configuration failures still fail immediately. Cache refreshes maintain a
+zone-suffixed warm disk when they have to move away from the primary zone.
 
 ## Device Check
 
