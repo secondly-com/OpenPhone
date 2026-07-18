@@ -27,6 +27,7 @@ on:
         options:
           - incremental-emulator
           - smoke-only
+          - assistant-apk
           - export-emulator-image
           - custom
       arch:
@@ -82,6 +83,14 @@ on:
         options:
           - "false"
           - "true"
+      export_assistant_apk:
+        description: "Custom lane only: build and upload OpenPhoneAssistant.apk"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
       run_smoke:
         description: "Custom lane only: boot emulator and run smoke after build/export"
         required: true
@@ -129,6 +138,7 @@ jobs:
       OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
       OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
       OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_FALLBACK_ZONES: ${{ vars.OPENPHONE_GCP_FALLBACK_ZONES || '' }}
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
@@ -201,6 +211,7 @@ jobs:
             cache_disk=""
             keep_vm="false"
             lane="incremental-emulator"
+            export_assistant_apk="false"
             export_emulator_image="false"
             run_smoke="true"
             skip_build="false"
@@ -234,21 +245,31 @@ jobs:
             lane="${{ inputs.lane }}"
             case "$lane" in
               incremental-emulator)
+                export_assistant_apk="false"
                 export_emulator_image="false"
                 run_smoke="true"
                 skip_build="false"
                 ;;
               smoke-only)
+                export_assistant_apk="false"
                 export_emulator_image="false"
                 run_smoke="true"
                 skip_build="true"
                 ;;
+              assistant-apk)
+                export_assistant_apk="true"
+                export_emulator_image="false"
+                run_smoke="false"
+                skip_build="false"
+                ;;
               export-emulator-image)
+                export_assistant_apk="false"
                 export_emulator_image="true"
                 run_smoke="false"
                 skip_build="false"
                 ;;
               custom)
+                export_assistant_apk="${{ inputs.export_assistant_apk }}"
                 export_emulator_image="${{ inputs.export_emulator_image }}"
                 run_smoke="${{ inputs.run_smoke }}"
                 skip_build="${{ inputs.skip_build }}"
@@ -274,6 +295,7 @@ jobs:
             echo "cache_disk=$cache_disk"
             echo "cache_source_snapshot=$cache_source_snapshot"
             echo "keep_vm=$keep_vm"
+            echo "export_assistant_apk=$export_assistant_apk"
             echo "export_emulator_image=$export_emulator_image"
             echo "run_smoke=$run_smoke"
             echo "skip_build=$skip_build"
@@ -289,6 +311,7 @@ jobs:
             --ref "${{ steps.target.outputs.ref }}"
             --project "${OPENPHONE_GCP_PROJECT}"
             --zone "${OPENPHONE_GCP_ZONE}"
+            --fallback-zones "${OPENPHONE_GCP_FALLBACK_ZONES}"
             --machine-type "${{ steps.target.outputs.machine_type }}"
             --boot-disk-size "${{ steps.target.outputs.boot_disk_size }}"
             --boot-disk-type "${{ steps.target.outputs.boot_disk_type }}"
@@ -303,6 +326,9 @@ jobs:
           fi
           if [[ "${{ steps.target.outputs.keep_vm }}" == "true" ]]; then
             args+=(--keep-vm)
+          fi
+          if [[ "${{ steps.target.outputs.export_assistant_apk }}" == "true" ]]; then
+            args+=(--export-assistant-apk)
           fi
           if [[ "${{ steps.target.outputs.export_emulator_image }}" == "true" ]]; then
             args+=(--export-emulator-image)
@@ -340,6 +366,7 @@ jobs:
             echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
             echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
             echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
+            echo "- Export assistant APK: \`${{ steps.target.outputs.export_assistant_apk }}\`"
             echo "- Export emulator image: \`${{ steps.target.outputs.export_emulator_image }}\`"
             echo "- Run smoke: \`${{ steps.target.outputs.run_smoke }}\`"
             echo "- Skip build: \`${{ steps.target.outputs.skip_build }}\`"

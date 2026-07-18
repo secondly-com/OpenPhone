@@ -63,6 +63,7 @@ jobs:
       OPENPHONE_GCP_PROJECT: ${{ vars.OPENPHONE_GCP_PROJECT || 'openphone-lab' }}
       OPENPHONE_GCP_REGION: ${{ vars.OPENPHONE_GCP_REGION || 'us-central1' }}
       OPENPHONE_GCP_ZONE: ${{ vars.OPENPHONE_GCP_ZONE || 'us-central1-a' }}
+      OPENPHONE_GCP_FALLBACK_ZONES: ${{ vars.OPENPHONE_GCP_FALLBACK_ZONES || '' }}
       OPENPHONE_GCP_MACHINE_TYPE: ${{ vars.OPENPHONE_GCP_MACHINE_TYPE || 'c3-standard-22' }}
       OPENPHONE_GCP_BOOT_DISK_SIZE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_SIZE || '1000GB' }}
       OPENPHONE_GCP_BOOT_DISK_TYPE: ${{ vars.OPENPHONE_GCP_BOOT_DISK_TYPE || 'pd-ssd' }}
@@ -155,6 +156,7 @@ jobs:
             --ref "${{ steps.plan.outputs.ref }}"
             --project "${OPENPHONE_GCP_PROJECT}"
             --zone "${OPENPHONE_GCP_ZONE}"
+            --fallback-zones "${OPENPHONE_GCP_FALLBACK_ZONES}"
             --machine-type "${OPENPHONE_GCP_MACHINE_TYPE}"
             --boot-disk-size "${OPENPHONE_GCP_BOOT_DISK_SIZE}"
             --boot-disk-type "${OPENPHONE_GCP_BOOT_DISK_TYPE}"

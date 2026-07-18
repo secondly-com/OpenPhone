@@ -11,6 +11,7 @@ usage() {
 Usage: scripts/lab/gcp/create-vm.sh [options]
 
 Creates one disposable OpenPhone lab VM inside the shared GCP lab project.
+Returns exit status 75 when GCP reports a retryable zone-capacity stockout.
 
 Options:
   --name <name>               VM name. Default: generated.
@@ -212,6 +213,18 @@ if [[ "$cache_mode" == "attach-disk" || "$cache_mode" == "snapshot" ]]; then
 fi
 
 info "Creating GCP lab VM: $name"
-gcloud "${args[@]}"
+set +e
+create_output="$(gcloud "${args[@]}" 2>&1)"
+create_status=$?
+set -e
+if [[ "$create_status" -ne 0 ]]; then
+  printf '%s\n' "$create_output" >&2
+  if gcp_is_capacity_error "$create_output"; then
+    printf 'GCP zone capacity is temporarily unavailable: %s\n' "$zone" >&2
+    exit 75
+  fi
+  exit "$create_status"
+fi
+printf '%s\n' "$create_output"
 created_cache_disk=false
 printf '%s\n' "$name"
