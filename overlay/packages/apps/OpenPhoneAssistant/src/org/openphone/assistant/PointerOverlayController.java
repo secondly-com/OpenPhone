@@ -786,11 +786,22 @@ public final class PointerOverlayController {
                 mInspectExpanded = false;
                 mLargeExpanded = false;
             } else {
-                mInspectExpanded = true;
-                mLargeExpanded = false;
-                mStatusTab = STATUS_TAB_CHAT;
+                launchAiHome();
+                return;
             }
             updateIslandViews();
+        }
+    }
+
+    private void launchAiHome() {
+        Intent intent = new Intent(mContext, OpenPhoneHomeActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        try {
+            mContext.startActivity(intent);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Unable to launch OpenPhone Home", e);
         }
     }
 

@@ -51,10 +51,13 @@ Device
 The current repo implements the first OpenPhone product layer:
 
 - `vendor/openphone` product config.
-- `OpenPhoneAssistant` privileged app with a chat-style user surface, text and
-  voice task entry, stateful mic/send/stop composer action, advanced model and
-  developer controls, task grants, screen context, trace/audit export, OTA
-  preview controls, and audit controls.
+- `OpenPhoneAssistant` privileged app with a dedicated Android Home activity,
+  a calm voice-first AI Home surface, explicit conventional-launcher App Space
+  handoff, text and voice task entry, stateful mic/send/stop controls, advanced
+  model and developer controls, task grants, screen context, trace/audit
+  export, OTA preview controls, and audit controls. AI Home is a normal
+  application window rather than an opaque overlay, so Android retains
+  ownership of keyguard, notifications, IME, recents, and system dialogs.
 - Initial capability and policy config files. `scripts/check.sh` validates that
   the assistant fallback `PolicyEngine` covers every capability in
   `openphone_capabilities.json` with the same risk class.
@@ -149,6 +152,9 @@ The following components still need real Android framework implementation:
   certbot/nginx helper exists for broker TLS certificate setup.
 - Richer Settings-hosted durable grant editor for app-specific rules.
 - Richer background task visibility in SystemUI.
+- Production SystemUI ownership of the compact OpenPhone island. The current
+  assistant-owned controller remains the compatibility implementation while
+  the shared island state contract and SystemUI renderer are built.
 
 ## Design Rule
 

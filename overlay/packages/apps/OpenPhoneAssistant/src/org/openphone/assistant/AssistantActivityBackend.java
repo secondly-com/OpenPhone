@@ -313,15 +313,27 @@ public class AssistantActivityBackend extends ComponentActivity {
                     }
                     return;
                 }
+                if (isHomeSurface()) {
+                    return;
+                }
                 setEnabled(false);
                 getOnBackPressedDispatcher().onBackPressed();
             }
         });
-        setContentView(AssistantComposeHost.createView(this));
+        setContentView(createActivityContentView());
         setServiceIslandVisible(false);
         mPointerOverlayController.hide();
         refreshAll();
         applyDebugIntentExtras(getIntent());
+    }
+
+    /**
+     * Activity-specific content hook. The conversation/settings activity keeps
+     * the existing Compose host while OpenPhoneHomeActivity supplies the
+     * deliberately smaller AI Home surface.
+     */
+    protected View createActivityContentView() {
+        return AssistantComposeHost.createView(this);
     }
 
     @Override
@@ -336,6 +348,14 @@ public class AssistantActivityBackend extends ComponentActivity {
             mPointerOverlayController.hide();
         }
         OpenPhoneAccessibilityService.ensureEnabled(this);
+    }
+
+    @Override
+    protected void onPause() {
+        if (isHomeSurface() && !isControlSurface()) {
+            setServiceIslandVisible(true);
+        }
+        super.onPause();
     }
 
     @Override
@@ -523,6 +543,10 @@ public class AssistantActivityBackend extends ComponentActivity {
     }
 
     protected boolean isControlSurface() {
+        return false;
+    }
+
+    protected boolean isHomeSurface() {
         return false;
     }
 
@@ -755,6 +779,42 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     public void onComposeMic() {
         startVoiceAgent();
+    }
+
+    public void onHomeVoiceHoldStarted() {
+        // AI Home's primary gesture has deterministic push-to-talk semantics:
+        // hold records, release transcribes and submits. Live sessions remain
+        // available through the volume gesture and assistant settings.
+        startVoiceAgent(true, true, "ai_home_voice");
+    }
+
+    public void onHomeVoiceHoldFinished() {
+        if (!mListening || !mVoiceHoldToRecord) {
+            return;
+        }
+        mVoiceCaptureFinishRequested = true;
+        OpenAiSpeechTranscriber speechTranscriber = mRunningSpeechTranscriber;
+        if (speechTranscriber != null) {
+            speechTranscriber.stopRecording();
+        }
+    }
+
+    public void onHomeVoiceHoldCancelled() {
+        if (mListening || mRunningRealtimeVoiceSession != null
+                || mRunningGeminiLiveVoiceSession != null) {
+            stopTask();
+        }
+    }
+
+    public void onHomeTextSubmitted(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            setTaskText("Type a request first.");
+            updateIsland("Ready");
+            return;
+        }
+        setCurrentGoalText(clean);
+        routeMessageFromCurrentMessage("ai_home");
     }
 
     public void onComposeStop() {

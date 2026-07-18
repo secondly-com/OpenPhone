@@ -254,6 +254,44 @@ Manual or screenshot-backed checks:
 - tapping outside the composer dismisses the keyboard;
 - recent logcat has no `FATAL EXCEPTION` or `AndroidRuntime` crash signature.
 
+## AI Home And App Space Smoke Test
+
+AI Home changes affect Android Home resolution and require a full product build
+or an assistant APK plus the matching Launcher3 patch. An assistant-only APK
+push does not remove Launcher3 as a competing Home candidate.
+
+On a build containing both sides of the change, verify:
+
+- clean boot/setup resolves Home to
+  `org.openphone.assistant/.OpenPhoneHomeActivity`;
+- the Home surface is black and remains usable when no model runtime is
+  configured;
+- holding the orb starts voice capture and release submits it;
+- a short tap opens text entry;
+- the visible Apps action and a two-finger inward pinch open the explicit
+  Launcher3 App Space activity;
+- pressing Home from App Space or another app returns to AI Home;
+- tapping the compact idle island returns to AI Home;
+- the notification shade, Quick Settings, keyguard, IME, recents, system
+  dialogs, camera, dialer, and emergency surfaces are not covered by a
+  full-screen OpenPhone overlay;
+- TalkBack exposes the voice orb, Apps action, settings/history action, text
+  composer, and review actions.
+
+Useful resolution checks:
+
+```bash
+adb shell cmd package resolve-activity \
+  -a android.intent.action.MAIN \
+  -c android.intent.category.HOME
+
+adb shell am start -W \
+  -n org.openphone.assistant/.OpenPhoneHomeActivity
+
+adb shell am start -W \
+  -n com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher
+```
+
 If the mounted APK bytes match the new OTA but PackageManager still reports an
 older persistent system-app version, treat it as stale `/data/system` package
 metadata. On the Pixel 9a test device this happened after a v54 OTA: the

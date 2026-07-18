@@ -8,6 +8,21 @@ flow, and device support.
 
 ## [Unreleased]
 
+### Added
+
+- Dedicated OpenPhone Android Home activity with a calm black AI Home surface,
+  press-and-hold/release voice input, text fallback, accessible controls, and a
+  two-finger App Space gesture.
+- Explicit App Space handoff to the installed Launcher3 implementation while
+  preserving Home as a reliable return to AI Home.
+
+### Changed
+
+- Launcher3 remains installed for conventional app access but no longer
+  advertises itself as a competing Home activity in OpenPhone products.
+- Tapping the compact idle OpenPhone island returns directly to AI Home; the
+  existing pull-down gesture continues to expose detailed status.
+
 ## [0.0.3] - 2026-07-03
 
 ### Added
