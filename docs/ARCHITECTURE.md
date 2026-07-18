@@ -72,6 +72,12 @@ The current repo implements the first OpenPhone product layer:
   and blocks state-changing background tools until a foreground reviewed
   approval flow exists. The runtime contract is documented in
   [AGENT_RUNTIME_V1.md](AGENT_RUNTIME_V1.md).
+- A unified agent-run projection reads jobs, watchers, commitments, and
+  foreground execution sessions without creating a second execution store.
+  AI Home uses it for stable activity bubbles and run detail, while the
+  expanded island reads the same projection for recent/live run status.
+  Inspection and dismissal state is local presentation metadata; source stores
+  remain authoritative for execution and stop operations.
 - Runtime Agent Protocol for external agent runtimes. This is an OpenPhone AI
   layer boundary, not a separate product stack: Android owns sessions, screen
   context, tool execution, confirmations, and audit, while adapters map remote

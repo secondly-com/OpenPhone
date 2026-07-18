@@ -272,11 +272,23 @@ On a build containing both sides of the change, verify:
   Launcher3 App Space activity;
 - pressing Home from App Space or another app returns to AI Home;
 - tapping the compact idle island returns to AI Home;
+- queued/running jobs, watchers, commitments, and foreground sessions appear
+  as stable Home activity bubbles without relaunching Home;
+- Home shows no more than three individual activity bubbles plus a `+N`
+  overflow control, and the expanded island's Runs tab reports the same run
+  projection;
+- tapping a bubble shows its title, source kind, phase, latest progress, and
+  applicable Stop/Dismiss actions;
+- stopping supported work updates its source store and survives assistant
+  process restart; dismissing a terminal result hides only its presentation
+  and never stops live work;
+- terminal results remain visible until inspected and then age out after 24
+  hours; attention-required and live work sort ahead of recent terminal work;
 - the notification shade, Quick Settings, keyguard, IME, recents, system
   dialogs, camera, dialer, and emergency surfaces are not covered by a
   full-screen OpenPhone overlay;
 - TalkBack exposes the voice orb, Apps action, settings/history action, text
-  composer, and review actions.
+  composer, review actions, run bubbles, overflow control, and run actions.
 
 Useful resolution checks:
 

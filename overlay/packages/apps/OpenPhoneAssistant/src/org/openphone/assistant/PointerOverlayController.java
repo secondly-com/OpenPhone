@@ -33,8 +33,8 @@ import org.json.JSONObject;
 import org.openphone.assistant.context.ContextIndexStore;
 import org.openphone.assistant.runtime.RuntimeConfig;
 import org.openphone.assistant.runtime.RuntimeRegistry;
-import org.openphone.assistant.jobs.AgentJobRecord;
-import org.openphone.assistant.jobs.AgentJobStore;
+import org.openphone.assistant.runs.AgentRunProjection;
+import org.openphone.assistant.runs.AgentRunSummary;
 import org.openphone.assistant.watchers.OpenPhoneWatcherScheduler;
 import org.openphone.assistant.watchers.WatcherRecord;
 import org.openphone.assistant.watchers.WatcherStore;
@@ -1347,18 +1347,28 @@ public final class PointerOverlayController {
     }
 
     private String runsStatusBody() {
-        List<AgentJobRecord> jobs = activeJobs(5);
-        int jobCount = activeJobCount();
+        List<AgentRunSummary> runs = projectedRuns(50);
+        int runCount = runs.size();
         StringBuilder body = new StringBuilder();
-        body.append("Queued agent tasks that keep working after current chat.");
-        if (jobCount <= 0) {
-            body.append("\n\n◌\nNo queued runs");
+        body.append("Durable agent work across jobs, commitments, and sessions.");
+        if (runCount <= 0) {
+            body.append("\n\n◌\nNo recent runs");
             return body.toString();
         }
-        body.append("\nRuns: ").append(jobCount).append(" active");
-        for (AgentJobRecord job : jobs) {
-            body.append("\n").append(compactStatusLine(job.id, job.title,
-                    job.type, job.status, job.nextRunAtMillis));
+        int liveCount = 0;
+        for (AgentRunSummary run : runs) {
+            if (run.isLive()) {
+                liveCount++;
+            }
+        }
+        body.append("\nRuns: ").append(liveCount).append(" live");
+        int visible = Math.min(5, runs.size());
+        for (int i = 0; i < visible; i++) {
+            AgentRunSummary run = runs.get(i);
+            body.append("\n").append(compactRunStatusLine(run));
+        }
+        if (runs.size() > visible) {
+            body.append("\n").append(runs.size() - visible).append(" more");
         }
         return body.toString();
     }
@@ -1494,16 +1504,14 @@ public final class PointerOverlayController {
         }
     }
 
-    private List<AgentJobRecord> activeJobs(int limit) {
-        List<AgentJobRecord> out = new ArrayList<>();
+    private List<AgentRunSummary> projectedRuns(int limit) {
+        List<AgentRunSummary> out = new ArrayList<>();
         try {
-            for (AgentJobRecord job : new AgentJobStore(mContext).list("", 50)) {
-                if (!isLiveJob(job)) {
+            for (AgentRunSummary run : new AgentRunProjection(mContext).snapshot(limit)) {
+                if (AgentRunSummary.KIND_WATCHER.equals(run.kind)) {
                     continue;
                 }
-                if (out.size() < Math.max(1, limit)) {
-                    out.add(job);
-                }
+                out.add(run);
             }
         } catch (RuntimeException ignored) {
         }
@@ -1512,19 +1520,12 @@ public final class PointerOverlayController {
 
     private int activeJobCount() {
         int count = 0;
-        try {
-            for (AgentJobRecord job : new AgentJobStore(mContext).list("", 50)) {
-                if (isLiveJob(job)) {
-                    count++;
-                }
+        for (AgentRunSummary run : projectedRuns(50)) {
+            if (run.isLive()) {
+                count++;
             }
-        } catch (RuntimeException ignored) {
         }
         return count;
-    }
-
-    private static boolean isLiveJob(AgentJobRecord job) {
-        return job != null && ("active".equals(job.status) || "running".equals(job.status));
     }
 
     private String latestConversationBody() {
@@ -1649,6 +1650,22 @@ public final class PointerOverlayController {
         }
         if (!cleanStatus.isEmpty() && !"active".equals(cleanStatus)) {
             line.append(" ").append(cleanStatus);
+        }
+        if (!timing.isEmpty()) {
+            line.append(" ").append(timing);
+        }
+        return line.toString();
+    }
+
+    private static String compactRunStatusLine(AgentRunSummary run) {
+        String cleanTitle = shortText(firstNonEmpty(run.title, run.kind, "Agent run"), 44);
+        String phase = shortText(firstNonEmpty(run.phase, run.status, ""), 18);
+        String timing = relativeTime(run.nextRunAtMillis);
+        StringBuilder line = new StringBuilder();
+        line.append(run.needsAttention ? "! " : "- ");
+        line.append(cleanTitle);
+        if (!phase.isEmpty()) {
+            line.append(" · ").append(phase);
         }
         if (!timing.isEmpty()) {
             line.append(" ").append(timing);

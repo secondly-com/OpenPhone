@@ -60,9 +60,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.openphone.assistant.state.PendingConfirmation
+import org.openphone.assistant.runs.AgentRunProjection
+import org.openphone.assistant.runs.AgentRunSummary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,6 +87,7 @@ data class HomeUiState(
     val status: String = "Ready",
     val resultText: String = "",
     val pending: PendingConfirmation? = null,
+    val runs: List<AgentRunSummary> = emptyList(),
 )
 
 object OpenPhoneHomeComposeHost {
@@ -90,6 +96,7 @@ object OpenPhoneHomeComposeHost {
     @JvmStatic
     fun createView(activity: OpenPhoneHomeActivity): View {
         state.value = HomeUiState()
+        val runProjection = AgentRunProjection(activity)
         activity.setComposeStateCallbacks(object : AssistantActivityBackend.ComposeStateCallbacks {
             override fun setTaskStatus(text: String) {
                 state.update {
@@ -185,6 +192,16 @@ object OpenPhoneHomeComposeHost {
         return ComposeView(activity).apply {
             setContent {
                 val uiState by state.collectAsState()
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                LaunchedEffect(runProjection) {
+                    while (true) {
+                        val runs = withContext(Dispatchers.IO) {
+                            runProjection.snapshot(24)
+                        }
+                        state.update { it.copy(runs = runs) }
+                        delay(2_000L)
+                    }
+                }
                 AiHomeTheme {
                     OpenPhoneHomeScreen(
                         state = uiState,
@@ -200,6 +217,39 @@ object OpenPhoneHomeComposeHost {
                         onOpenAssistant = activity::openAssistant,
                         onApprove = activity::onComposeApprove,
                         onDeny = activity::onComposeDeny,
+                        onStopRun = { runId ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runProjection.stop(runId)
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                state.update { it.copy(runs = refreshed) }
+                            }
+                        },
+                        onReadRun = { runId ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runProjection.markRead(runId)
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                state.update { it.copy(runs = refreshed) }
+                            }
+                        },
+                        onDismissRun = { runId ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runProjection.dismiss(runId)
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                state.update { it.copy(runs = refreshed) }
+                            }
+                        },
                     )
                 }
             }
@@ -261,12 +311,18 @@ private fun OpenPhoneHomeScreen(
     onOpenAssistant: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onStopRun: (String) -> Unit,
+    onReadRun: (String) -> Unit,
+    onDismissRun: (String) -> Unit,
 ) {
     var showTextInput by remember { mutableStateOf(false) }
     var composer by remember { mutableStateOf("") }
     var cumulativeZoom by remember { mutableStateOf(1f) }
     var transitionStarted by remember { mutableStateOf(false) }
+    var selectedRunId by remember { mutableStateOf<String?>(null) }
+    var showAllRuns by remember { mutableStateOf(false) }
     var now by remember { mutableStateOf(Date()) }
+    val selectedRun = state.runs.firstOrNull { it.id == selectedRunId }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -308,6 +364,19 @@ private fun OpenPhoneHomeScreen(
 
         HomeResult(
             state = state,
+            selectedRun = selectedRun,
+            showAllRuns = showAllRuns,
+            onSelectRun = {
+                selectedRunId = it.id
+                showAllRuns = false
+                if (it.unreadResult) onReadRun(it.id)
+            },
+            onCloseRuns = {
+                selectedRunId = null
+                showAllRuns = false
+            },
+            onStopRun = onStopRun,
+            onDismissRun = onDismissRun,
             onApprove = onApprove,
             onDeny = onDeny,
             modifier = Modifier
@@ -321,6 +390,19 @@ private fun OpenPhoneHomeScreen(
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            AgentBubbleRow(
+                runs = state.runs,
+                onSelectRun = {
+                    selectedRunId = it.id
+                    showAllRuns = false
+                    if (it.unreadResult) onReadRun(it.id)
+                },
+                onShowAll = {
+                    selectedRunId = null
+                    showAllRuns = true
+                },
+            )
+            Spacer(Modifier.height(16.dp))
             AnimatedVisibility(visible = showTextInput) {
                 HomeTextComposer(
                     text = composer,
@@ -412,10 +494,28 @@ private fun HomeHeaderAction(label: String, description: String, onClick: () -> 
 @Composable
 private fun HomeResult(
     state: HomeUiState,
+    selectedRun: AgentRunSummary?,
+    showAllRuns: Boolean,
+    onSelectRun: (AgentRunSummary) -> Unit,
+    onCloseRuns: () -> Unit,
+    onStopRun: (String) -> Unit,
+    onDismissRun: (String) -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (selectedRun != null || showAllRuns) {
+        HomeRunPanel(
+            runs = if (showAllRuns) state.runs else listOfNotNull(selectedRun),
+            showAll = showAllRuns,
+            onSelectRun = onSelectRun,
+            onClose = onCloseRuns,
+            onStopRun = onStopRun,
+            onDismissRun = onDismissRun,
+            modifier = modifier,
+        )
+        return
+    }
     val visibleText = state.pending?.summary
         ?: state.resultText.ifBlank {
             if (state.mode == HomeAgentMode.Idle) "" else state.status
@@ -448,6 +548,208 @@ private fun HomeResult(
             }
         }
     }
+}
+
+@Composable
+private fun AgentBubbleRow(
+    runs: List<AgentRunSummary>,
+    onSelectRun: (AgentRunSummary) -> Unit,
+    onShowAll: () -> Unit,
+) {
+    val visible = runs.take(3)
+    if (visible.isEmpty()) return
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        visible.forEach { run ->
+            AgentBubble(run = run, onClick = { onSelectRun(run) })
+        }
+        if (runs.size > visible.size) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(onClick = onShowAll)
+                    .semantics {
+                        contentDescription = "Show all ${runs.size} OpenPhone runs"
+                        role = Role.Button
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "+${runs.size - visible.size}",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentBubble(run: AgentRunSummary, onClick: () -> Unit) {
+    val accent = when {
+        run.needsAttention -> Color(0xFFFFC857)
+        run.status == "failed" || run.failureLike() -> MaterialTheme.colorScheme.error
+        run.kind == AgentRunSummary.KIND_WATCHER -> Color(0xFF5BE7D2)
+        run.unreadResult -> Color(0xFF76C9FF)
+        else -> Color(0xFF7186A8)
+    }
+    val label = when (run.kind) {
+        AgentRunSummary.KIND_WATCHER -> "◎"
+        AgentRunSummary.KIND_COMMITMENT -> "!"
+        AgentRunSummary.KIND_SESSION -> "↗"
+        else -> if (run.isLive) "●" else "✓"
+    }
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF070A10))
+            .border(if (run.needsAttention) 3.dp else 2.dp, accent, CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = "${run.title}. ${run.status}."
+                role = Role.Button
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = accent, fontWeight = FontWeight.Bold)
+        if (run.unreadResult || run.needsAttention) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(if (run.needsAttention) Color(0xFFFFC857) else Color.White),
+            )
+        }
+    }
+}
+
+private fun AgentRunSummary.failureLike(): Boolean =
+    failureCountFromProgress(progressText) > 0
+
+private fun failureCountFromProgress(progress: String): Int =
+    if (progress.contains("failed", ignoreCase = true) ||
+        progress.contains("error", ignoreCase = true)
+    ) 1 else 0
+
+@Composable
+private fun HomeRunPanel(
+    runs: List<AgentRunSummary>,
+    showAll: Boolean,
+    onSelectRun: (AgentRunSummary) -> Unit,
+    onClose: () -> Unit,
+    onStopRun: (String) -> Unit,
+    onDismissRun: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, Color(0xFF263246), RoundedCornerShape(28.dp))
+            .padding(20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (showAll) "OpenPhone activity" else "Agent run",
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Close",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onClose)
+                    .padding(8.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        if (runs.isEmpty()) {
+            Text("No active work", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        runs.take(if (showAll) 8 else 1).forEach { run ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .clickable { if (showAll) onSelectRun(run) }
+                    .padding(vertical = 10.dp),
+            ) {
+                Text(
+                    run.title.ifBlank { "OpenPhone work" },
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${run.kind.replace('_', ' ')} · ${run.phase.ifBlank { run.status }}",
+                    color = if (run.needsAttention) {
+                        Color(0xFFFFC857)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+                if (run.progressText.isNotBlank()) {
+                    Text(
+                        run.progressText,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = if (showAll) 2 else 5,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                if (!showAll) {
+                    Row(
+                        modifier = Modifier.padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (run.canStop) {
+                            RunAction("Stop", danger = true) { onStopRun(run.id) }
+                        }
+                        if (run.unreadResult || !run.isLive) {
+                            RunAction("Dismiss", danger = false) {
+                                onDismissRun(run.id)
+                                onClose()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (showAll && runs.size > 8) {
+            Text(
+                "${runs.size - 8} more",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunAction(label: String, danger: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        color = if (danger) MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+    )
 }
 
 @Composable

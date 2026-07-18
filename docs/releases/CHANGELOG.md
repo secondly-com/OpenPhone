@@ -15,6 +15,9 @@ flow, and device support.
   two-finger App Space gesture.
 - Explicit App Space handoff to the installed Launcher3 implementation while
   preserving Home as a reliable return to AI Home.
+- Unified durable-run projection across agent jobs, watchers, commitments, and
+  foreground sessions, with stable AI Home activity bubbles, overflow/detail
+  UI, unread/attention states, and source-routed stop controls.
 
 ### Changed
 
@@ -22,6 +25,8 @@ flow, and device support.
   advertises itself as a competing Home activity in OpenPhone products.
 - Tapping the compact idle OpenPhone island returns directly to AI Home; the
   existing pull-down gesture continues to expose detailed status.
+- The expanded island Runs tab now reads the same durable-run projection as AI
+  Home instead of maintaining a jobs-only status view.
 
 ## [0.0.3] - 2026-07-03
 
