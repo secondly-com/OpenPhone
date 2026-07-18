@@ -33,6 +33,7 @@ Options:
   --variant eng|userdebug     Emulator variant. Default: eng.
   --timeout <seconds>         Emulator boot timeout. Default: 900.
   --repo-sync-jobs <n>        repo sync jobs. Default: nproc on the VM.
+  --result-file <path>        Write selected VM zone/disk metadata as JSON.
   --keep-vm                   Leave the prewarm VM running for debug.
   -h, --help                  Show this help.
 EOF
@@ -63,6 +64,7 @@ arch="x86_64"
 variant="eng"
 timeout_seconds=900
 repo_sync_jobs=""
+result_file=""
 keep_vm=false
 
 while [[ $# -gt 0 ]]; do
@@ -152,6 +154,11 @@ while [[ $# -gt 0 ]]; do
       repo_sync_jobs="$2"
       shift 2
       ;;
+    --result-file)
+      [[ $# -ge 2 ]] || die "--result-file requires a value"
+      result_file="$2"
+      shift 2
+      ;;
     --keep-vm)
       keep_vm=true
       shift
@@ -194,6 +201,9 @@ if gcloud compute snapshots describe "$snapshot" \
   --project "$project" >/dev/null 2>&1; then
   die "snapshot already exists: $snapshot"
 fi
+if [[ -n "$result_file" ]]; then
+  rm -f "$result_file"
+fi
 
 short_ref="$(printf '%s' "$ref" | cut -c1-12)"
 name="$(sanitize_gcp_name "openphone-lab-prewarm-${short_ref}-$(date -u +%H%M%S)")"
@@ -221,7 +231,20 @@ while IFS= read -r candidate_zone; do
       create_args+=(--source-snapshot "$source_snapshot")
     fi
     info "Creating cache disk in $candidate_zone: $candidate_cache_disk"
-    gcloud "${create_args[@]}"
+    if gcp_run_with_capacity_status gcloud "${create_args[@]}"; then
+      :
+    else
+      disk_create_status=$?
+      if [[ "$disk_create_status" -eq 75 ]]; then
+        info "Cache disk capacity unavailable in $candidate_zone; trying the next fallback zone"
+        gcloud compute disks delete "$candidate_cache_disk" \
+          --project "$project" \
+          --zone "$candidate_zone" \
+          --quiet >/dev/null 2>&1 || true
+        continue
+      fi
+      exit "$disk_create_status"
+    fi
   else
     info "Reusing cache disk in $candidate_zone: $candidate_cache_disk"
   fi
@@ -247,6 +270,9 @@ while IFS= read -r candidate_zone; do
   fi
   if [[ "$keep_vm" == true ]]; then
     run_args+=(--keep-vm)
+  fi
+  if [[ -n "$result_file" ]]; then
+    run_args+=(--result-file "$result_file")
   fi
 
   if "$script_dir/run-smoke.sh" "${run_args[@]}"; then

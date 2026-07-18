@@ -309,12 +309,21 @@ bash -c 'source "$1"; gcp_is_capacity_error "code: ZONE_RESOURCE_POOL_EXHAUSTED_
   printf 'GCP capacity-error detection must recognize zone stockouts\n' >&2
   exit 1
 }
+"$root/scripts/test-gcp-lab-retries.sh"
 grep -q 'OPENPHONE_GCP_FALLBACK_ZONES' "$root/.github/workflows/gcp-lab.yml" || {
   printf 'GCP lab workflow must pass configured fallback zones\n' >&2
   exit 1
 }
 grep -q 'OPENPHONE_GCP_FALLBACK_ZONES' "$root/.github/workflows/gcp-cache-refresh.yml" || {
   printf 'GCP cache refresh workflow must pass configured fallback zones\n' >&2
+  exit 1
+}
+grep -q 'steps.lab.outputs.selected_zone' "$root/.github/workflows/gcp-lab.yml" || {
+  printf 'GCP lab workflow must summarize the selected fallback zone\n' >&2
+  exit 1
+}
+grep -q 'steps.refresh.outputs.selected_zone' "$root/.github/workflows/gcp-cache-refresh.yml" || {
+  printf 'GCP cache refresh workflow must summarize the selected fallback zone\n' >&2
   exit 1
 }
 for gcp_script in \

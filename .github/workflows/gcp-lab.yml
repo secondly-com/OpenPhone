@@ -302,9 +302,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run GCP emulator lab
+        id: lab
         shell: bash
         run: |
           set -euxo pipefail
+          result_file="${RUNNER_TEMP}/openphone-gcp-lab-result.json"
+          rm -f "$result_file"
+          capture_selection() {
+            if [[ -s "$result_file" ]]; then
+              jq -r \
+                '"selected_zone=\(.selected_zone)", "selected_cache_disk=\(.selected_cache_disk)"' \
+                "$result_file" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          trap capture_selection EXIT
           args=(
             --name "${{ steps.target.outputs.name }}"
             --repo-url "${{ steps.target.outputs.repo_url }}"
@@ -317,6 +328,7 @@ jobs:
             --boot-disk-type "${{ steps.target.outputs.boot_disk_type }}"
             --cache-mode "${{ steps.target.outputs.cache_mode }}"
             --arch "${{ steps.target.outputs.arch }}"
+            --result-file "$result_file"
           )
           if [[ -n "${{ steps.target.outputs.cache_disk }}" ]]; then
             args+=(--cache-disk "${{ steps.target.outputs.cache_disk }}")
@@ -350,12 +362,20 @@ jobs:
         if: always()
         shell: bash
         run: |
+          selected_zone="${{ steps.lab.outputs.selected_zone }}"
+          selected_zone="${selected_zone:-$OPENPHONE_GCP_ZONE}"
+          selected_cache_disk="${{ steps.lab.outputs.selected_cache_disk }}"
+          if [[ -z "$selected_cache_disk" ]]; then
+            selected_cache_disk="${{ steps.target.outputs.cache_disk }}"
+          fi
+          selected_cache_disk="${selected_cache_disk:-none}"
           {
             echo "## GCP emulator lab"
             echo
             echo "- Cloud provider: \`GCP\`"
             echo "- Project: \`${OPENPHONE_GCP_PROJECT}\`"
-            echo "- Zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- Primary zone: \`${OPENPHONE_GCP_ZONE}\`"
+            echo "- Selected zone: \`${selected_zone}\`"
             echo "- VM: \`${{ steps.target.outputs.name }}\`"
             echo "- Source ref: \`${{ steps.target.outputs.ref }}\`"
             echo "- Source repo: \`${{ steps.target.outputs.repo_url }}\`"
@@ -364,7 +384,7 @@ jobs:
             echo "- Emulator arch: \`${{ steps.target.outputs.arch }}\`"
             echo "- Machine type: \`${{ steps.target.outputs.machine_type }}\`"
             echo "- Cache mode: \`${{ steps.target.outputs.cache_mode }}\`"
-            echo "- Cache disk: \`${{ steps.target.outputs.cache_disk || 'none' }}\`"
+            echo "- Cache disk: \`${selected_cache_disk}\`"
             echo "- Cache snapshot: \`${{ steps.target.outputs.cache_source_snapshot || 'none' }}\`"
             echo "- Export assistant APK: \`${{ steps.target.outputs.export_assistant_apk }}\`"
             echo "- Export emulator image: \`${{ steps.target.outputs.export_emulator_image }}\`"

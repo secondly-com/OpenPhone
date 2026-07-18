@@ -171,14 +171,26 @@ trap cleanup_cache_disk EXIT
 
 if [[ "$cache_mode" == "snapshot" ]]; then
   info "Creating per-run cache disk from snapshot: $cache_disk"
-  gcloud compute disks create "$cache_disk" \
-    --project "$project" \
-    --zone "$zone" \
-    --type "$cache_disk_type" \
-    --size "$cache_disk_size" \
-    --source-snapshot "$cache_source_snapshot" \
-    --labels "$labels"
   created_cache_disk=true
+  disk_create_args=(
+    gcloud compute disks create "$cache_disk"
+    --project "$project"
+    --zone "$zone"
+    --type "$cache_disk_type"
+    --size "$cache_disk_size"
+    --source-snapshot "$cache_source_snapshot"
+    --labels "$labels"
+  )
+  if gcp_run_with_capacity_status "${disk_create_args[@]}"; then
+    :
+  else
+    create_status=$?
+    if [[ "$create_status" -eq 75 ]]; then
+      printf 'GCP zone capacity is temporarily unavailable while creating the cache disk: %s\n' \
+        "$zone" >&2
+    fi
+    exit "$create_status"
+  fi
 fi
 
 args=(
@@ -213,18 +225,15 @@ if [[ "$cache_mode" == "attach-disk" || "$cache_mode" == "snapshot" ]]; then
 fi
 
 info "Creating GCP lab VM: $name"
-set +e
-create_output="$(gcloud "${args[@]}" 2>&1)"
-create_status=$?
-set -e
-if [[ "$create_status" -ne 0 ]]; then
-  printf '%s\n' "$create_output" >&2
-  if gcp_is_capacity_error "$create_output"; then
-    printf 'GCP zone capacity is temporarily unavailable: %s\n' "$zone" >&2
-    exit 75
+if gcp_run_with_capacity_status gcloud "${args[@]}"; then
+  :
+else
+  create_status=$?
+  if [[ "$create_status" -eq 75 ]]; then
+    printf 'GCP zone capacity is temporarily unavailable while creating the VM: %s\n' \
+      "$zone" >&2
   fi
   exit "$create_status"
 fi
-printf '%s\n' "$create_output"
 created_cache_disk=false
 printf '%s\n' "$name"

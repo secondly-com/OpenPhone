@@ -39,6 +39,7 @@ Options:
                              May be repeated. Default: local.
   --timeout <seconds>         Emulator boot timeout. Default: 900.
   --repo-sync-jobs <n>        repo sync jobs. Default: nproc.
+  --result-file <path>        Write selected VM zone/disk metadata as JSON.
   --keep-vm                   Leave VM running for debug.
   --skip-build                Reuse existing Android build outputs on the VM.
   --export-assistant-apk      Build OpenPhoneAssistant only and copy the APK
@@ -77,6 +78,7 @@ arch="x86_64"
 variant="eng"
 timeout_seconds=900
 repo_sync_jobs=""
+result_file=""
 keep_vm=false
 skip_build=false
 export_assistant_apk=false
@@ -181,6 +183,11 @@ while [[ $# -gt 0 ]]; do
       repo_sync_jobs="$2"
       shift 2
       ;;
+    --result-file)
+      [[ $# -ge 2 ]] || die "--result-file requires a value"
+      result_file="$2"
+      shift 2
+      ;;
     --keep-vm)
       keep_vm=true
       shift
@@ -247,6 +254,9 @@ slot="$(printf '%s' "$slot" | tr -c 'A-Za-z0-9_.-' '-')"
 artifact_root="$root/.worktree/gcp-lab/$name"
 artifact_dir="$artifact_root/artifacts"
 mkdir -p "$artifact_dir"
+if [[ -n "$result_file" ]]; then
+  rm -f "$result_file"
+fi
 
 info "GCP lab target: name=$name project=$project zone=$zone ref=$ref"
 info "GCP lab shape: machine=$machine_type disk=$boot_disk_size/$boot_disk_type cache_mode=$cache_mode"
@@ -323,6 +333,11 @@ fi
 zone="$selected_zone"
 vm_created=true
 info "GCP lab selected zone: $zone"
+selected_cache_disk="$cache_disk"
+if [[ "$cache_mode" == "snapshot" && -z "$selected_cache_disk" ]]; then
+  selected_cache_disk="$(sanitize_gcp_name "${name}-cache")"
+fi
+gcp_write_selection_result "$result_file" "$name" "$zone" "$selected_cache_disk"
 
 "$script_dir/bootstrap-vm.sh" --name "$name" --project "$project" --zone "$zone"
 
