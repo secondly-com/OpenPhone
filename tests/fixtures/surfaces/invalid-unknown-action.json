@@ -1,0 +1,24 @@
+{
+  "schema": "openphone.surface.v1",
+  "surface_id": "surface-invalid-action",
+  "revision": 1,
+  "session_id": "phone-sess-fixture",
+  "runtime": "builtin",
+  "title": "Unsafe",
+  "presentation": "full",
+  "expires_at": 4102444800000,
+  "sensitivity": "public",
+  "body": {
+    "type": "button",
+    "label": "Run unknown action",
+    "action_id": "unknown_action"
+  },
+  "actions": {
+    "unknown_action": {
+      "label": "Run unknown action",
+      "tool": "unregistered_phone_tool",
+      "params": {},
+      "reason": "This must fail closed"
+    }
+  }
+}

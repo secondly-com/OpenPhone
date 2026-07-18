@@ -1,0 +1,16 @@
+{
+  "schema": "openphone.surface.v1",
+  "surface_id": "surface-invalid-component",
+  "revision": 1,
+  "session_id": "phone-sess-fixture",
+  "runtime": "builtin",
+  "title": "Unsafe",
+  "presentation": "full",
+  "expires_at": 4102444800000,
+  "sensitivity": "public",
+  "body": {
+    "type": "webview",
+    "text": "<script>alert(1)</script>"
+  },
+  "actions": {}
+}

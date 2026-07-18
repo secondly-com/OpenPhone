@@ -43,6 +43,10 @@ import org.openphone.assistant.orchestrator.OperatingMode;
 import org.openphone.assistant.orchestrator.OrchestratorDecision;
 import org.openphone.assistant.ota.OtaUpdateClient;
 import org.openphone.assistant.policy.AppCapabilityPolicy;
+import org.openphone.assistant.surface.AdaptiveSurface;
+import org.openphone.assistant.surface.DeterministicSurfaceFactory;
+import org.openphone.assistant.surface.SurfaceMutationResult;
+import org.openphone.assistant.surface.SurfaceRepository;
 import org.openphone.assistant.watchers.OpenPhoneWatcherScheduler;
 
 import java.io.IOException;
@@ -267,6 +271,10 @@ public class AssistantActivityBackend extends ComponentActivity {
     private String mAutonomyMode = "reviewed";
     private boolean mComposeAdvancedVisible;
     private ComposeStateCallbacks mComposeStateCallbacks;
+
+    OpenPhoneAgentManager agentManagerForSurfaces() {
+        return mAgentManager;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -3378,6 +3386,11 @@ public class AssistantActivityBackend extends ComponentActivity {
                         showConfirmationIfNeeded(result);
                         boolean finished = result.contains("\"status\":\"task.finished\"")
                                 || result.contains("\"status\": \"task.finished\"");
+                        if (finished) {
+                            AdaptiveSurface surface =
+                                    presentDeterministicSurface(result, taskId);
+                            trajectory.recordSurfacePresented(surface);
+                        }
                         String displayReply = finished
                                 ? taskFinishedMessage(result) : agentResultForDisplay(result);
                         appendConversation("OpenPhone", displayReply);
@@ -3402,6 +3415,21 @@ public class AssistantActivityBackend extends ComponentActivity {
         mAgentThread = agentThread;
         updateComposerActionButton();
         agentThread.start();
+    }
+
+    private AdaptiveSurface presentDeterministicSurface(
+            String agentResultJson, String sessionId) {
+        AdaptiveSurface surface = new DeterministicSurfaceFactory(this)
+                .fromAgentResult(agentResultJson, sessionId, RuntimeRegistry.BUILTIN);
+        if (surface == null) {
+            return null;
+        }
+        SurfaceMutationResult result = new SurfaceRepository(this).present(surface);
+        if (!result.ok) {
+            Log.w(TAG, "Deterministic surface rejected code=" + result.code);
+            return null;
+        }
+        return surface;
     }
 
     private void confirmPending(boolean approved) {

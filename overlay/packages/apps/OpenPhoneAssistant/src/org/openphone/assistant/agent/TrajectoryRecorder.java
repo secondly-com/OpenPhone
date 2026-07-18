@@ -11,6 +11,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.openphone.assistant.surface.AdaptiveSurface;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -98,6 +99,23 @@ public final class TrajectoryRecorder {
             writeFile(new File(mSessionDir, "summary.json"), summary.toString(2));
         } catch (JSONException e) {
             Log.w(TAG, "Failed to record agent result", e);
+        }
+    }
+
+    public synchronized void recordSurfacePresented(AdaptiveSurface surface) {
+        if (surface == null) {
+            return;
+        }
+        try {
+            append("surface_presented", new JSONObject()
+                    .put("surface_id", surface.surfaceId)
+                    .put("revision", surface.revision)
+                    .put("session_id", surface.sessionId)
+                    .put("runtime", surface.runtime)
+                    .put("presentation", surface.presentation)
+                    .put("sensitivity", surface.sensitivity));
+        } catch (JSONException e) {
+            Log.w(TAG, "Failed to record surface presentation", e);
         }
     }
 

@@ -1,0 +1,46 @@
+{
+  "schema": "openphone.surface.v1",
+  "surface_id": "surface-calendar-fixture",
+  "revision": 1,
+  "session_id": "phone-sess-fixture",
+  "runtime": "builtin",
+  "title": "Today",
+  "presentation": "full",
+  "expires_at": 4102444800000,
+  "sensitivity": "personal",
+  "created_at": 1784419200000,
+  "body": {
+    "type": "column",
+    "spacing": "md",
+    "children": [
+      {
+        "type": "text",
+        "style": "headline",
+        "text": "Your afternoon"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "type": "list_item",
+            "title": "Design review",
+            "subtitle": "2:00 PM · Meet",
+            "icon": "calendar",
+            "action_id": "search_event"
+          }
+        ]
+      }
+    ]
+  },
+  "actions": {
+    "search_event": {
+      "label": "Open event",
+      "tool": "calendar_search",
+      "params": {
+        "query": "Design review",
+        "limit": 8
+      },
+      "reason": "User selected an event from the generated agenda"
+    }
+  }
+}

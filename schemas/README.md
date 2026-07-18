@@ -14,6 +14,7 @@ release tooling, and eval tooling must agree on:
 - audit events and audit evidence exports;
 - trajectory events;
 - background agent jobs and task reports;
+- phone-owned adaptive surfaces and runtime-neutral assistant outputs;
 - OTA feed metadata.
 
 `scripts/check.sh` loads `action-registry`, `action-request`, `audit-event`,
@@ -25,7 +26,11 @@ schemas they validate against:
 - `scripts/validate-ota-feed.sh` — `ota-feed.schema.json`;
 - `scripts/validate-agent-eval-report.sh` — `agent-eval-report.schema.json`;
 - `scripts/validate-audit-evidence-export.sh` — `audit-evidence.schema.json`
-  and `audit-event.schema.json`.
+  and `audit-event.schema.json`;
+- `scripts/validate-surface-contract.mjs` —
+  `openphone-surface.schema.json` and
+  `openphone-assistant-output.schema.json`, including known-valid and
+  known-invalid conformance fixtures.
 
 Editing enums, required keys, or const markers in those schemas changes
 validator behavior directly. The remaining schemas (`action-result`,

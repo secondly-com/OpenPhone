@@ -18,6 +18,11 @@ flow, and device support.
 - Unified durable-run projection across agent jobs, watchers, commitments, and
   foreground sessions, with stable AI Home activity bubbles, overflow/detail
   UI, unread/attention states, and source-routed stop controls.
+- Adaptive Surface V1 schemas, fail-closed validator, revisioned durable
+  repository, bounded Compose component renderer, artifact provenance, and
+  policy-routed surface action dispatcher.
+- Deterministic AI Home agenda and message/notification summary surfaces built
+  from trusted phone tool results.
 
 ### Changed
 

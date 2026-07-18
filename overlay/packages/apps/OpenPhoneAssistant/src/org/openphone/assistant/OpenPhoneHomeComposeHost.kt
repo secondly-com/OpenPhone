@@ -68,6 +68,12 @@ import kotlinx.coroutines.withContext
 import org.openphone.assistant.state.PendingConfirmation
 import org.openphone.assistant.runs.AgentRunProjection
 import org.openphone.assistant.runs.AgentRunSummary
+import org.openphone.assistant.surface.AdaptiveSurface
+import org.openphone.assistant.surface.AdaptiveSurfaceView
+import org.openphone.assistant.surface.SurfaceActionDispatcher
+import org.openphone.assistant.surface.SurfaceActionResult
+import org.openphone.assistant.surface.SurfaceRepository
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -88,6 +94,9 @@ data class HomeUiState(
     val resultText: String = "",
     val pending: PendingConfirmation? = null,
     val runs: List<AgentRunSummary> = emptyList(),
+    val surface: AdaptiveSurface? = null,
+    val surfaceActionStatus: String = "",
+    val surfaceConfirmation: Boolean = false,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -97,6 +106,11 @@ object OpenPhoneHomeComposeHost {
     fun createView(activity: OpenPhoneHomeActivity): View {
         state.value = HomeUiState()
         val runProjection = AgentRunProjection(activity)
+        val surfaceRepository = SurfaceRepository(activity)
+        val surfaceDispatcher = SurfaceActionDispatcher(
+            activity,
+            activity.agentManagerForSurfaces(),
+        )
         activity.setComposeStateCallbacks(object : AssistantActivityBackend.ComposeStateCallbacks {
             override fun setTaskStatus(text: String) {
                 state.update {
@@ -172,6 +186,7 @@ object OpenPhoneHomeComposeHost {
                 state.update {
                     it.copy(
                         pending = PendingConfirmation(actionId, toolName, summary),
+                        surfaceConfirmation = false,
                         status = "Approval needed",
                         mode = HomeAgentMode.Review,
                     )
@@ -182,6 +197,7 @@ object OpenPhoneHomeComposeHost {
                 state.update {
                     it.copy(
                         pending = null,
+                        surfaceConfirmation = false,
                         mode = if (it.mode == HomeAgentMode.Review) HomeAgentMode.Idle else it.mode,
                     )
                 }
@@ -195,10 +211,15 @@ object OpenPhoneHomeComposeHost {
                 val scope = androidx.compose.runtime.rememberCoroutineScope()
                 LaunchedEffect(runProjection) {
                     while (true) {
-                        val runs = withContext(Dispatchers.IO) {
-                            runProjection.snapshot(24)
+                        val projection = withContext(Dispatchers.IO) {
+                            runProjection.snapshot(24) to surfaceRepository.currentVisible()
                         }
-                        state.update { it.copy(runs = runs) }
+                        state.update {
+                            it.copy(
+                                runs = projection.first,
+                                surface = projection.second,
+                            )
+                        }
                         delay(2_000L)
                     }
                 }
@@ -215,8 +236,70 @@ object OpenPhoneHomeComposeHost {
                             }
                         },
                         onOpenAssistant = activity::openAssistant,
-                        onApprove = activity::onComposeApprove,
-                        onDeny = activity::onComposeDeny,
+                        onApprove = {
+                            val current = state.value
+                            if (!current.surfaceConfirmation) {
+                                activity.onComposeApprove()
+                            } else {
+                                val confirmationId = current.pending?.actionId.orEmpty()
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        surfaceDispatcher.resolveConfirmation(
+                                            confirmationId,
+                                            true,
+                                        )
+                                    }
+                                    applySurfaceActionResult(result)
+                                }
+                            }
+                        },
+                        onDeny = {
+                            val current = state.value
+                            if (!current.surfaceConfirmation) {
+                                activity.onComposeDeny()
+                            } else {
+                                val confirmationId = current.pending?.actionId.orEmpty()
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        surfaceDispatcher.resolveConfirmation(
+                                            confirmationId,
+                                            false,
+                                        )
+                                    }
+                                    applySurfaceActionResult(result)
+                                }
+                            }
+                        },
+                        onSurfaceAction = { surface, actionId, input ->
+                            scope.launch {
+                                state.update { it.copy(surfaceActionStatus = "Working…") }
+                                val result = withContext(Dispatchers.IO) {
+                                    surfaceDispatcher.invoke(
+                                        surface.surfaceId,
+                                        surface.revision,
+                                        actionId,
+                                        input,
+                                        "surface:${surface.surfaceId}:${surface.revision}:$actionId",
+                                    )
+                                }
+                                applySurfaceActionResult(result)
+                            }
+                        },
+                        onDismissSurface = { surface ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    surfaceRepository.dismiss(surface.surfaceId, "user_dismissed")
+                                }
+                                state.update {
+                                    it.copy(
+                                        surface = null,
+                                        surfaceActionStatus = "",
+                                        pending = if (it.surfaceConfirmation) null else it.pending,
+                                        surfaceConfirmation = false,
+                                    )
+                                }
+                            }
+                        },
                         onStopRun = { runId ->
                             scope.launch {
                                 withContext(Dispatchers.IO) {
@@ -266,6 +349,42 @@ object OpenPhoneHomeComposeHost {
         }
     }
 
+    private fun applySurfaceActionResult(result: SurfaceActionResult) {
+        if (result.status == "needs_confirmation") {
+            val confirmationId = result.result.optString("confirmation_id", "")
+            val tool = result.result.optString("tool", "")
+            val summary = result.result.optString(
+                "summary",
+                result.message.ifBlank { "Approve this surface action?" },
+            )
+            state.update {
+                it.copy(
+                    pending = PendingConfirmation(confirmationId, tool, summary),
+                    surfaceConfirmation = true,
+                    surfaceActionStatus = "Approval required",
+                    mode = HomeAgentMode.Review,
+                )
+            }
+            return
+        }
+        val message = when (result.status) {
+            "ok" -> "Done"
+            "denied" -> "Action denied"
+            "timeout" -> "Approval timed out"
+            else -> result.message.ifBlank {
+                result.code.replace('_', ' ').ifBlank { "Action failed" }
+            }
+        }
+        state.update {
+            it.copy(
+                pending = if (it.surfaceConfirmation) null else it.pending,
+                surfaceConfirmation = false,
+                surfaceActionStatus = message,
+                mode = if (result.status == "ok") HomeAgentMode.Result else HomeAgentMode.Error,
+            )
+        }
+    }
+
     private fun modeForStatus(text: String, fallback: HomeAgentMode): HomeAgentMode {
         val clean = text.trim().lowercase(Locale.US)
         return when {
@@ -311,6 +430,8 @@ private fun OpenPhoneHomeScreen(
     onOpenAssistant: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
+    onDismissSurface: (AdaptiveSurface) -> Unit,
     onStopRun: (String) -> Unit,
     onReadRun: (String) -> Unit,
     onDismissRun: (String) -> Unit,
@@ -379,6 +500,8 @@ private fun OpenPhoneHomeScreen(
             onDismissRun = onDismissRun,
             onApprove = onApprove,
             onDeny = onDeny,
+            onSurfaceAction = onSurfaceAction,
+            onDismissSurface = onDismissSurface,
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(bottom = 112.dp),
@@ -502,6 +625,8 @@ private fun HomeResult(
     onDismissRun: (String) -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
+    onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
+    onDismissSurface: (AdaptiveSurface) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (selectedRun != null || showAllRuns) {
@@ -514,6 +639,38 @@ private fun HomeResult(
             onDismissRun = onDismissRun,
             modifier = modifier,
         )
+        return
+    }
+    val surface = state.surface
+    if (surface != null && (state.pending == null || state.surfaceConfirmation)) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AdaptiveSurfaceView(
+                surface = surface,
+                actionStatus = state.surfaceActionStatus,
+                onAction = { actionId, input ->
+                    onSurfaceAction(surface, actionId, input)
+                },
+                onDismiss = { onDismissSurface(surface) },
+            )
+            if (state.surfaceConfirmation && state.pending != null) {
+                Text(
+                    state.pending.summary,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                Row(
+                    modifier = Modifier.padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ReviewAction("Deny", false, onDeny)
+                    ReviewAction("Approve", true, onApprove)
+                }
+            }
+        }
         return
     }
     val visibleText = state.pending?.summary

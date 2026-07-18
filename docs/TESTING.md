@@ -290,6 +290,26 @@ On a build containing both sides of the change, verify:
 - TalkBack exposes the voice orb, Apps action, settings/history action, text
   composer, review actions, run bubbles, overflow control, and run actions.
 
+### Adaptive Surface V1 checks
+
+Run `node scripts/validate-surface-contract.mjs` (also included in
+`./scripts/check.sh`) and verify the known-valid calendar/message fixtures pass
+while external-image, unknown-component, and unknown-action fixtures fail.
+
+On a device, ask for a calendar list, message summary, and notification
+summary, then verify:
+
+- a deterministic surface replaces prose-only result presentation on AI Home;
+- rotating/recreating Home restores the same surface and revision;
+- dismissing it survives recreation, and an expired surface is not shown;
+- every interactive element has a useful TalkBack label;
+- action taps use the registered phone tool, and a stale revision is rejected;
+- read-only actions execute through the tool bridge; mutating actions show the
+  existing local approval UI and cannot execute before approval;
+- sensitive message/notification surfaces do not appear over a locked device;
+- malformed documents, undeclared actions, arbitrary component types, and
+  remote image URLs render nothing and create a rejection event.
+
 Useful resolution checks:
 
 ```bash

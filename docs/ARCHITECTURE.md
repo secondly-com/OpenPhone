@@ -78,6 +78,22 @@ The current repo implements the first OpenPhone product layer:
   expanded island reads the same projection for recent/live run status.
   Inspection and dismissal state is local presentation metadata; source stores
   remain authoritative for execution and stop operations.
+- Adaptive Surface V1 is a phone-owned, revisioned UI document contract.
+  Runtimes can request only a bounded semantic component registry; the
+  assistant validates identity, ownership, expiry, depth/node/text/image
+  limits, local artifact provenance, registered tool bindings, tool parameter
+  shapes, accessibility labels, and mutation disclosure before persistence or
+  rendering. Surface actions resolve against the current revision and then
+  enter the existing runtime tool bridge, so policy, grants, confirmation,
+  idempotency, and framework audit remain authoritative. The Compose renderer
+  has no WebView, HTML, remote image URL, arbitrary color, absolute-position,
+  or runtime-code path.
+- Built-in calendar search and message/notification result paths produce
+  deterministic Adaptive Surface documents from trusted phone tool results.
+  Tool artifacts retain session/runtime/capability/sensitivity/expiry
+  provenance separately from the layout, while the surface repository survives
+  activity recreation and fails closed on stale, malformed, expired, or
+  cross-session content.
 - Runtime Agent Protocol for external agent runtimes. This is an OpenPhone AI
   layer boundary, not a separate product stack: Android owns sessions, screen
   context, tool execution, confirmations, and audit, while adapters map remote

@@ -1,0 +1,53 @@
+{
+  "schema": "openphone.surface.v1",
+  "surface_id": "surface-message-fixture",
+  "revision": 1,
+  "session_id": "phone-sess-fixture",
+  "runtime": "builtin",
+  "title": "Messages",
+  "presentation": "full",
+  "expires_at": 4102444800000,
+  "sensitivity": "sensitive",
+  "body": {
+    "type": "column",
+    "spacing": "md",
+    "children": [
+      {
+        "type": "capability_disclosure",
+        "capability": "messages.read",
+        "text": "From recent messages on this phone"
+      },
+      {
+        "type": "card",
+        "children": [
+          {
+            "type": "text",
+            "style": "title",
+            "text": "Sam"
+          },
+          {
+            "type": "text",
+            "style": "body",
+            "text": "Can we move dinner to 7?"
+          },
+          {
+            "type": "button",
+            "label": "Find thread",
+            "action_id": "find_thread"
+          }
+        ]
+      }
+    ]
+  },
+  "actions": {
+    "find_thread": {
+      "label": "Find thread",
+      "tool": "messages_search",
+      "params": {
+        "query": "Sam",
+        "limit": 8
+      },
+      "reason": "User selected a message summary item"
+    }
+  }
+}

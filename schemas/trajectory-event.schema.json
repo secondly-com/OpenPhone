@@ -21,7 +21,11 @@
         "task_started",
         "tool_call",
         "tool_result",
-        "agent_result"
+        "agent_result",
+        "surface_presented",
+        "surface_action_invoked",
+        "surface_action_result",
+        "surface_dismissed"
       ]
     },
     "payload": {

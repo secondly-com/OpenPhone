@@ -55,6 +55,8 @@ required=(
   schemas/audit-event.schema.json
   schemas/audit-log.schema.json
   schemas/model-tool.schema.json
+  schemas/openphone-assistant-output.schema.json
+  schemas/openphone-surface.schema.json
   schemas/ota-feed.schema.json
   schemas/screen-context.schema.json
   schemas/trajectory-event.schema.json
@@ -91,6 +93,7 @@ required=(
   scripts/run-assistant-task.sh
   scripts/pull-latest-trajectory.sh
   scripts/check-runtime-protocol.sh
+  scripts/validate-surface-contract.mjs
   scripts/smoke-test-openclaw-device-failures.sh
   scripts/smoke-test-openclaw-runtime.sh
   scripts/setup-model-broker-tls.sh
@@ -129,6 +132,11 @@ required=(
   tests/integrations/runtime-protocol-versioning-contract.mjs
   tests/integrations/openclaw-plugin-policy-contract.mjs
   tests/integrations/runtime-package-contract.mjs
+  tests/fixtures/surfaces/calendar-agenda.json
+  tests/fixtures/surfaces/message-summary.json
+  tests/fixtures/surfaces/invalid-external-image.json
+  tests/fixtures/surfaces/invalid-unknown-action.json
+  tests/fixtures/surfaces/invalid-unknown-component.json
   integrations/mcp-server/README.md
   integrations/mcp-server/package.json
   integrations/mcp-server/src/index.mjs
@@ -1113,6 +1121,7 @@ if grep -R "SPDX-license-identifier-Apache-2.0" \
 fi
 
 "$root/scripts/check-runtime-protocol.sh"
+node "$root/scripts/validate-surface-contract.mjs"
 "$root/scripts/check-assistant-java.sh"
 
 printf 'OpenPhone repo checks passed.\n'
