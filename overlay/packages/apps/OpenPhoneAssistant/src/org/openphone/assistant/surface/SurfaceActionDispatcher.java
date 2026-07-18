@@ -14,6 +14,8 @@ import org.openphone.assistant.runtime.RuntimeToolRequest;
 import org.openphone.assistant.runtime.RuntimeToolResult;
 
 import java.util.Iterator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -27,9 +29,12 @@ public final class SurfaceActionDispatcher {
     private final SurfaceRepository mRepository;
     private final SurfaceEventLog mEvents;
     private final RuntimeToolBridge mToolBridge;
+    private final Context mContext;
+    private final Map<String, PendingSurfaceAction> mPending = new HashMap<>();
 
     public SurfaceActionDispatcher(Context context, OpenPhoneAgentManager agentManager) {
         Context app = context.getApplicationContext();
+        mContext = app;
         mRepository = new SurfaceRepository(app);
         mEvents = new SurfaceEventLog(app);
         mToolBridge = agentManager == null ? null : new RuntimeToolBridge(app, agentManager);
@@ -91,11 +96,17 @@ public final class SurfaceActionDispatcher {
         }
         mEvents.record(SurfaceEventLog.ACTION_INVOKED, surface,
                 "Invoked " + action.label, eventPayload);
+        SurfaceRuntimeNotifier.actionInvoked(mContext, surface, action.id, key);
         RuntimeToolResult runtimeResult = mToolBridge.execute(request);
         SurfaceActionResult result = SurfaceActionResult.fromRuntime(runtimeResult);
+        String confirmationId = result.result.optString("confirmation_id", "");
+        if (!confirmationId.isEmpty()) {
+            mPending.put(confirmationId, new PendingSurfaceAction(surface, action.id));
+        }
         mEvents.record(SurfaceEventLog.ACTION_RESULT, surface,
                 result.status + (result.code.isEmpty() ? "" : ": " + result.code),
                 result.toJson());
+        SurfaceRuntimeNotifier.actionResult(mContext, surface, action.id, result);
         return result;
     }
 
@@ -111,7 +122,13 @@ public final class SurfaceActionDispatcher {
             return SurfaceActionResult.error(
                     "confirmation_result_missing", "Confirmation returned no result.");
         }
-        return SurfaceActionResult.fromRuntime(resolution.result());
+        SurfaceActionResult result = SurfaceActionResult.fromRuntime(resolution.result());
+        PendingSurfaceAction pending = mPending.remove(clean(confirmationId));
+        if (pending != null) {
+            SurfaceRuntimeNotifier.actionResult(
+                    mContext, pending.surface, pending.actionId, result);
+        }
+        return result;
     }
 
     private static SurfaceActionResult mergeValidatedInput(String tool, JSONObject params,
@@ -152,5 +169,15 @@ public final class SurfaceActionDispatcher {
 
     private static String clean(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static final class PendingSurfaceAction {
+        final AdaptiveSurface surface;
+        final String actionId;
+
+        PendingSurfaceAction(AdaptiveSurface surface, String actionId) {
+            this.surface = surface;
+            this.actionId = actionId;
+        }
     }
 }

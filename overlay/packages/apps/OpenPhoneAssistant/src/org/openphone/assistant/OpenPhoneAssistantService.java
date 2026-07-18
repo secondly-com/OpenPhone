@@ -56,6 +56,14 @@ public final class OpenPhoneAssistantService extends Service {
             "org.openphone.assistant.extra.RUNTIME_ATTENTION_AUTONOMY";
     public static final String EXTRA_RUNTIME_ATTENTION_INCLUDE_SCREEN =
             "org.openphone.assistant.extra.RUNTIME_ATTENTION_INCLUDE_SCREEN";
+    public static final String ACTION_RUNTIME_SURFACE_EVENT =
+            "org.openphone.assistant.action.RUNTIME_SURFACE_EVENT";
+    public static final String EXTRA_RUNTIME_SURFACE_RUNTIME =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_RUNTIME";
+    public static final String EXTRA_RUNTIME_SURFACE_EVENT =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_EVENT";
+    public static final String EXTRA_RUNTIME_SURFACE_PAYLOAD =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_PAYLOAD";
     private static final int MAX_PENDING_RUNTIME_VOICE_REPLIES = 16;
     private static volatile String sLatestRuntimeStatusJson =
             "{\"status\":\"disabled\",\"manager_status\":\"not_created\"}";
@@ -204,6 +212,10 @@ public final class OpenPhoneAssistantService extends Service {
             requestRuntimeAttention(intent);
             return START_STICKY;
         }
+        if (ACTION_RUNTIME_SURFACE_EVENT.equals(action)) {
+            forwardRuntimeSurfaceEvent(intent);
+            return START_STICKY;
+        }
         if (OpenPhoneNotificationController.ACTION_START.equals(action)) {
             mIslandHiddenByActivity = false;
             mNotificationTaskId = startNotificationTask();
@@ -278,6 +290,21 @@ public final class OpenPhoneAssistantService extends Service {
                 : mRuntimeManager.statusJson();
         sLatestRuntimeStatusJson = status;
         return status;
+    }
+
+    private void forwardRuntimeSurfaceEvent(Intent intent) {
+        if (mRuntimeManager == null || intent == null) {
+            return;
+        }
+        String runtime = cleanRuntime(intent.getStringExtra(EXTRA_RUNTIME_SURFACE_RUNTIME));
+        String event = cleanExtra(intent.getStringExtra(EXTRA_RUNTIME_SURFACE_EVENT), "");
+        JSONObject payload = parseObject(
+                intent.getStringExtra(EXTRA_RUNTIME_SURFACE_PAYLOAD));
+        if (runtime.isEmpty() || event.isEmpty()) {
+            return;
+        }
+        mRuntimeManager.sendEventToRuntime(runtime, new org.openphone.assistant.runtime.RuntimeEvent(
+                event, payload));
     }
 
     static String latestRuntimeStatusJson() {

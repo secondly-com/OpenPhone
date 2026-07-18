@@ -1,0 +1,31 @@
+{
+  "event": "runtime.surface.replace",
+  "payload": {
+    "sessionKey": "openphone:fixture:phone-sess-fixture",
+    "expected_revision": 1,
+    "output": {
+      "schema": "openphone.assistant_output.v1",
+      "session_id": "phone-sess-fixture",
+      "speech": "",
+      "text": "The agenda changed.",
+      "surface": {
+        "schema": "openphone.surface.v1",
+        "surface_id": "surface-runtime-fixture",
+        "revision": 2,
+        "session_id": "phone-sess-fixture",
+        "runtime": "openclaw",
+        "title": "Today",
+        "presentation": "full",
+        "expires_at": 4102444800000,
+        "sensitivity": "personal",
+        "body": {
+          "type": "text",
+          "style": "body",
+          "text": "Updated agenda"
+        },
+        "actions": {}
+      },
+      "background_run": null
+    }
+  }
+}

@@ -24,6 +24,15 @@ const androidCommandRegistryPath = path.join(
   root,
   "overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/runtime/adapters/openclaw/OpenClawCommandRegistry.java",
 );
+const openClawAdapterPath = path.join(
+  root,
+  "overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/runtime/adapters/openclaw/OpenClawRuntimeAdapter.java",
+);
+const surfaceFixturePaths = [
+  "surface-present-event.json",
+  "surface-replace-event.json",
+  "surface-dismiss-event.json",
+].map((name) => path.join(root, "tests/fixtures/runtime", name));
 
 function fail(message) {
   console.error(`check-runtime-protocol: ${message}`);
@@ -95,6 +104,62 @@ if (eventsManifest.version !== 1 || !Array.isArray(eventsManifest.events)) {
   fail("openphone-events.json must contain version=1 and events[]");
 }
 unique(eventsManifest.events.map((entry) => entry.name), "event");
+const eventDirections = new Map(
+  eventsManifest.events.map((entry) => [entry.name, entry.direction]),
+);
+const expectedSurfaceEvents = new Map([
+  ["runtime.surface.present", "runtime_to_phone"],
+  ["runtime.surface.replace", "runtime_to_phone"],
+  ["runtime.surface.dismiss", "runtime_to_phone"],
+  ["runtime.surface.action_result", "phone_to_runtime"],
+  ["phone.surface.action_invoked", "phone_to_runtime"],
+  ["phone.surface.dismissed", "phone_to_runtime"],
+]);
+for (const [event, direction] of expectedSurfaceEvents) {
+  if (eventDirections.get(event) !== direction) {
+    fail(`missing or misdirected surface event: ${event} -> ${direction}`);
+  }
+}
+const openClawMappings = new Map(
+  (eventsManifest.transport_mappings ?? [])
+    .filter((mapping) => mapping.runtime === "openclaw")
+    .flatMap((mapping) => mapping.events ?? [])
+    .map((mapping) => [mapping.protocol, mapping.wire]),
+);
+for (const event of expectedSurfaceEvents.keys()) {
+  if (!openClawMappings.has(event)) {
+    fail(`OpenClaw transport mapping missing surface event: ${event}`);
+  }
+}
+
+const surfaceFixtures = surfaceFixturePaths.map(readJson);
+const [presentFixture, replaceFixture, dismissFixture] = surfaceFixtures;
+if (presentFixture.event !== "runtime.surface.present"
+    || presentFixture.payload?.output?.schema !== "openphone.assistant_output.v1"
+    || presentFixture.payload?.output?.surface?.schema !== "openphone.surface.v1"
+    || presentFixture.payload?.output?.session_id
+      !== presentFixture.payload?.output?.surface?.session_id) {
+  fail("runtime surface present fixture is malformed");
+}
+if (replaceFixture.event !== "runtime.surface.replace"
+    || replaceFixture.payload?.expected_revision !== 1
+    || replaceFixture.payload?.output?.surface?.revision !== 2
+    || replaceFixture.payload?.output?.surface?.surface_id
+      !== presentFixture.payload?.output?.surface?.surface_id) {
+  fail("runtime surface replace fixture must increment the same surface revision");
+}
+if (dismissFixture.event !== "runtime.surface.dismiss"
+    || dismissFixture.payload?.revision !== replaceFixture.payload?.output?.surface?.revision
+    || dismissFixture.payload?.surface_id
+      !== replaceFixture.payload?.output?.surface?.surface_id) {
+  fail("runtime surface dismiss fixture must target the replacement revision");
+}
+const openClawAdapterSource = fs.readFileSync(openClawAdapterPath, "utf8");
+for (const wire of openClawMappings.values()) {
+  if (wire.startsWith("openphone.surface.") && !openClawAdapterSource.includes(wire)) {
+    fail(`Android OpenClaw adapter does not map surface wire event: ${wire}`);
+  }
+}
 
 const capabilitiesManifest = readJson(capabilitiesPath);
 if (capabilitiesManifest.version !== 1 || !Array.isArray(capabilitiesManifest.capabilities)) {

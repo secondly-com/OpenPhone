@@ -197,4 +197,23 @@ for (const name of invalidFixtures) {
   if (!rejected) fail(`invalid fixture was accepted: ${name}`);
 }
 
+for (const name of ["surface-present-event.json", "surface-replace-event.json"]) {
+  const event = JSON.parse(
+    fs.readFileSync(path.join(root, "tests/fixtures/runtime", name), "utf8"),
+  );
+  const output = event.payload?.output;
+  if (!output || output.schema !== "openphone.assistant_output.v1"
+      || typeof output.session_id !== "string"
+      || typeof output.speech !== "string"
+      || typeof output.text !== "string") {
+    fail(`runtime fixture has invalid assistant output: ${name}`);
+  }
+  if (output.surface) {
+    validateSurface(output.surface);
+    if (output.surface.session_id !== output.session_id) {
+      fail(`runtime fixture surface crosses output session: ${name}`);
+    }
+  }
+}
+
 console.log("Adaptive surface contract checks passed.");

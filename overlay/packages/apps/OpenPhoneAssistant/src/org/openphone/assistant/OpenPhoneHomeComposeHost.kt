@@ -73,6 +73,7 @@ import org.openphone.assistant.surface.AdaptiveSurfaceView
 import org.openphone.assistant.surface.SurfaceActionDispatcher
 import org.openphone.assistant.surface.SurfaceActionResult
 import org.openphone.assistant.surface.SurfaceRepository
+import org.openphone.assistant.surface.SurfaceRuntimeNotifier
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -289,6 +290,11 @@ object OpenPhoneHomeComposeHost {
                             scope.launch {
                                 withContext(Dispatchers.IO) {
                                     surfaceRepository.dismiss(surface.surfaceId, "user_dismissed")
+                                    SurfaceRuntimeNotifier.dismissed(
+                                        activity,
+                                        surface,
+                                        "user_dismissed",
+                                    )
                                 }
                                 state.update {
                                     it.copy(

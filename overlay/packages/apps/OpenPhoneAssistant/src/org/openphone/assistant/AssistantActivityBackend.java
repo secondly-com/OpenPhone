@@ -44,6 +44,7 @@ import org.openphone.assistant.orchestrator.OrchestratorDecision;
 import org.openphone.assistant.ota.OtaUpdateClient;
 import org.openphone.assistant.policy.AppCapabilityPolicy;
 import org.openphone.assistant.surface.AdaptiveSurface;
+import org.openphone.assistant.surface.AssistantOutput;
 import org.openphone.assistant.surface.DeterministicSurfaceFactory;
 import org.openphone.assistant.surface.SurfaceMutationResult;
 import org.openphone.assistant.surface.SurfaceRepository;
@@ -3428,6 +3429,16 @@ public class AssistantActivityBackend extends ComponentActivity {
         if (!result.ok) {
             Log.w(TAG, "Deterministic surface rejected code=" + result.code);
             return null;
+        }
+        AssistantOutput output = AssistantOutput.builtin(
+                sessionId, "", taskFinishedMessage(agentResultJson), surface);
+        if (output != null) {
+            recordContextAgentEvent(
+                    "assistant.output.presented",
+                    "Assistant output presented",
+                    output.displayText(),
+                    sessionId,
+                    output.toJson().toString());
         }
         return surface;
     }

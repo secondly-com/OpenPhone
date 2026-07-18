@@ -23,6 +23,9 @@ flow, and device support.
   policy-routed surface action dispatcher.
 - Deterministic AI Home agenda and message/notification summary surfaces built
   from trusted phone tool results.
+- Runtime-neutral assistant output envelopes and additive surface
+  present/replace/dismiss/action-result events, including OpenClaw node-event
+  mapping and recorded conformance fixtures.
 
 ### Changed
 

@@ -134,6 +134,9 @@ required=(
   tests/integrations/runtime-package-contract.mjs
   tests/fixtures/surfaces/calendar-agenda.json
   tests/fixtures/surfaces/message-summary.json
+  tests/fixtures/runtime/surface-present-event.json
+  tests/fixtures/runtime/surface-replace-event.json
+  tests/fixtures/runtime/surface-dismiss-event.json
   tests/fixtures/surfaces/invalid-external-image.json
   tests/fixtures/surfaces/invalid-unknown-action.json
   tests/fixtures/surfaces/invalid-unknown-component.json
