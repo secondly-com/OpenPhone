@@ -54,6 +54,14 @@ flow, and device support.
 - OpenPhone Assistant development package bumped to `versionCode=168` /
   `versionName=0.1.132-dev` for the SystemUI island integration.
 
+### Fixed
+
+- AI Home now waits for the first user unlock instead of inheriting the
+  assistant application's direct-boot eligibility and reading
+  credential-encrypted state during locked boot.
+- OpenPhone Assistant development package bumped to `versionCode=169` /
+  `versionName=0.1.133-dev` for the locked-boot fix.
+
 ## [0.0.3] - 2026-07-03
 
 ### Added

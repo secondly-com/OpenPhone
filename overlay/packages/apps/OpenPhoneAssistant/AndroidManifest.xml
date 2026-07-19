@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openphone.assistant"
-    android:versionCode="168"
-    android:versionName="0.1.132-dev">
+    android:versionCode="169"
+    android:versionName="0.1.133-dev">
     <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
     <uses-permission android:name="android.permission.GET_TASKS" />
@@ -59,6 +59,7 @@
         <activity
             android:name=".OpenPhoneHomeActivity"
             android:clearTaskOnLaunch="true"
+            android:directBootAware="false"
             android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTask"
