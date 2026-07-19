@@ -63,7 +63,10 @@ metadata="$output_dir/mindthegapps-${android_version}-${arch}-latest.json"
 info "Fetching latest release metadata: $repo"
 curl -fsSL "$api_url" -o "$metadata"
 
-readarray -t assets < <(python3 - <<'PY' "$metadata"
+assets=()
+while IFS= read -r asset; do
+  assets+=("$asset")
+done < <(python3 - <<'PY' "$metadata"
 import json
 import sys
 
