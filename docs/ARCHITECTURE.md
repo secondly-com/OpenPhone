@@ -91,7 +91,10 @@ The current repo implements the first OpenPhone product layer:
   one-way change events to SystemUI. SystemUI renders only a fixed-size
   `TYPE_STATUS_BAR_SUB_PANEL` window with non-modal touch behavior, redacts
   personal/review state on keyguard, routes detail and approval to AI Home, and
-  degrades to a generic bounded status when the publisher becomes stale. The
+  degrades to a generic bounded status when the publisher becomes stale. Its
+  compact geometry, black capsule, centered typography, and terse state glyphs
+  preserve the established assistant-island presentation while moving window
+  ownership into SystemUI. The
   assistant's full-screen `TYPE_SYSTEM_ERROR` layer remains only for
   non-touchable pointer/glow visualization during active device control; the
   old assistant island is a property-gated compatibility renderer.

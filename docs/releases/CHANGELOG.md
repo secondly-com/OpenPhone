@@ -56,6 +56,9 @@ flow, and device support.
 
 ### Fixed
 
+- The SystemUI-owned App Space island now preserves the previous compact
+  geometry, black capsule, centered typography, and icon-first state language
+  instead of replacing it with a wide, verbose status pill.
 - AI Home now renders a minimal black locked-boot shell, while its
   direct-boot-aware assistant service remains bindable with a locked status;
   both wait for `USER_UNLOCKED` before initializing credential-encrypted

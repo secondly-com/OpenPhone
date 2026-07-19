@@ -4,9 +4,9 @@ Date: Sat, 18 Jul 2026 17:15:21 -0700
 Subject: [PATCH 21/21] OpenPhone: render compact island in SystemUI
 
 ---
- .../openphone/OpenPhoneIslandController.java  | 460 ++++++++++++++++++
+ .../openphone/OpenPhoneIslandController.java  | 456 ++++++++++++++++++
  .../openphone/OpenPhoneSystemUIModule.kt      |   9 +
- 2 files changed, 469 insertions(+)
+ 2 files changed, 465 insertions(+)
  create mode 100644 packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
 
 diff --git a/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
@@ -14,7 +14,7 @@ new file mode 100644
 index 00000000..2fb9b890
 --- /dev/null
 +++ b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,456 @@
 +/*
 + * Copyright (C) 2026 OpenPhone
 + *
@@ -202,51 +202,48 @@ index 00000000..2fb9b890
 +
 +    private RenderedState renderedState(IslandState state, boolean redact) {
 +        if (redact) {
-+            return new RenderedState("OpenPhone", "Unlock", 0xfff4f7f8,
++            return new RenderedState("AI", "⌾", 0xfff4f7f8,
 +                    "OpenPhone. Unlock to review private activity.");
 +        }
 +        if (state.needsAttention || "needs_review".equals(state.mode)) {
-+            return new RenderedState("Review", "!", 0xffffcc6c,
++            return new RenderedState("!", "", 0xffffcc6c,
 +                    "OpenPhone approval needed. Double tap to review.");
 +        }
 +        switch (state.mode) {
 +            case "listening":
-+                return new RenderedState("Listening", "■", 0xffff6b6b,
++                return new RenderedState("●", "■", 0xffff6b6b,
 +                        "OpenPhone is listening. Double tap to open.");
 +            case "thinking":
-+                return new RenderedState("OpenPhone", "Thinking", 0xff9ab8ff,
++                return new RenderedState("", "...", 0xff9ab8ff,
 +                        "OpenPhone is thinking. Double tap to open.");
 +            case "realtime":
-+                return new RenderedState("OpenPhone", "Live", 0xffffcc6c,
++                return new RenderedState("⚡", "...", 0xffffcc6c,
 +                        "OpenPhone realtime session is active. Double tap to open.");
 +            case "action_running":
-+                return new RenderedState("OpenPhone",
-+                        state.liveRuns > 1 ? state.liveRuns + " active" : "Working",
-+                        0xff72e0c4,
++                return new RenderedState("●", "■", 0xffff6b6b,
 +                        "OpenPhone task running. Double tap to open; long press to stop.");
 +            case "answer_ready":
-+                return new RenderedState("OpenPhone", "Done", 0xff20e36a,
++                return new RenderedState("", "✓", 0xff20e36a,
 +                        "OpenPhone finished. Double tap to open.");
 +            case "transcript":
 +            case "reply":
-+                return new RenderedState("OpenPhone", "Ready", 0xff72e0c4,
++                return new RenderedState("AI", "✓", 0xff72e0c4,
 +                        "OpenPhone response ready. Double tap to open.");
 +            case "error":
-+                return new RenderedState("OpenPhone", "Issue", 0xffff6b6b,
++                return new RenderedState("!", "", 0xffff6b6b,
 +                        "OpenPhone needs attention. Double tap to open.");
 +            case "watching":
-+                return new RenderedState("OpenPhone",
-+                        state.liveRuns > 0 ? state.liveRuns + " active" : "Watching",
++                return new RenderedState("AI",
++                        state.liveRuns > 1 ? "◎ " + state.liveRuns : "◎",
 +                        0xff9ab8ff,
 +                        "OpenPhone background activity. Double tap to open.");
 +            case "unavailable":
-+                return new RenderedState("OpenPhone", "Offline", 0xffaeb8bf,
++                return new RenderedState("AI", "○", 0xffaeb8bf,
 +                        "OpenPhone assistant unavailable. Double tap to open.");
 +            case "idle":
 +            default:
-+                return new RenderedState(
-+                        state.label.isEmpty() ? "OpenPhone" : state.label,
-+                        state.liveRuns > 0 ? state.liveRuns + " active" : "◉",
++                return new RenderedState("AI",
++                        state.liveRuns > 0 ? "◎ " + state.liveRuns : "◉",
 +                        0xff72e0c4,
 +                        "OpenPhone ready. Double tap to open.");
 +        }
@@ -259,33 +256,33 @@ index 00000000..2fb9b890
 +        LinearLayout root = new LinearLayout(mContext);
 +        root.setOrientation(LinearLayout.HORIZONTAL);
 +        root.setGravity(Gravity.CENTER_VERTICAL);
-+        root.setPadding(dp(12), 0, dp(12), 0);
++        root.setPadding(dp(4), 0, dp(4), 0);
 +        root.setClickable(true);
 +        root.setFocusable(true);
-+        root.setElevation(dp(8));
++        root.setElevation(0);
 +        root.setOnClickListener(view -> launchAiHome());
 +        root.setOnLongClickListener(this::handleLongPress);
 +
-+        TextView left = islandText(Gravity.START);
-+        TextView right = islandText(Gravity.END);
++        TextView left = islandText(Gravity.CENTER);
++        TextView right = islandText(Gravity.CENTER);
 +        root.addView(left, new LinearLayout.LayoutParams(
 +                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 +        View cameraSpace = new View(mContext);
 +        root.addView(cameraSpace, new LinearLayout.LayoutParams(
-+                dp(48), LinearLayout.LayoutParams.MATCH_PARENT));
++                dp(37), LinearLayout.LayoutParams.MATCH_PARENT));
 +        root.addView(right, new LinearLayout.LayoutParams(
 +                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 +
 +        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-+                dp(216),
-+                dp(40),
++                dp(110),
++                dp(34),
 +                WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL,
 +                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
 +                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
 +                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
 +                PixelFormat.TRANSLUCENT);
 +        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-+        params.y = dp(6);
++        params.y = dp(16);
 +        params.layoutInDisplayCutoutMode =
 +                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
 +        params.setFitInsetsTypes(0);
@@ -349,7 +346,7 @@ index 00000000..2fb9b890
 +    private TextView islandText(int gravity) {
 +        TextView view = new TextView(mContext);
 +        view.setTextColor(0xfff4f7f8);
-+        view.setTextSize(11);
++        view.setTextSize(14);
 +        view.setTypeface(Typeface.DEFAULT_BOLD);
 +        view.setGravity(Gravity.CENTER_VERTICAL | gravity);
 +        view.setSingleLine(true);
@@ -358,13 +355,12 @@ index 00000000..2fb9b890
 +    }
 +
 +    private GradientDrawable chipBackground(boolean attention) {
-+        GradientDrawable background = new GradientDrawable(
-+                GradientDrawable.Orientation.LEFT_RIGHT,
-+                attention
-+                        ? new int[] {0xff171107, 0xff241b08}
-+                        : new int[] {0xff030607, 0xff101817});
-+        background.setCornerRadius(dp(22));
-+        background.setStroke(dp(1), attention ? 0x99ffcc6c : 0x6672e0c4);
++        GradientDrawable background = new GradientDrawable();
++        background.setColor(0xff000000);
++        background.setCornerRadius(dp(17));
++        if (attention) {
++            background.setStroke(dp(1), 0xffffcc6c);
++        }
 +        return background;
 +    }
 +

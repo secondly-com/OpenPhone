@@ -120,6 +120,11 @@ for (const marker of [
   "Unlock to review private activity",
   "STATE_STALE_MS",
   "postStartActivityDismissingKeyguard",
+  "dp(110)",
+  "dp(34)",
+  "\"AI\",",
+  "\"◎ \" + state.liveRuns",
+  "background.setColor(0xff000000)",
 ]) {
   if (!systemUiPatch.includes(marker)) {
     fail(`SystemUI island renderer is missing ${marker}`);

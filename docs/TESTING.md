@@ -319,8 +319,10 @@ renderer. On a matching device, verify:
 - tapping the island dismisses keyguard when necessary and opens AI Home;
 - long-press stops only an unlocked active foreground task; approval-needed,
   stale, background-only, and locked states route to AI Home instead;
-- approval details and personal status are replaced with `OpenPhone · Unlock`
+- approval details and personal status are replaced with a generic locked glyph
   on keyguard, and Approve/Deny remain available only on AI Home;
+- the App Space chip preserves the legacy compact 288 x 90 px proportions on
+  the Pixel 9a reference density, with a black capsule and terse state glyphs;
 - touches immediately outside the fixed chip reach the underlying app, and
   notification shade, Quick Settings, IME, recents, camera, dialer, and
   emergency UI remain unobstructed;
