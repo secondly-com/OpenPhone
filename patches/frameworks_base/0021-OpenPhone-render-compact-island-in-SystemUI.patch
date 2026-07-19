@@ -1,0 +1,511 @@
+From 38f9073ca70344ee029b7f0fe4c0eabdbffa55cc Mon Sep 17 00:00:00 2001
+From: OpenPhone <openphone@example.invalid>
+Date: Sat, 18 Jul 2026 17:15:21 -0700
+Subject: [PATCH 21/21] OpenPhone: render compact island in SystemUI
+
+---
+ .../openphone/OpenPhoneIslandController.java  | 460 ++++++++++++++++++
+ .../openphone/OpenPhoneSystemUIModule.kt      |   9 +
+ 2 files changed, 469 insertions(+)
+ create mode 100644 packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
+
+diff --git a/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
+new file mode 100644
+index 00000000..2fb9b890
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneIslandController.java
+@@ -0,0 +1,460 @@
++/*
++ * Copyright (C) 2026 OpenPhone
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software distributed under the
++ * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied. See the License for the specific language governing
++ * permissions and limitations under the License.
++ */
++
++package com.android.systemui.openphone;
++
++import android.app.KeyguardManager;
++import android.content.BroadcastReceiver;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.graphics.PixelFormat;
++import android.graphics.Typeface;
++import android.graphics.drawable.GradientDrawable;
++import android.openphone.IOpenPhoneIslandStateListener;
++import android.openphone.OpenPhoneAgentManager;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import android.util.Log;
++import android.view.Gravity;
++import android.view.HapticFeedbackConstants;
++import android.view.View;
++import android.view.WindowManager;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++
++import com.android.systemui.CoreStartable;
++import com.android.systemui.dagger.SysUISingleton;
++import com.android.systemui.plugins.ActivityStarter;
++
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.PrintWriter;
++import java.util.Set;
++
++import javax.inject.Inject;
++
++/**
++ * SystemUI-owned compact renderer for the OpenPhone island.
++ *
++ * <p>The renderer consumes a small projection cached by system_server. It owns
++ * only a bounded touchable window: touches outside the chip continue directly
++ * to the app underneath. Review and private content are always redacted while
++ * the device is locked.</p>
++ */
++@SysUISingleton
++public final class OpenPhoneIslandController implements CoreStartable {
++    private static final String TAG = "OpenPhoneIsland";
++    private static final String ISLAND_SCHEMA = "openphone.island_state.v1";
++    private static final long STATE_STALE_MS = 2 * 60 * 1000L;
++    private static final long STALE_CHECK_MS = 30 * 1000L;
++    private static final Set<String> ACTIVE_MODES = Set.of(
++            "listening", "thinking", "realtime", "action_running");
++
++    private final Context mContext;
++    private final ActivityStarter mActivityStarter;
++    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
++    private final WindowManager mWindowManager;
++    private final KeyguardManager mKeyguardManager;
++    private final OpenPhoneAgentManager mAgentManager;
++
++    private LinearLayout mRoot;
++    private TextView mLeftText;
++    private TextView mRightText;
++    private IslandState mState = IslandState.unavailable();
++    private boolean mStarted;
++
++    private final IOpenPhoneIslandStateListener mListener =
++            new IOpenPhoneIslandStateListener.Stub() {
++                @Override
++                public void onIslandStateChanged(String stateJson) {
++                    mMainHandler.post(() -> acceptState(stateJson));
++                }
++            };
++
++    private final Runnable mStaleCheck = new Runnable() {
++        @Override
++        public void run() {
++            render();
++            mMainHandler.postDelayed(this, STALE_CHECK_MS);
++        }
++    };
++
++    private final BroadcastReceiver mLockStateReceiver = new BroadcastReceiver() {
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            mMainHandler.post(OpenPhoneIslandController.this::render);
++        }
++    };
++
++    @Inject
++    public OpenPhoneIslandController(Context context, ActivityStarter activityStarter) {
++        mContext = context;
++        mActivityStarter = activityStarter;
++        mWindowManager = context.getSystemService(WindowManager.class);
++        mKeyguardManager = context.getSystemService(KeyguardManager.class);
++        mAgentManager = context.getSystemService(OpenPhoneAgentManager.class);
++    }
++
++    @Override
++    public void start() {
++        if (mStarted) {
++            return;
++        }
++        mStarted = true;
++
++        IntentFilter lockFilter = new IntentFilter();
++        lockFilter.addAction(Intent.ACTION_SCREEN_ON);
++        lockFilter.addAction(Intent.ACTION_SCREEN_OFF);
++        lockFilter.addAction(Intent.ACTION_USER_PRESENT);
++        try {
++            mContext.registerReceiver(
++                    mLockStateReceiver, lockFilter, Context.RECEIVER_NOT_EXPORTED);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Unable to observe lock state", e);
++        }
++
++        if (mAgentManager == null || mWindowManager == null) {
++            Log.w(TAG, "Island dependencies unavailable; showing bounded degraded state");
++            render();
++        } else {
++            try {
++                mAgentManager.registerIslandStateListener(mListener);
++                acceptState(mAgentManager.getIslandState());
++            } catch (RuntimeException e) {
++                Log.w(TAG, "Unable to subscribe to island state", e);
++                render();
++            }
++        }
++        mMainHandler.postDelayed(mStaleCheck, STALE_CHECK_MS);
++    }
++
++    private void acceptState(String stateJson) {
++        IslandState candidate = IslandState.parse(stateJson);
++        if (candidate == null) {
++            Log.w(TAG, "Ignoring invalid island state");
++            return;
++        }
++        if (candidate.revision < mState.revision) {
++            return;
++        }
++        mState = candidate;
++        render();
++    }
++
++    private void render() {
++        // A hidden state is an explicit Home-space ownership decision, not a
++        // health signal. Preserve it even if the assistant later disappears.
++        if (!mState.visible) {
++            removeView();
++            return;
++        }
++        IslandState state = isStale(mState) ? IslandState.unavailable() : mState;
++        ensureView();
++        if (mRoot == null) {
++            return;
++        }
++
++        boolean locked = mKeyguardManager != null && mKeyguardManager.isDeviceLocked();
++        boolean redact = locked
++                && (!"public".equals(state.sensitivity)
++                        || state.needsAttention
++                        || !state.pendingConfirmationId.isEmpty());
++        RenderedState rendered = renderedState(state, redact);
++        mLeftText.setText(rendered.left);
++        mRightText.setText(rendered.right);
++        mRightText.setTextColor(rendered.accentColor);
++        mRoot.setBackground(chipBackground(state.needsAttention && !redact));
++        mRoot.setContentDescription(rendered.contentDescription);
++    }
++
++    private RenderedState renderedState(IslandState state, boolean redact) {
++        if (redact) {
++            return new RenderedState("OpenPhone", "Unlock", 0xfff4f7f8,
++                    "OpenPhone. Unlock to review private activity.");
++        }
++        if (state.needsAttention || "needs_review".equals(state.mode)) {
++            return new RenderedState("Review", "!", 0xffffcc6c,
++                    "OpenPhone approval needed. Double tap to review.");
++        }
++        switch (state.mode) {
++            case "listening":
++                return new RenderedState("Listening", "■", 0xffff6b6b,
++                        "OpenPhone is listening. Double tap to open.");
++            case "thinking":
++                return new RenderedState("OpenPhone", "Thinking", 0xff9ab8ff,
++                        "OpenPhone is thinking. Double tap to open.");
++            case "realtime":
++                return new RenderedState("OpenPhone", "Live", 0xffffcc6c,
++                        "OpenPhone realtime session is active. Double tap to open.");
++            case "action_running":
++                return new RenderedState("OpenPhone",
++                        state.liveRuns > 1 ? state.liveRuns + " active" : "Working",
++                        0xff72e0c4,
++                        "OpenPhone task running. Double tap to open; long press to stop.");
++            case "answer_ready":
++                return new RenderedState("OpenPhone", "Done", 0xff20e36a,
++                        "OpenPhone finished. Double tap to open.");
++            case "transcript":
++            case "reply":
++                return new RenderedState("OpenPhone", "Ready", 0xff72e0c4,
++                        "OpenPhone response ready. Double tap to open.");
++            case "error":
++                return new RenderedState("OpenPhone", "Issue", 0xffff6b6b,
++                        "OpenPhone needs attention. Double tap to open.");
++            case "watching":
++                return new RenderedState("OpenPhone",
++                        state.liveRuns > 0 ? state.liveRuns + " active" : "Watching",
++                        0xff9ab8ff,
++                        "OpenPhone background activity. Double tap to open.");
++            case "unavailable":
++                return new RenderedState("OpenPhone", "Offline", 0xffaeb8bf,
++                        "OpenPhone assistant unavailable. Double tap to open.");
++            case "idle":
++            default:
++                return new RenderedState(
++                        state.label.isEmpty() ? "OpenPhone" : state.label,
++                        state.liveRuns > 0 ? state.liveRuns + " active" : "◉",
++                        0xff72e0c4,
++                        "OpenPhone ready. Double tap to open.");
++        }
++    }
++
++    private void ensureView() {
++        if (mRoot != null || mWindowManager == null) {
++            return;
++        }
++        LinearLayout root = new LinearLayout(mContext);
++        root.setOrientation(LinearLayout.HORIZONTAL);
++        root.setGravity(Gravity.CENTER_VERTICAL);
++        root.setPadding(dp(12), 0, dp(12), 0);
++        root.setClickable(true);
++        root.setFocusable(true);
++        root.setElevation(dp(8));
++        root.setOnClickListener(view -> launchAiHome());
++        root.setOnLongClickListener(this::handleLongPress);
++
++        TextView left = islandText(Gravity.START);
++        TextView right = islandText(Gravity.END);
++        root.addView(left, new LinearLayout.LayoutParams(
++                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
++        View cameraSpace = new View(mContext);
++        root.addView(cameraSpace, new LinearLayout.LayoutParams(
++                dp(48), LinearLayout.LayoutParams.MATCH_PARENT));
++        root.addView(right, new LinearLayout.LayoutParams(
++                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
++
++        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
++                dp(216),
++                dp(40),
++                WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL,
++                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
++                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
++                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
++                PixelFormat.TRANSLUCENT);
++        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
++        params.y = dp(6);
++        params.layoutInDisplayCutoutMode =
++                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
++        params.setFitInsetsTypes(0);
++        params.setTitle("OpenPhoneIsland");
++
++        try {
++            mWindowManager.addView(root, params);
++            mRoot = root;
++            mLeftText = left;
++            mRightText = right;
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Unable to add bounded island window", e);
++        }
++    }
++
++    private boolean handleLongPress(View view) {
++        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
++        boolean locked = mKeyguardManager != null && mKeyguardManager.isDeviceLocked();
++        IslandState state = mState;
++        if (locked || isStale(state) || state.needsAttention || state.activeTaskId.isEmpty()
++                || !ACTIVE_MODES.contains(state.mode) || mAgentManager == null) {
++            launchAiHome();
++            return true;
++        }
++        try {
++            mAgentManager.stopTask(
++                    state.activeTaskId,
++                    "{\"reason\":\"systemui_island_long_press\"}");
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Unable to stop island task", e);
++            launchAiHome();
++        }
++        return true;
++    }
++
++    private void launchAiHome() {
++        Intent intent = new Intent();
++        intent.setComponent(new ComponentName(
++                "org.openphone.assistant",
++                "org.openphone.assistant.OpenPhoneHomeActivity"));
++        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                | Intent.FLAG_ACTIVITY_SINGLE_TOP
++                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
++        mActivityStarter.postStartActivityDismissingKeyguard(intent, 0);
++    }
++
++    private void removeView() {
++        if (mRoot == null || mWindowManager == null) {
++            return;
++        }
++        try {
++            mWindowManager.removeView(mRoot);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Unable to remove island window", e);
++        }
++        mRoot = null;
++        mLeftText = null;
++        mRightText = null;
++    }
++
++    private TextView islandText(int gravity) {
++        TextView view = new TextView(mContext);
++        view.setTextColor(0xfff4f7f8);
++        view.setTextSize(11);
++        view.setTypeface(Typeface.DEFAULT_BOLD);
++        view.setGravity(Gravity.CENTER_VERTICAL | gravity);
++        view.setSingleLine(true);
++        view.setEllipsize(android.text.TextUtils.TruncateAt.END);
++        return view;
++    }
++
++    private GradientDrawable chipBackground(boolean attention) {
++        GradientDrawable background = new GradientDrawable(
++                GradientDrawable.Orientation.LEFT_RIGHT,
++                attention
++                        ? new int[] {0xff171107, 0xff241b08}
++                        : new int[] {0xff030607, 0xff101817});
++        background.setCornerRadius(dp(22));
++        background.setStroke(dp(1), attention ? 0x99ffcc6c : 0x6672e0c4);
++        return background;
++    }
++
++    private boolean isStale(IslandState state) {
++        if (state.publishedElapsedMs <= 0L) {
++            return true;
++        }
++        long age = SystemClock.elapsedRealtime() - state.publishedElapsedMs;
++        return age < -10_000L || age > STATE_STALE_MS;
++    }
++
++    private int dp(int value) {
++        return Math.round(value * mContext.getResources().getDisplayMetrics().density);
++    }
++
++    @Override
++    public void dump(PrintWriter pw, String[] args) {
++        pw.println("OpenPhone island:");
++        pw.println("  started=" + mStarted);
++        pw.println("  attached=" + (mRoot != null));
++        pw.println("  revision=" + mState.revision);
++        pw.println("  mode=" + mState.mode);
++        pw.println("  visible=" + mState.visible);
++        pw.println("  stale=" + isStale(mState));
++        pw.println("  needsAttention=" + mState.needsAttention);
++        pw.println("  liveRuns=" + mState.liveRuns);
++    }
++
++    private static final class RenderedState {
++        final String left;
++        final String right;
++        final int accentColor;
++        final String contentDescription;
++
++        RenderedState(String left, String right, int accentColor, String contentDescription) {
++            this.left = left;
++            this.right = right;
++            this.accentColor = accentColor;
++            this.contentDescription = contentDescription;
++        }
++    }
++
++    private static final class IslandState {
++        final long revision;
++        final String mode;
++        final String label;
++        final boolean visible;
++        final boolean needsAttention;
++        final String sensitivity;
++        final String activeTaskId;
++        final String pendingConfirmationId;
++        final int liveRuns;
++        final long publishedElapsedMs;
++
++        IslandState(long revision, String mode, String label, boolean visible,
++                boolean needsAttention, String sensitivity, String activeTaskId,
++                String pendingConfirmationId, int liveRuns, long publishedElapsedMs) {
++            this.revision = revision;
++            this.mode = clean(mode);
++            this.label = clean(label);
++            this.visible = visible;
++            this.needsAttention = needsAttention;
++            this.sensitivity = clean(sensitivity);
++            this.activeTaskId = clean(activeTaskId);
++            this.pendingConfirmationId = clean(pendingConfirmationId);
++            this.liveRuns = Math.max(0, Math.min(liveRuns, 100));
++            this.publishedElapsedMs = publishedElapsedMs;
++        }
++
++        static IslandState parse(String raw) {
++            try {
++                JSONObject json = new JSONObject(raw);
++                if (!ISLAND_SCHEMA.equals(json.getString("schema"))) {
++                    return null;
++                }
++                return new IslandState(
++                        json.getLong("revision"),
++                        json.getString("mode"),
++                        json.optString("label", ""),
++                        json.getBoolean("visible"),
++                        json.getBoolean("needs_attention"),
++                        json.getString("sensitivity"),
++                        json.optString("active_task_id", ""),
++                        json.optString("pending_confirmation_id", ""),
++                        json.getInt("live_runs"),
++                        json.getLong("published_elapsed_ms"));
++            } catch (JSONException | RuntimeException e) {
++                return null;
++            }
++        }
++
++        static IslandState unavailable() {
++            return new IslandState(
++                    0L,
++                    "unavailable",
++                    "OpenPhone",
++                    true,
++                    false,
++                    "public",
++                    "",
++                    "",
++                    0,
++                    SystemClock.elapsedRealtime());
++        }
++
++        private static String clean(String value) {
++            return value == null ? "" : value.trim();
++        }
++    }
++}
+diff --git a/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneSystemUIModule.kt b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneSystemUIModule.kt
+index a9ada9e8..a21ea41c 100644
+--- a/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneSystemUIModule.kt
++++ b/packages/SystemUI/src/com/android/systemui/openphone/OpenPhoneSystemUIModule.kt
+@@ -16,6 +16,7 @@
+ 
+ package com.android.systemui.openphone
+ 
++import com.android.systemui.CoreStartable
+ import com.android.systemui.qs.QsEventLogger
+ import com.android.systemui.qs.pipeline.shared.TileSpec
+ import com.android.systemui.qs.shared.model.TileCategory
+@@ -27,11 +28,19 @@ import com.android.systemui.res.R
+ import dagger.Binds
+ import dagger.Module
+ import dagger.Provides
++import dagger.multibindings.ClassKey
+ import dagger.multibindings.IntoMap
+ import dagger.multibindings.StringKey
+ 
+ @Module
+ interface OpenPhoneSystemUIModule {
++    @Binds
++    @IntoMap
++    @ClassKey(OpenPhoneIslandController::class)
++    fun bindOpenPhoneIslandController(
++        controller: OpenPhoneIslandController,
++    ): CoreStartable
++
+     @Binds
+     @IntoMap
+     @StringKey(OpenPhoneAgentTile.TILE_SPEC)
+-- 
+2.54.0

@@ -30,6 +30,12 @@ flow, and device support.
   exact expiring approval bindings, Android notification and AI Home review
   controls, structured denial/timeout continuation, duplicate-tap gating,
   fail-safe interrupted-run repair, and conformance fixtures.
+- A versioned compact-island state contract cached by `system_server`, with an
+  assistant-only publisher, one-way Binder listeners, bounded fields,
+  secret-like-content rejection, and known-valid/invalid conformance fixtures.
+- A SystemUI-owned compact OpenPhone island with a fixed non-modal touch
+  window, keyguard privacy redaction, stale-publisher degradation, AI Home
+  routing, and unlocked active-task long-press stop.
 
 ### Changed
 
@@ -41,6 +47,12 @@ flow, and device support.
   Home instead of maintaining a jobs-only status view.
 - AI Home run detail now supports pause/resume and exact background review;
   approval-needed compact-island entries route the user to AI Home.
+- The assistant no longer owns the product compact-island window. Its
+  `TYPE_SYSTEM_ERROR` overlay is reduced to a non-touchable pointer/glow layer
+  during active device control, with the previous island retained only behind
+  a product compatibility property.
+- OpenPhone Assistant development package bumped to `versionCode=168` /
+  `versionName=0.1.132-dev` for the SystemUI island integration.
 
 ## [0.0.3] - 2026-07-03
 

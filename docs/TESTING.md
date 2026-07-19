@@ -275,8 +275,8 @@ On a build containing both sides of the change, verify:
 - queued/running jobs, watchers, commitments, and foreground sessions appear
   as stable Home activity bubbles without relaunching Home;
 - Home shows no more than three individual activity bubbles plus a `+N`
-  overflow control, and the expanded island's Runs tab reports the same run
-  projection;
+  overflow control, and the compact SystemUI island reports the same live-run
+  count and attention state;
 - tapping a bubble shows its title, source kind, phase, latest progress, and
   applicable Pause/Resume/Stop/Dismiss actions;
 - stopping supported work updates its source store and survives assistant
@@ -289,6 +289,36 @@ On a build containing both sides of the change, verify:
   full-screen OpenPhone overlay;
 - TalkBack exposes the voice orb, Apps action, settings/history action, text
   composer, review actions, run bubbles, overflow control, and run actions.
+
+### SystemUI island checks
+
+Run `node scripts/validate-island-contract.mjs` (also included in
+`./scripts/check.sh`). The idle and approval-needed snapshots must pass, while
+unknown-mode, secret-bearing, and oversized snapshots must fail. This validator
+also checks the framework/SystemUI patch contract: a bounded status-bar
+sub-panel, non-modal touch flags, keyguard redaction, stale-state degradation,
+and no confirmation execution from the island itself.
+
+This path requires a full product build containing framework patches `0020`
+and `0021`; an assistant-only APK does not add the Binder listener or SystemUI
+renderer. On a matching device, verify:
+
+- idle, listening, working, live-run count, completion, error, and
+  approval-needed transitions update without recreating SystemUI;
+- recreating or killing only the assistant activity leaves the latest
+  `system_server` snapshot rendered, while a publisher that stays absent beyond
+  the stale bound becomes a generic `OpenPhone · Offline` chip;
+- opening AI Home hides the island and returning to App Space restores it;
+- tapping the island dismisses keyguard when necessary and opens AI Home;
+- long-press stops only an unlocked active foreground task; approval-needed,
+  stale, background-only, and locked states route to AI Home instead;
+- approval details and personal status are replaced with `OpenPhone · Unlock`
+  on keyguard, and Approve/Deny remain available only on AI Home;
+- touches immediately outside the fixed chip reach the underlying app, and
+  notification shade, Quick Settings, IME, recents, camera, dialer, and
+  emergency UI remain unobstructed;
+- active pointer/glow visualization is non-touchable and disappears when
+  device control finishes.
 
 ### Resumable background review checks
 

@@ -60,4 +60,8 @@ public final class OpenPhoneAgentManager {
     public String getUiTreeSnapshot() {
         throw new UnsupportedOperationException("compile-check stub");
     }
+
+    public String publishIslandState(String stateJson) {
+        throw new UnsupportedOperationException("compile-check stub");
+    }
 }

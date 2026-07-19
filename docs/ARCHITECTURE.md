@@ -78,12 +78,23 @@ The current repo implements the first OpenPhone product layer:
 - A unified agent-run projection reads jobs, watchers, commitments, and
   foreground execution sessions without creating a second execution store.
   AI Home uses it for stable activity bubbles and run detail, while the
-  expanded island reads the same projection for recent/live run status.
+  SystemUI island reads the same projection for compact recent/live status.
   Approval-needed bubbles expose exact review detail and Approve/Deny actions;
   queued work can be paused/resumed, and the compact island routes review back
   to AI Home.
   Inspection and dismissal state is local presentation metadata; source stores
   remain authoritative for execution and stop operations.
+- The compact OpenPhone island is owned by SystemUI. The assistant publishes a
+  bounded, privacy-minimized state projection through the OpenPhone agent
+  Binder service; `system_server` validates it, assigns revision/timestamps,
+  retains the latest snapshot across assistant UI recreation, and sends
+  one-way change events to SystemUI. SystemUI renders only a fixed-size
+  `TYPE_STATUS_BAR_SUB_PANEL` window with non-modal touch behavior, redacts
+  personal/review state on keyguard, routes detail and approval to AI Home, and
+  degrades to a generic bounded status when the publisher becomes stale. The
+  assistant's full-screen `TYPE_SYSTEM_ERROR` layer remains only for
+  non-touchable pointer/glow visualization during active device control; the
+  old assistant island is a property-gated compatibility renderer.
 - Adaptive Surface V1 is a phone-owned, revisioned UI document contract.
   Runtimes can request only a bounded semantic component registry; the
   assistant validates identity, ownership, expiry, depth/node/text/image
@@ -180,9 +191,6 @@ The following components still need real Android framework implementation:
   certbot/nginx helper exists for broker TLS certificate setup.
 - Richer Settings-hosted durable grant editor for app-specific rules.
 - Richer background task visibility in SystemUI.
-- Production SystemUI ownership of the compact OpenPhone island. The current
-  assistant-owned controller remains the compatibility implementation while
-  the shared island state contract and SystemUI renderer are built.
 
 ## Design Rule
 

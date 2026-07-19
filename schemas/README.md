@@ -15,6 +15,7 @@ release tooling, and eval tooling must agree on:
 - trajectory events;
 - background agent jobs and task reports;
 - exact, expiring background-action confirmations;
+- the privacy-minimized SystemUI compact-island state projection;
 - phone-owned adaptive surfaces and runtime-neutral assistant outputs;
 - OTA feed metadata.
 
@@ -36,6 +37,10 @@ schemas they validate against:
   `agent-job.schema.json` and `background-confirmation.schema.json`, including
   exact parameter and approval-binding digests, checkpoint linkage, expiry,
   size, and blocked-secret checks.
+- `scripts/validate-island-contract.mjs` —
+  `openphone-island-state.schema.json`, bounded/privacy-safe state fixtures,
+  Binder listener/publisher markers, SystemUI window/touch/lock policy, and
+  assistant overlay ownership reduction.
 
 Editing enums, required keys, or const markers in those schemas changes
 validator behavior directly. The remaining schemas (`action-result`,

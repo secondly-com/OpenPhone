@@ -1,0 +1,414 @@
+From 6867fb1fa13b96fddae6e1094f53d4f43c432ad1 Mon Sep 17 00:00:00 2001
+From: OpenPhone <openphone@example.invalid>
+Date: Sat, 18 Jul 2026 17:12:55 -0700
+Subject: [PATCH 20/21] OpenPhone: add durable island state contract
+
+---
+ .../openphone/IOpenPhoneAgentService.aidl     |   6 +
+ .../IOpenPhoneIslandStateListener.aidl        |  14 +
+ .../openphone/OpenPhoneAgentManager.java      |  49 ++++
+ .../OpenPhoneAgentManagerService.java         | 251 ++++++++++++++++++
+ 4 files changed, 320 insertions(+)
+ create mode 100644 core/java/android/openphone/IOpenPhoneIslandStateListener.aidl
+
+diff --git a/core/java/android/openphone/IOpenPhoneAgentService.aidl b/core/java/android/openphone/IOpenPhoneAgentService.aidl
+index 2d1d9943..8ab48776 100644
+--- a/core/java/android/openphone/IOpenPhoneAgentService.aidl
++++ b/core/java/android/openphone/IOpenPhoneAgentService.aidl
+@@ -8,6 +8,8 @@
+ 
+ package android.openphone;
+ 
++import android.openphone.IOpenPhoneIslandStateListener;
++
+ /** @hide */
+ interface IOpenPhoneAgentService {
+     String getServiceStatus();
+@@ -23,4 +25,8 @@ interface IOpenPhoneAgentService {
+     String getAuditLog(int maxEvents);
+     String submitUiTreeSnapshot(String snapshotJson);
+     String getUiTreeSnapshot();
++    String getIslandState();
++    String publishIslandState(String stateJson);
++    void registerIslandStateListener(IOpenPhoneIslandStateListener listener);
++    void unregisterIslandStateListener(IOpenPhoneIslandStateListener listener);
+ }
+diff --git a/core/java/android/openphone/IOpenPhoneIslandStateListener.aidl b/core/java/android/openphone/IOpenPhoneIslandStateListener.aidl
+new file mode 100644
+index 00000000..595149b7
+--- /dev/null
++++ b/core/java/android/openphone/IOpenPhoneIslandStateListener.aidl
+@@ -0,0 +1,14 @@
++/*
++ * Copyright 2026 OpenPhone contributors.
++ *
++ * SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
++ *
++ * Commercial use requires a separate written license.
++ */
++
++package android.openphone;
++
++/** @hide */
++oneway interface IOpenPhoneIslandStateListener {
++    void onIslandStateChanged(String stateJson);
++}
+diff --git a/core/java/android/openphone/OpenPhoneAgentManager.java b/core/java/android/openphone/OpenPhoneAgentManager.java
+index 7ef47657..992143ba 100644
+--- a/core/java/android/openphone/OpenPhoneAgentManager.java
++++ b/core/java/android/openphone/OpenPhoneAgentManager.java
+@@ -168,4 +168,53 @@ public final class OpenPhoneAgentManager {
+             throw e.rethrowFromSystemServer();
+         }
+     }
++
++    /**
++     * Return the latest normalized compact-island projection held by
++     * system_server.
++     *
++     * @hide
++     */
++    @NonNull
++    public String getIslandState() {
++        try {
++            return mService.getIslandState();
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++    }
++
++    /**
++     * Publish a bounded compact-island projection. Only the OpenPhone
++     * assistant package may publish; system_server normalizes the payload,
++     * assigns its revision and timestamps, and discards unknown fields.
++     *
++     * @hide
++     */
++    @NonNull
++    public String publishIslandState(@NonNull String stateJson) {
++        try {
++            return mService.publishIslandState(stateJson);
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++    }
++
++    /** @hide */
++    public void registerIslandStateListener(@NonNull IOpenPhoneIslandStateListener listener) {
++        try {
++            mService.registerIslandStateListener(listener);
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++    }
++
++    /** @hide */
++    public void unregisterIslandStateListener(@NonNull IOpenPhoneIslandStateListener listener) {
++        try {
++            mService.unregisterIslandStateListener(listener);
++        } catch (RemoteException e) {
++            throw e.rethrowFromSystemServer();
++        }
++    }
+ }
+diff --git a/services/core/java/com/android/server/openphone/OpenPhoneAgentManagerService.java b/services/core/java/com/android/server/openphone/OpenPhoneAgentManagerService.java
+index b44bd1eb..4be18f8b 100644
+--- a/services/core/java/com/android/server/openphone/OpenPhoneAgentManagerService.java
++++ b/services/core/java/com/android/server/openphone/OpenPhoneAgentManagerService.java
+@@ -18,8 +18,11 @@ import android.net.Uri;
+ import android.graphics.Bitmap;
+ import android.hardware.input.InputManager;
+ import android.openphone.IOpenPhoneAgentService;
++import android.openphone.IOpenPhoneIslandStateListener;
+ import android.os.Binder;
+ import android.os.Environment;
++import android.os.RemoteCallbackList;
++import android.os.RemoteException;
+ import android.os.SystemClock;
+ import android.os.UserHandle;
+ import android.util.AtomicFile;
+@@ -113,6 +116,15 @@ public final class OpenPhoneAgentManagerService extends SystemService {
+         private static final long DEFAULT_SWIPE_MS = 250;
+         private static final int DEFAULT_SCREENSHOT_QUALITY = 70;
+         private static final int DEFAULT_SCREENSHOT_MAX_DIMENSION = 720;
++        private static final int MAX_ISLAND_STATE_BYTES = 16 * 1024;
++        private static final String ISLAND_STATE_SCHEMA = "openphone.island_state.v1";
++        private static final String ASSISTANT_PACKAGE = "org.openphone.assistant";
++        private static final Set<String> ALLOWED_ISLAND_MODES = Set.of(
++                "idle", "listening", "transcript", "thinking", "realtime",
++                "action_running", "answer_ready", "reply", "needs_review",
++                "error", "watching", "unavailable");
++        private static final Set<String> ALLOWED_ISLAND_SENSITIVITY = Set.of(
++                "public", "personal", "sensitive", "restricted");
+ 
+         private final Context mContext;
+         private final Object mAuditLock = new Object();
+@@ -129,6 +141,11 @@ public final class OpenPhoneAgentManagerService extends SystemService {
+         private String mUiTreeSnapshot = "";
+         private long mUiTreeSnapshotElapsedMs = 0L;
+         private int mUiTreeSnapshotProducerUid = 0;
++        private final Object mIslandStateLock = new Object();
++        private final RemoteCallbackList<IOpenPhoneIslandStateListener> mIslandStateListeners =
++                new RemoteCallbackList<>();
++        private String mIslandState = defaultIslandState();
++        private long mIslandStateRevision = 0L;
+         private final String mBootId = UUID.randomUUID().toString();
+         private long mAuditSeq = 0L;
+         private String mAuditChainHead = AUDIT_GENESIS_HASH;
+@@ -333,6 +350,221 @@ public final class OpenPhoneAgentManagerService extends SystemService {
+             }
+         }
+ 
++        @Override
++        public String getIslandState() {
++            enforceManageTasks();
++            synchronized (mIslandStateLock) {
++                return mIslandState;
++            }
++        }
++
++        @Override
++        public String publishIslandState(String stateJson) {
++            enforceManageTasks();
++            enforceAssistantIslandPublisher();
++            final String normalized;
++            synchronized (mIslandStateLock) {
++                final long nextRevision = mIslandStateRevision + 1L;
++                normalized = normalizeIslandState(stateJson, nextRevision);
++                mIslandState = normalized;
++                mIslandStateRevision = nextRevision;
++            }
++            notifyIslandStateListeners(normalized);
++            return normalized;
++        }
++
++        @Override
++        public void registerIslandStateListener(IOpenPhoneIslandStateListener listener) {
++            enforceManageTasks();
++            if (listener == null) {
++                throw new IllegalArgumentException("Island state listener must not be null");
++            }
++            mIslandStateListeners.register(listener);
++            final String current;
++            synchronized (mIslandStateLock) {
++                current = mIslandState;
++            }
++            try {
++                listener.onIslandStateChanged(current);
++            } catch (RemoteException ignored) {
++                mIslandStateListeners.unregister(listener);
++            }
++        }
++
++        @Override
++        public void unregisterIslandStateListener(IOpenPhoneIslandStateListener listener) {
++            enforceManageTasks();
++            if (listener != null) {
++                mIslandStateListeners.unregister(listener);
++            }
++        }
++
++        private void notifyIslandStateListeners(String stateJson) {
++            final int count = mIslandStateListeners.beginBroadcast();
++            try {
++                for (int index = 0; index < count; index++) {
++                    try {
++                        mIslandStateListeners.getBroadcastItem(index)
++                                .onIslandStateChanged(stateJson);
++                    } catch (RemoteException ignored) {
++                        // RemoteCallbackList removes dead binders automatically.
++                    }
++                }
++            } finally {
++                mIslandStateListeners.finishBroadcast();
++            }
++        }
++
++        private String normalizeIslandState(String stateJson, long revision) {
++            if (stateJson == null
++                    || stateJson.getBytes(StandardCharsets.UTF_8).length > MAX_ISLAND_STATE_BYTES) {
++                throw new IllegalArgumentException("Island state exceeds bounded payload");
++            }
++            final JSONObject input;
++            try {
++                input = new JSONObject(stateJson);
++            } catch (JSONException e) {
++                throw new IllegalArgumentException("Invalid island state JSON", e);
++            }
++            try {
++                final String schema = requiredBoundedString(input, "schema", 64);
++                if (!ISLAND_STATE_SCHEMA.equals(schema)) {
++                    throw new IllegalArgumentException("Unsupported island state schema");
++                }
++                final String mode = requiredBoundedString(input, "mode", 32);
++                if (!ALLOWED_ISLAND_MODES.contains(mode)) {
++                    throw new IllegalArgumentException("Unsupported island mode");
++                }
++                final String sensitivity = requiredBoundedString(
++                        input, "sensitivity", 16);
++                if (!ALLOWED_ISLAND_SENSITIVITY.contains(sensitivity)) {
++                    throw new IllegalArgumentException("Unsupported island sensitivity");
++                }
++                final String label = boundedString(input, "label", 48);
++                final String title = boundedString(input, "title", 80);
++                final String detail = boundedString(input, "detail", 160);
++                rejectSecretMaterial(label);
++                rejectSecretMaterial(title);
++                rejectSecretMaterial(detail);
++                final int liveRuns = strictBoundedInt(input, "live_runs", 0, 100);
++                final JSONObject output = new JSONObject()
++                        .put("schema", ISLAND_STATE_SCHEMA)
++                        .put("revision", revision)
++                        .put("mode", mode)
++                        .put("label", label)
++                        .put("title", title)
++                        .put("detail", detail)
++                        .put("visible", strictBoolean(input, "visible"))
++                        .put("needs_attention", strictBoolean(input, "needs_attention"))
++                        .put("sensitivity", sensitivity)
++                        .put("active_task_id",
++                                boundedString(input, "active_task_id", 96))
++                        .put("pending_confirmation_id",
++                                boundedString(input, "pending_confirmation_id", 128))
++                        .put("live_runs", liveRuns)
++                        .put("updated_at", strictNonNegativeLong(input, "updated_at"))
++                        .put("published_at", System.currentTimeMillis())
++                        .put("published_elapsed_ms", SystemClock.elapsedRealtime())
++                        .put("source", "assistant");
++                return output.toString();
++            } catch (JSONException e) {
++                throw new IllegalArgumentException("Invalid island state fields", e);
++            }
++        }
++
++        private static String defaultIslandState() {
++            try {
++                return new JSONObject()
++                        .put("schema", ISLAND_STATE_SCHEMA)
++                        .put("revision", 0)
++                        .put("mode", "unavailable")
++                        .put("label", "OpenPhone")
++                        .put("title", "OpenPhone")
++                        .put("detail", "Assistant unavailable")
++                        .put("visible", true)
++                        .put("needs_attention", false)
++                        .put("sensitivity", "public")
++                        .put("active_task_id", "")
++                        .put("pending_confirmation_id", "")
++                        .put("live_runs", 0)
++                        .put("updated_at", 0)
++                        .put("published_at", System.currentTimeMillis())
++                        .put("published_elapsed_ms", SystemClock.elapsedRealtime())
++                        .put("source", "system_server")
++                        .toString();
++            } catch (JSONException e) {
++                throw new IllegalStateException(e);
++            }
++        }
++
++        private static String requiredBoundedString(JSONObject input, String key, int max)
++                throws JSONException {
++            if (!input.has(key)) {
++                throw new JSONException("Missing " + key);
++            }
++            return boundedString(input, key, max);
++        }
++
++        private static String boundedString(JSONObject input, String key, int max)
++                throws JSONException {
++            if (!input.has(key) || input.isNull(key)) {
++                return "";
++            }
++            final Object value = input.get(key);
++            if (!(value instanceof String)) {
++                throw new JSONException(key + " must be a string");
++            }
++            final String clean = ((String) value).trim();
++            if (clean.length() > max) {
++                throw new JSONException(key + " exceeds " + max + " characters");
++            }
++            return clean;
++        }
++
++        private static boolean strictBoolean(JSONObject input, String key) throws JSONException {
++            final Object value = input.get(key);
++            if (!(value instanceof Boolean)) {
++                throw new JSONException(key + " must be a boolean");
++            }
++            return (Boolean) value;
++        }
++
++        private static int strictBoundedInt(JSONObject input, String key, int min, int max)
++                throws JSONException {
++            final Object value = input.get(key);
++            if (!(value instanceof Number)) {
++                throw new JSONException(key + " must be a number");
++            }
++            final long parsed = ((Number) value).longValue();
++            if (((Number) value).doubleValue() != parsed || parsed < min || parsed > max) {
++                throw new JSONException(key + " is outside bounds");
++            }
++            return (int) parsed;
++        }
++
++        private static long strictNonNegativeLong(JSONObject input, String key)
++                throws JSONException {
++            final Object value = input.get(key);
++            if (!(value instanceof Number)) {
++                throw new JSONException(key + " must be a number");
++            }
++            final long parsed = ((Number) value).longValue();
++            if (((Number) value).doubleValue() != parsed || parsed < 0L) {
++                throw new JSONException(key + " must be non-negative");
++            }
++            return parsed;
++        }
++
++        private static void rejectSecretMaterial(String value) {
++            final String lower = value.toLowerCase(Locale.ROOT);
++            if (lower.contains("api_key") || lower.contains("access_token")
++                    || lower.contains("bearer ") || lower.contains("private key")
++                    || lower.contains("password=")) {
++                throw new IllegalArgumentException(
++                        "Secret-like material is not allowed in island state");
++            }
++        }
++
+         private static String emptyUiTreeSnapshot(String reason) {
+             try {
+                 return new JSONObject()
+@@ -376,6 +608,20 @@ public final class OpenPhoneAgentManagerService extends SystemService {
+                     "OpenPhone task management requires MANAGE_AGENT_TASKS");
+         }
+ 
++        private void enforceAssistantIslandPublisher() {
++            final int callerUid = Binder.getCallingUid();
++            final String[] packages = mContext.getPackageManager().getPackagesForUid(callerUid);
++            if (packages != null) {
++                for (String packageName : packages) {
++                    if (ASSISTANT_PACKAGE.equals(packageName)) {
++                        return;
++                    }
++                }
++            }
++            throw new SecurityException(
++                    "Only the OpenPhone assistant may publish island state");
++        }
++
+         private void enforceReadAuditLog() {
+             mContext.enforceCallingOrSelfPermission(
+                     PERMISSION_READ_AGENT_AUDIT_LOG,
+@@ -393,6 +639,11 @@ public final class OpenPhoneAgentManagerService extends SystemService {
+                 json.put("pending_actions", pendingActions);
+                 json.put("active_tasks", activeTaskIds.length());
+                 json.put("active_task_ids", activeTaskIds);
++                synchronized (mIslandStateLock) {
++                    json.put("island_state_revision", mIslandStateRevision);
++                    json.put("island_state_listeners",
++                            mIslandStateListeners.getRegisteredCallbackCount());
++                }
+                 json.put("audit_storage", "durable");
+                 json.put("audit_path", auditPath);
+             } catch (JSONException e) {
+-- 
+2.54.0

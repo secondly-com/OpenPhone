@@ -31,6 +31,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.context.ContextIndexStore;
+import org.openphone.assistant.island.IslandStateRepository;
 import org.openphone.assistant.runtime.RuntimeConfig;
 import org.openphone.assistant.runtime.RuntimeRegistry;
 import org.openphone.assistant.runs.AgentRunProjection;
@@ -78,6 +79,7 @@ public final class PointerOverlayController {
     private static final long ISLAND_RESIZE_MS = 260L;
     private static final long THINKING_DOTS_INTERVAL_MS = 420L;
     private static final long REPLY_AUTO_COLLAPSE_MS = 7000L;
+    private static final long SYSTEM_UI_STATE_REFRESH_MS = 2000L;
     private static final int REPLY_MAX_LINES = 8;
     private static final int CAMERA_RESERVED_WIDTH = 96;
     private static final int CAMERA_ISLAND_FALLBACK_TOP = 42;
@@ -90,6 +92,7 @@ public final class PointerOverlayController {
     private static final long DONE_VISIBLE_MS = 2200;
     private static final Set<PointerOverlayController> sControllers =
             Collections.newSetFromMap(new WeakHashMap<>());
+    private static PointerOverlayController sIslandOwner;
     private static String sLatestUserMessage = "";
     private static String sLatestAssistantMessage = "";
     private static long sLatestConversationAtMillis;
@@ -105,6 +108,7 @@ public final class PointerOverlayController {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private final Runnable mWatchdogHide = this::hide;
     private final ScreenAnswerProvider mScreenAnswerProvider;
+    private final IslandStateRepository mIslandStateRepository;
     private ConfirmationHandler mConfirmationHandler;
     private WindowManager mWindowManager;
     private FrameLayout mRoot;
@@ -135,6 +139,7 @@ public final class PointerOverlayController {
     private TextView mDenyButton;
     private TextView mActionLabel;
     private String mMode = "idle";
+    private String mActiveTaskId = "";
     private String mStateDetail = "";
     private String mTranscriptText = "";
     private String mReplyText = "";
@@ -144,6 +149,7 @@ public final class PointerOverlayController {
     private boolean mInspectExpanded;
     private boolean mLargeExpanded;
     private boolean mIslandDragExpanded;
+    private boolean mIslandVisible;
     private float mIslandTouchDownY;
     private int mStatusTab = STATUS_TAB_CHAT;
     private int mThinkingDotsFrame;
@@ -163,6 +169,17 @@ public final class PointerOverlayController {
             mHandler.postDelayed(this, THINKING_DOTS_INTERVAL_MS);
         }
     };
+    private final Runnable mSystemUiStateRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (!mIslandVisible || !isIslandOwner()
+                    || !mIslandStateRepository.isSystemUiOwned()) {
+                return;
+            }
+            publishSystemUiState();
+            mHandler.postDelayed(this, SYSTEM_UI_STATE_REFRESH_MS);
+        }
+    };
     private ValueAnimator mIslandResizeAnimator;
 
     PointerOverlayController(Context context) {
@@ -172,6 +189,7 @@ public final class PointerOverlayController {
     PointerOverlayController(Context context, ScreenAnswerProvider screenAnswerProvider) {
         mContext = context.getApplicationContext();
         mScreenAnswerProvider = screenAnswerProvider;
+        mIslandStateRepository = new IslandStateRepository(mContext);
         synchronized (sControllers) {
             sControllers.add(this);
         }
@@ -185,6 +203,7 @@ public final class PointerOverlayController {
     void show(String taskId) {
         mHandler.post(() -> {
             mMode = "action_running";
+            mActiveTaskId = taskId == null ? "" : taskId.trim();
             mInspectExpanded = false;
             ensurePointerLayer();
             showPointerDot();
@@ -196,6 +215,19 @@ public final class PointerOverlayController {
 
     void hide() {
         mHandler.post(() -> {
+            boolean publishHidden;
+            synchronized (sControllers) {
+                publishHidden = sIslandOwner == null || sIslandOwner == this;
+                if (sIslandOwner == this) {
+                    sIslandOwner = null;
+                }
+            }
+            mIslandVisible = false;
+            mHandler.removeCallbacks(mSystemUiStateRefresh);
+            if (publishHidden) {
+                mIslandStateRepository.publish(
+                        mMode, false, mActiveTaskId, mWatchingCount);
+            }
             mHandler.removeCallbacks(mWatchdogHide);
             mHandler.removeCallbacks(mReplyAutoCollapse);
             stopThinkingDots();
@@ -406,6 +438,7 @@ public final class PointerOverlayController {
     private void showMicButtonNow() {
         stopThinkingDots();
         mMode = mWatchingCount > 0 ? "watching" : "idle";
+        mActiveTaskId = "";
         mInspectExpanded = false;
         mLargeExpanded = false;
         mTranscriptText = "";
@@ -554,22 +587,28 @@ public final class PointerOverlayController {
     }
 
     private void ensureIslandWindow() {
+        mIslandVisible = true;
+        ArrayList<PointerOverlayController> controllers;
+        synchronized (sControllers) {
+            sIslandOwner = this;
+            controllers = new ArrayList<>(sControllers);
+        }
+        // Only one island state owner may exist across service and activity
+        // controller instances. The latest claimant wins.
+        for (PointerOverlayController other : controllers) {
+            if (other != this) {
+                other.removeIslandNow();
+            }
+        }
+        if (mIslandStateRepository.isSystemUiOwned()) {
+            startSystemUiStateRefresh();
+            return;
+        }
         if (mWindowManager == null) {
             mWindowManager = mContext.getSystemService(WindowManager.class);
         }
         if (mWindowManager == null) {
             return;
-        }
-        // Only one island may exist across all controller instances
-        // (service + activities); the latest claimant wins.
-        ArrayList<PointerOverlayController> controllers;
-        synchronized (sControllers) {
-            controllers = new ArrayList<>(sControllers);
-        }
-        for (PointerOverlayController other : controllers) {
-            if (other != this) {
-                other.removeIslandNow();
-            }
         }
         if (mIslandRoot != null) {
             return;
@@ -872,6 +911,13 @@ public final class PointerOverlayController {
     }
 
     private void removeIslandNow() {
+        mIslandVisible = false;
+        mHandler.removeCallbacks(mSystemUiStateRefresh);
+        synchronized (sControllers) {
+            if (sIslandOwner == this) {
+                sIslandOwner = null;
+            }
+        }
         mHandler.removeCallbacks(mWatchdogHide);
         if (mIslandResizeAnimator != null) {
             mIslandResizeAnimator.cancel();
@@ -984,6 +1030,10 @@ public final class PointerOverlayController {
     }
 
     private void updateIslandViews() {
+        publishSystemUiState();
+        if (mIslandStateRepository.isSystemUiOwned()) {
+            return;
+        }
         if (mLeftIslandText == null || mRightIslandText == null
                 || mIslandBodyText == null || mIslandChatColumn == null) {
             return;
@@ -1002,6 +1052,26 @@ public final class PointerOverlayController {
             applyExpandedIslandLayout(presentation);
         } else {
             applyCompactIslandLayout();
+        }
+    }
+
+    private void startSystemUiStateRefresh() {
+        mHandler.removeCallbacks(mSystemUiStateRefresh);
+        publishSystemUiState();
+        mHandler.postDelayed(mSystemUiStateRefresh, SYSTEM_UI_STATE_REFRESH_MS);
+    }
+
+    private void publishSystemUiState() {
+        if (!isIslandOwner()) {
+            return;
+        }
+        mIslandStateRepository.publish(
+                mMode, mIslandVisible, mActiveTaskId, mWatchingCount);
+    }
+
+    private boolean isIslandOwner() {
+        synchronized (sControllers) {
+            return sIslandOwner == this;
         }
     }
 
