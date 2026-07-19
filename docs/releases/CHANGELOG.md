@@ -56,14 +56,14 @@ flow, and device support.
 
 ### Fixed
 
-- AI Home now waits for the first user unlock instead of inheriting the
-  assistant application's direct-boot eligibility and reading
-  credential-encrypted state during locked boot.
+- AI Home now renders a minimal black locked-boot shell and waits for
+  `USER_UNLOCKED` before initializing credential-encrypted agent state, even
+  when Android launches the preferred Home activity during early boot.
 - Launcher3 App Space keeps its internal HOME resolution at a lower priority,
   preventing Quickstep startup crashes while AI Home remains the preferred
   Home activity.
-- OpenPhone Assistant development package bumped to `versionCode=169` /
-  `versionName=0.1.133-dev` for the locked-boot fix.
+- OpenPhone Assistant development package bumped to `versionCode=170` /
+  `versionName=0.1.134-dev` for the locked-boot fix.
 
 ## [0.0.3] - 2026-07-03
 

@@ -1,16 +1,20 @@
 package org.openphone.assistant;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.openphone.OpenPhoneAgentManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
@@ -238,6 +242,8 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean mRuntimeReplyTtsReady;
     private boolean mPendingRuntimeVoiceReply;
     private boolean mVoiceCaptureFinishRequested;
+    private boolean mWaitingForUserUnlock;
+    private BroadcastReceiver mUserUnlockReceiver;
     private boolean mRealtimeVoiceErrorShown;
     private boolean mPendingVoiceForceClassic;
     private boolean mVolumeChordPendingClassic;
@@ -280,6 +286,11 @@ public class AssistantActivityBackend extends ComponentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UserManager userManager = getSystemService(UserManager.class);
+        if (userManager != null && !userManager.isUserUnlocked()) {
+            showLockedBootShell();
+            return;
+        }
         mAgentManager = getSystemService(OpenPhoneAgentManager.class);
         mPointerOverlayController = new PointerOverlayController(this);
         // Wire inline Approve / Deny on the island to this activity's
@@ -348,6 +359,9 @@ public class AssistantActivityBackend extends ComponentActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (mWaitingForUserUnlock) {
+            return;
+        }
         sForegroundActivity = this;
         if (isControlSurface()) {
             return;
@@ -361,6 +375,10 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     @Override
     protected void onPause() {
+        if (mWaitingForUserUnlock) {
+            super.onPause();
+            return;
+        }
         if (isHomeSurface() && !isControlSurface()) {
             setServiceIslandVisible(true);
         }
@@ -371,11 +389,19 @@ public class AssistantActivityBackend extends ComponentActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (mWaitingForUserUnlock) {
+            return;
+        }
         applyDebugIntentExtras(intent);
     }
 
     @Override
     protected void onDestroy() {
+        unregisterUserUnlockReceiver();
+        if (mWaitingForUserUnlock) {
+            super.onDestroy();
+            return;
+        }
         shutdownRuntimeReplyTts();
         if (isControlSurface()) {
             super.onDestroy();
@@ -390,6 +416,43 @@ public class AssistantActivityBackend extends ComponentActivity {
         }
         setServiceIslandVisible(true);
         super.onDestroy();
+    }
+
+    private void showLockedBootShell() {
+        mWaitingForUserUnlock = true;
+        View lockedBootView = new View(this);
+        lockedBootView.setBackgroundColor(Color.BLACK);
+        setContentView(lockedBootView);
+        mUserUnlockReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())) {
+                    return;
+                }
+                unregisterUserUnlockReceiver();
+                recreate();
+            }
+        };
+        registerReceiver(mUserUnlockReceiver, new IntentFilter(Intent.ACTION_USER_UNLOCKED),
+                Context.RECEIVER_NOT_EXPORTED);
+        UserManager userManager = getSystemService(UserManager.class);
+        if (userManager != null && userManager.isUserUnlocked()) {
+            unregisterUserUnlockReceiver();
+            recreate();
+            return;
+        }
+        Log.i(TAG, "AI Home is waiting for credential-encrypted storage to unlock");
+    }
+
+    private void unregisterUserUnlockReceiver() {
+        if (mUserUnlockReceiver == null) {
+            return;
+        }
+        try {
+            unregisterReceiver(mUserUnlockReceiver);
+        } catch (IllegalArgumentException ignored) {
+        }
+        mUserUnlockReceiver = null;
     }
 
     private void setServiceIslandVisible(boolean visible) {

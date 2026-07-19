@@ -262,9 +262,10 @@ push does not remove Launcher3 as a competing Home candidate.
 
 On a build containing both sides of the change, verify:
 
-- after a reboot, the locked-boot phase does not start
-  `OpenPhoneHomeActivity` or crash `org.openphone.assistant`; Android may show
-  its direct-boot fallback until the first user unlock;
+- after a reboot, an early `OpenPhoneHomeActivity` launch renders only its
+  black locked-boot shell, does not open credential-encrypted stores, and
+  recreates the full Home surface after `USER_UNLOCKED` without crashing
+  `org.openphone.assistant`;
 - clean boot/setup resolves Home to
   `org.openphone.assistant/.OpenPhoneHomeActivity`;
 - the Home surface is black and remains usable when no model runtime is
