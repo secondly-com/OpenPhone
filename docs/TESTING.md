@@ -273,6 +273,8 @@ On a build containing both sides of the change, verify:
 - a short tap opens text entry;
 - the visible Apps action and a two-finger inward pinch open the explicit
   Launcher3 App Space activity;
+- Launcher3 initializes Quickstep without a
+  `OverviewComponentObserver` null-home crash when App Space opens;
 - pressing Home from App Space or another app returns to AI Home;
 - tapping the compact idle island returns to AI Home;
 - queued/running jobs, watchers, commitments, and foreground sessions appear

@@ -1,56 +1,56 @@
 From 7f5f6f8a0ec4e79f2c5be3f13dbf8a08d0cda801 Mon Sep 17 00:00:00 2001
 From: OpenPhone <dev@openphone.local>
 Date: Sat, 18 Jul 2026 18:05:00 -0700
-Subject: [PATCH] OpenPhone: make AI Home the default home surface
+Subject: [PATCH] OpenPhone: prefer AI Home as the default home surface
 
-Keep Launcher3 available through its explicit activity and ALL_APPS action,
-but stop advertising it as a HOME candidate in OpenPhone products. This leaves
-OpenPhoneHomeActivity as the deterministic default while AI Home can still
-launch Launcher3 explicitly as App Space.
+Keep Launcher3's HOME intent resolvable inside Quickstep, which uses its own
+HOME activity to initialize overview even when another launcher is the
+default. Give that filter a lower priority so OpenPhoneHomeActivity remains
+the deterministic default while AI Home can launch Launcher3 explicitly as
+App Space.
 
 Change-Id: I5d2b98f67bc5fe81472841fd35e536af983a411c
 ---
- AndroidManifest.xml                    | 1 -
- go/AndroidManifest-launcher.xml        | 1 -
- quickstep/AndroidManifest-launcher.xml | 1 -
- 3 files changed, 3 deletions(-)
+ AndroidManifest.xml                    | 2 +-
+ go/AndroidManifest-launcher.xml        | 2 +-
+ quickstep/AndroidManifest-launcher.xml | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/AndroidManifest.xml b/AndroidManifest.xml
-index bce808b5a2d14618888a1737ed31cacbcdfe4264..25069154c2f0d8a19a119aaea37762709b9ca127 100644
 --- a/AndroidManifest.xml
 +++ b/AndroidManifest.xml
-@@ -66,7 +66,6 @@
+@@ -62,7 +62,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
                  <action android:name="android.intent.action.MAIN" />
                  <action android:name="android.intent.action.SHOW_WORK_APPS" />
                  <action android:name="android.intent.action.ALL_APPS" />
--                <category android:name="android.intent.category.HOME" />
-                 <category android:name="android.intent.category.DEFAULT" />
-                 <category android:name="android.intent.category.MONKEY"/>
-                 <category android:name="android.intent.category.LAUNCHER_APP" />
 diff --git a/go/AndroidManifest-launcher.xml b/go/AndroidManifest-launcher.xml
-index 513b7909fe1917c5a715d76673605ff65bbfa812..0f5fe5f71035d5acf51b63a6e045bdf13debe3d3 100644
 --- a/go/AndroidManifest-launcher.xml
 +++ b/go/AndroidManifest-launcher.xml
-@@ -58,7 +58,6 @@
-             <intent-filter>
+@@ -55,7 +55,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
                  <action android:name="android.intent.action.MAIN" />
                  <action android:name="android.intent.action.ALL_APPS" />
--                <category android:name="android.intent.category.HOME" />
-                 <category android:name="android.intent.category.DEFAULT" />
-                 <category android:name="android.intent.category.MONKEY"/>
-                 <category android:name="android.intent.category.LAUNCHER_APP" />
+                 <category android:name="android.intent.category.HOME" />
 diff --git a/quickstep/AndroidManifest-launcher.xml b/quickstep/AndroidManifest-launcher.xml
-index 88de67fe8b4f26f839d497781eae30ffc645c972..d5e8148f86078068fe20b71fa00fe579d9d5c525 100644
 --- a/quickstep/AndroidManifest-launcher.xml
 +++ b/quickstep/AndroidManifest-launcher.xml
-@@ -58,7 +58,6 @@
+@@ -54,7 +54,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
                  <action android:name="android.intent.action.MAIN" />
                  <action android:name="android.intent.action.SHOW_WORK_APPS" />
                  <action android:name="android.intent.action.ALL_APPS" />
--                <category android:name="android.intent.category.HOME" />
-                 <category android:name="android.intent.category.DEFAULT" />
-                 <category android:name="android.intent.category.MONKEY"/>
-                 <category android:name="android.intent.category.LAUNCHER_APP" />
 -- 
 2.50.1
-
