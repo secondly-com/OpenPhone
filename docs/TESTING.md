@@ -262,10 +262,11 @@ push does not remove Launcher3 as a competing Home candidate.
 
 On a build containing both sides of the change, verify:
 
-- after a reboot, an early `OpenPhoneHomeActivity` launch renders only its
-  black locked-boot shell, does not open credential-encrypted stores, and
-  recreates the full Home surface after `USER_UNLOCKED` without crashing
-  `org.openphone.assistant`;
+- after a reboot, the direct-boot-aware assistant service reports locked and
+  defers its island/runtime state while an early `OpenPhoneHomeActivity`
+  launch renders only its black locked-boot shell; neither path opens
+  credential-encrypted stores, and both initialize after `USER_UNLOCKED`
+  without crashing `org.openphone.assistant`;
 - clean boot/setup resolves Home to
   `org.openphone.assistant/.OpenPhoneHomeActivity`;
 - the Home surface is black and remains usable when no model runtime is
