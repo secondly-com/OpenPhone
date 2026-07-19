@@ -69,13 +69,19 @@ The current repo implements the first OpenPhone product layer:
 - Agent Runtime V1 background jobs. The first assistant-side implementation
   persists background agent turns, schedules them with AlarmManager, wakes them
   at boot/package replacement/service startup, delivers notification results,
-  and blocks state-changing background tools until a foreground reviewed
-  approval flow exists. The runtime contract is documented in
+  and pauses state-changing tools behind exact, expiring Android-owned review.
+  Approval or denial produces a bound checkpoint result; resume cannot
+  regenerate or substitute the authorized request, duplicate taps cannot
+  execute twice, and interrupted approval execution fails safe without replay.
+  The runtime contract is documented in
   [AGENT_RUNTIME_V1.md](AGENT_RUNTIME_V1.md).
 - A unified agent-run projection reads jobs, watchers, commitments, and
   foreground execution sessions without creating a second execution store.
   AI Home uses it for stable activity bubbles and run detail, while the
   expanded island reads the same projection for recent/live run status.
+  Approval-needed bubbles expose exact review detail and Approve/Deny actions;
+  queued work can be paused/resumed, and the compact island routes review back
+  to AI Home.
   Inspection and dismissal state is local presentation metadata; source stores
   remain authoritative for execution and stop operations.
 - Adaptive Surface V1 is a phone-owned, revisioned UI document contract.

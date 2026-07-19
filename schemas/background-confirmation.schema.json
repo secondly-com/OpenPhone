@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/background-confirmation.schema.json",
+  "title": "OpenPhone Background Confirmation V1",
+  "type": "object",
+  "required": [
+    "schema",
+    "confirmation_id",
+    "job_id",
+    "runtime",
+    "phone_session_id",
+    "tool",
+    "params",
+    "params_digest",
+    "binding_digest",
+    "idempotency_key",
+    "created_at",
+    "expires_at",
+    "review_state",
+    "summary"
+  ],
+  "properties": {
+    "schema": { "const": "openphone.background_confirmation.v1" },
+    "confirmation_id": {
+      "type": "string",
+      "pattern": "^job-confirm-[A-Za-z0-9._-]+$",
+      "maxLength": 200
+    },
+    "job_id": { "type": "integer", "minimum": 1 },
+    "runtime": { "const": "builtin" },
+    "phone_session_id": {
+      "type": "string",
+      "pattern": "^background-job:[1-9][0-9]*$",
+      "maxLength": 160
+    },
+    "tool": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,79}$"
+    },
+    "params": {
+      "type": "object",
+      "maxProperties": 64
+    },
+    "params_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "binding_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "expires_at": { "type": "integer", "minimum": 0 },
+    "review_state": {
+      "enum": ["pending", "resolving", "resolved"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "decision": {
+      "enum": ["approved", "denied"]
+    },
+    "reviewed_at": { "type": "integer", "minimum": 0 },
+    "resolution": { "type": "string", "maxLength": 120 },
+    "resolved_at": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

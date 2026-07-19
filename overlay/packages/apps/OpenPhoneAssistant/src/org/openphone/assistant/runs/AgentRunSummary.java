@@ -22,6 +22,7 @@ public final class AgentRunSummary {
     public final boolean needsAttention;
     public final boolean unreadResult;
     public final String pendingConfirmationId;
+    public final String reviewSummary;
     public final String surfaceId;
     public final boolean canPause;
     public final boolean canResume;
@@ -31,7 +32,8 @@ public final class AgentRunSummary {
             String status, String phase, String progressText, String origin, String runtime,
             long createdAtMillis, long updatedAtMillis, long nextRunAtMillis,
             boolean needsAttention, boolean unreadResult, String pendingConfirmationId,
-            String surfaceId, boolean canPause, boolean canResume, boolean canStop) {
+            String reviewSummary, String surfaceId, boolean canPause, boolean canResume,
+            boolean canStop) {
         this.id = clean(id);
         this.kind = clean(kind);
         this.sourceId = clean(sourceId);
@@ -47,6 +49,7 @@ public final class AgentRunSummary {
         this.needsAttention = needsAttention;
         this.unreadResult = unreadResult;
         this.pendingConfirmationId = clean(pendingConfirmationId);
+        this.reviewSummary = clean(reviewSummary);
         this.surfaceId = clean(surfaceId);
         this.canPause = canPause;
         this.canResume = canResume;

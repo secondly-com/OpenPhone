@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openphone.assistant.state.PendingConfirmation
+import org.openphone.assistant.jobs.BackgroundJobReviewManager
 import org.openphone.assistant.runs.AgentRunProjection
 import org.openphone.assistant.runs.AgentRunSummary
 import org.openphone.assistant.surface.AdaptiveSurface
@@ -317,6 +318,67 @@ object OpenPhoneHomeComposeHost {
                                 state.update { it.copy(runs = refreshed) }
                             }
                         },
+                        onPauseRun = { runId ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runProjection.pause(runId)
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                state.update { it.copy(runs = refreshed) }
+                            }
+                        },
+                        onResumeRun = { runId ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runProjection.resume(runId)
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                state.update { it.copy(runs = refreshed) }
+                            }
+                        },
+                        onResolveRunReview = { run, approved ->
+                            scope.launch {
+                                state.update {
+                                    it.copy(
+                                        status = if (approved) {
+                                            "Executing approved action…"
+                                        } else {
+                                            "Applying denial…"
+                                        },
+                                        mode = HomeAgentMode.Running,
+                                    )
+                                }
+                                val result = withContext(Dispatchers.IO) {
+                                    BackgroundJobReviewManager.resolve(
+                                        activity,
+                                        run.pendingConfirmationId,
+                                        approved,
+                                    )
+                                }
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    runProjection.snapshot(24)
+                                }
+                                val resolved = JSONObject(result)
+                                state.update {
+                                    it.copy(
+                                        runs = refreshed,
+                                        status = if (
+                                            resolved.optString("status") ==
+                                            "background.review_resolved"
+                                        ) {
+                                            "Background job resumed"
+                                        } else {
+                                            "Review was already resolved"
+                                        },
+                                        mode = HomeAgentMode.Idle,
+                                    )
+                                }
+                            }
+                        },
                         onReadRun = { runId ->
                             scope.launch {
                                 withContext(Dispatchers.IO) {
@@ -439,6 +501,9 @@ private fun OpenPhoneHomeScreen(
     onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
     onDismissSurface: (AdaptiveSurface) -> Unit,
     onStopRun: (String) -> Unit,
+    onPauseRun: (String) -> Unit,
+    onResumeRun: (String) -> Unit,
+    onResolveRunReview: (AgentRunSummary, Boolean) -> Unit,
     onReadRun: (String) -> Unit,
     onDismissRun: (String) -> Unit,
 ) {
@@ -503,6 +568,9 @@ private fun OpenPhoneHomeScreen(
                 showAllRuns = false
             },
             onStopRun = onStopRun,
+            onPauseRun = onPauseRun,
+            onResumeRun = onResumeRun,
+            onResolveRunReview = onResolveRunReview,
             onDismissRun = onDismissRun,
             onApprove = onApprove,
             onDeny = onDeny,
@@ -628,6 +696,9 @@ private fun HomeResult(
     onSelectRun: (AgentRunSummary) -> Unit,
     onCloseRuns: () -> Unit,
     onStopRun: (String) -> Unit,
+    onPauseRun: (String) -> Unit,
+    onResumeRun: (String) -> Unit,
+    onResolveRunReview: (AgentRunSummary, Boolean) -> Unit,
     onDismissRun: (String) -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
@@ -642,6 +713,9 @@ private fun HomeResult(
             onSelectRun = onSelectRun,
             onClose = onCloseRuns,
             onStopRun = onStopRun,
+            onPauseRun = onPauseRun,
+            onResumeRun = onResumeRun,
+            onResolveRunReview = onResolveRunReview,
             onDismissRun = onDismissRun,
             modifier = modifier,
         )
@@ -807,6 +881,9 @@ private fun HomeRunPanel(
     onSelectRun: (AgentRunSummary) -> Unit,
     onClose: () -> Unit,
     onStopRun: (String) -> Unit,
+    onPauseRun: (String) -> Unit,
+    onResumeRun: (String) -> Unit,
+    onResolveRunReview: (AgentRunSummary, Boolean) -> Unit,
     onDismissRun: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -872,11 +949,45 @@ private fun HomeRunPanel(
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }
+                if (!showAll && run.reviewSummary.isNotBlank() &&
+                    run.reviewSummary != run.progressText
+                ) {
+                    Text(
+                        run.reviewSummary,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 6,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
                 if (!showAll) {
+                    if (run.pendingConfirmationId.isNotBlank()) {
+                        Row(
+                            modifier = Modifier.padding(top = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            ReviewAction("Deny", false) {
+                                onResolveRunReview(run, false)
+                            }
+                            ReviewAction("Approve", true) {
+                                onResolveRunReview(run, true)
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.padding(top = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        if (run.canPause) {
+                            RunAction("Pause", danger = false) {
+                                onPauseRun(run.id)
+                            }
+                        }
+                        if (run.canResume) {
+                            RunAction("Resume", danger = false) {
+                                onResumeRun(run.id)
+                            }
+                        }
                         if (run.canStop) {
                             RunAction("Stop", danger = true) { onStopRun(run.id) }
                         }

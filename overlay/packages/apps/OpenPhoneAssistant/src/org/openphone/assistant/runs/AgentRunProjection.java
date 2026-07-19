@@ -9,6 +9,8 @@ import org.openphone.assistant.commitments.CommitmentRecord;
 import org.openphone.assistant.commitments.CommitmentStore;
 import org.openphone.assistant.jobs.AgentJobRecord;
 import org.openphone.assistant.jobs.AgentJobStore;
+import org.openphone.assistant.jobs.OpenPhoneAgentJobScheduler;
+import org.openphone.assistant.OpenPhoneNotificationController;
 import org.openphone.assistant.session.PhoneExecutionSession;
 import org.openphone.assistant.session.PhoneSessionStore;
 import org.openphone.assistant.watchers.WatcherRecord;
@@ -36,9 +38,11 @@ public final class AgentRunProjection {
     private final CommitmentStore mCommitments;
     private final PhoneSessionStore mSessions;
     private final SharedPreferences mPrefs;
+    private final Context mContext;
 
     public AgentRunProjection(Context context) {
         Context app = context.getApplicationContext();
+        mContext = app;
         mJobs = new AgentJobStore(app);
         mWatchers = new WatcherStore(app);
         mCommitments = new CommitmentStore(app);
@@ -86,7 +90,13 @@ public final class AgentRunProjection {
             return false;
         }
         if (AgentRunSummary.KIND_JOB.equals(parsed.kind)) {
-            return mJobs.stop(parsed.longId);
+            AgentJobRecord job = mJobs.find(parsed.longId);
+            boolean stopped = mJobs.stop(parsed.longId);
+            if (stopped && job != null && !job.pendingConfirmationId.isEmpty()) {
+                OpenPhoneNotificationController.cancelAgentJobReview(
+                        mContext, job.id);
+            }
+            return stopped;
         }
         if (AgentRunSummary.KIND_WATCHER.equals(parsed.kind)) {
             return mWatchers.stop(parsed.longId);
@@ -97,6 +107,28 @@ public final class AgentRunProjection {
         return false;
     }
 
+    public boolean pause(String stableId) {
+        ParsedId parsed = ParsedId.parse(stableId);
+        boolean paused = parsed != null
+                && AgentRunSummary.KIND_JOB.equals(parsed.kind)
+                && mJobs.pause(parsed.longId);
+        if (paused) {
+            OpenPhoneAgentJobScheduler.scheduleNext(mContext);
+        }
+        return paused;
+    }
+
+    public boolean resume(String stableId) {
+        ParsedId parsed = ParsedId.parse(stableId);
+        boolean resumed = parsed != null
+                && AgentRunSummary.KIND_JOB.equals(parsed.kind)
+                && mJobs.resume(parsed.longId);
+        if (resumed) {
+            OpenPhoneAgentJobScheduler.checkNow(mContext);
+        }
+        return resumed;
+    }
+
     private void appendJobs(List<AgentRunSummary> out, long now) {
         for (AgentJobRecord job : mJobs.list("", 50)) {
             String stableId = stableId(AgentRunSummary.KIND_JOB, job.id);
@@ -104,20 +136,28 @@ public final class AgentRunProjection {
                 continue;
             }
             boolean terminal = isTerminal(job.status);
-            boolean unread = terminal && !isRead(stableId);
+            boolean unread = terminal && job.unreadResult && !isRead(stableId);
             if (terminal && !unread
                     && now - Math.max(job.updatedAtMillis, job.lastRunAtMillis)
                             > TERMINAL_VISIBILITY_MILLIS) {
                 continue;
             }
             JSONObject payload = objectOrEmpty(job.payloadJson);
-            String phase = payload.optString("phase", job.status);
-            String progress = payload.optString("progress_text", "");
+            String phase = firstNonEmpty(job.phase,
+                    payload.optString("phase", ""), job.status);
+            String progress = firstNonEmpty(job.progressText,
+                    payload.optString("progress_text", ""));
             if (progress.isEmpty()) {
                 progress = terminal ? summarizeResult(job.lastResult) : job.prompt;
             }
-            String pending = payload.optString("pending_confirmation_id", "");
-            String surface = payload.optString("surface_id", "");
+            String pending = firstNonEmpty(job.pendingConfirmationId,
+                    payload.optString("pending_confirmation_id", ""));
+            JSONObject pendingRequest = objectOrEmpty(job.pendingToolRequestJson);
+            String reviewSummary = pending.isEmpty() ? "" : firstNonEmpty(
+                    pendingRequest.optString("summary", ""),
+                    pendingRequest.optString("tool", ""));
+            String surface = firstNonEmpty(job.lastSurfaceId,
+                    payload.optString("surface_id", ""));
             boolean attention = "awaiting_review".equals(job.status)
                     || job.failureCount > 0 || !pending.isEmpty()
                     || "failed".equals(job.status);
@@ -137,8 +177,9 @@ public final class AgentRunProjection {
                     attention,
                     unread,
                     pending,
+                    reviewSummary,
                     surface,
-                    "running".equals(job.status),
+                    "queued".equals(job.status) || "active".equals(job.status),
                     "paused".equals(job.status),
                     !terminal));
         }
@@ -166,6 +207,7 @@ public final class AgentRunProjection {
                     watcher.nextRunAtMillis,
                     attention,
                     false,
+                    "",
                     "",
                     "",
                     false,
@@ -199,6 +241,7 @@ public final class AgentRunProjection {
                     commitment.dueAtMillis,
                     due,
                     due && !isRead(stableId),
+                    "",
                     "",
                     "",
                     false,
@@ -236,6 +279,7 @@ public final class AgentRunProjection {
                     0L,
                     attention,
                     unread,
+                    "",
                     "",
                     "",
                     false,
@@ -289,6 +333,15 @@ public final class AgentRunProjection {
 
     private static String clean(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private static final Comparator<AgentRunSummary> RUN_ORDER = (left, right) -> {

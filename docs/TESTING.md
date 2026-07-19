@@ -278,7 +278,7 @@ On a build containing both sides of the change, verify:
   overflow control, and the expanded island's Runs tab reports the same run
   projection;
 - tapping a bubble shows its title, source kind, phase, latest progress, and
-  applicable Stop/Dismiss actions;
+  applicable Pause/Resume/Stop/Dismiss actions;
 - stopping supported work updates its source store and survives assistant
   process restart; dismissing a terminal result hides only its presentation
   and never stops live work;
@@ -289,6 +289,32 @@ On a build containing both sides of the change, verify:
   full-screen OpenPhone overlay;
 - TalkBack exposes the voice orb, Apps action, settings/history action, text
   composer, review actions, run bubbles, overflow control, and run actions.
+
+### Resumable background review checks
+
+Run `node scripts/validate-background-review-contract.mjs` (also included in
+`./scripts/check.sh`). The known-valid `awaiting_review` job must pass, while a
+modified-parameter request and a secret-bearing request must fail.
+
+On a device, create a background job that proposes a registered state-changing
+tool, then verify:
+
+- the tool does not execute before review and the job becomes
+  `awaiting_review`;
+- its Home bubble and notification show the exact tool and arguments;
+- Deny returns `background.action_denied`, queues the same job, and lets it
+  complete gracefully;
+- Approve executes only the persisted request and resumes from its stored tool
+  result;
+- tapping Approve or Deny twice executes at most once;
+- force-stopping and restarting the assistant before review preserves the
+  request and expiry;
+- letting the request expire queues a structured timeout continuation and
+  removes the review notification;
+- killing the assistant after an approval claim never replays an outcome whose
+  completion is unknown;
+- audit/context events include binding digests and lifecycle state but no raw
+  tool parameters.
 
 ### Adaptive Surface V1 checks
 

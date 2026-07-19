@@ -49,6 +49,7 @@ required=(
   schemas/action-result.schema.json
   schemas/agent-eval-report.schema.json
   schemas/agent-job.schema.json
+  schemas/background-confirmation.schema.json
   schemas/agent-task.schema.json
   schemas/app-policy.schema.json
   schemas/audit-evidence.schema.json
@@ -93,6 +94,7 @@ required=(
   scripts/run-assistant-task.sh
   scripts/pull-latest-trajectory.sh
   scripts/check-runtime-protocol.sh
+  scripts/validate-background-review-contract.mjs
   scripts/validate-surface-contract.mjs
   scripts/smoke-test-openclaw-device-failures.sh
   scripts/smoke-test-openclaw-runtime.sh
@@ -140,6 +142,9 @@ required=(
   tests/fixtures/surfaces/invalid-external-image.json
   tests/fixtures/surfaces/invalid-unknown-action.json
   tests/fixtures/surfaces/invalid-unknown-component.json
+  tests/fixtures/jobs/background-awaiting-review.json
+  tests/fixtures/jobs/invalid-background-review-tampered.json
+  tests/fixtures/jobs/invalid-background-review-secret.json
   integrations/mcp-server/README.md
   integrations/mcp-server/package.json
   integrations/mcp-server/src/index.mjs
@@ -1125,6 +1130,7 @@ fi
 
 "$root/scripts/check-runtime-protocol.sh"
 node "$root/scripts/validate-surface-contract.mjs"
+node "$root/scripts/validate-background-review-contract.mjs"
 "$root/scripts/check-assistant-java.sh"
 
 printf 'OpenPhone repo checks passed.\n'

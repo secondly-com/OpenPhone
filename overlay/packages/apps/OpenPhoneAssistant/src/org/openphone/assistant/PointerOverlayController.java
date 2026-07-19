@@ -1667,6 +1667,9 @@ public final class PointerOverlayController {
         if (!phase.isEmpty()) {
             line.append(" · ").append(phase);
         }
+        if (!run.pendingConfirmationId.isEmpty()) {
+            line.append(" · approval needed · Open AI Home");
+        }
         if (!timing.isEmpty()) {
             line.append(" ").append(timing);
         }

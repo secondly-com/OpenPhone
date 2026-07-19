@@ -24,6 +24,7 @@ import org.openphone.assistant.runtime.RuntimeManager;
 import org.openphone.assistant.runtime.RuntimeRegistry;
 import org.openphone.assistant.model.ModelEndpointConfig;
 import org.openphone.assistant.model.OpenAiResponsesAgentAdapter;
+import org.openphone.assistant.jobs.BackgroundJobReviewManager;
 import org.openphone.assistant.jobs.OpenPhoneAgentJobScheduler;
 import org.openphone.assistant.policy.AuditLog;
 import org.openphone.assistant.policy.PolicyDecision;
@@ -231,6 +232,17 @@ public final class OpenPhoneAssistantService extends Service {
                 || OpenPhoneNotificationController.ACTION_EXTERNAL_DENY.equals(action)) {
             resolveRuntimeConfirmation(intent,
                     OpenPhoneNotificationController.ACTION_EXTERNAL_APPROVE.equals(action));
+            return START_STICKY;
+        }
+        if (OpenPhoneNotificationController.ACTION_BACKGROUND_APPROVE.equals(action)
+                || OpenPhoneNotificationController.ACTION_BACKGROUND_DENY.equals(action)) {
+            final String confirmationId = intent == null ? "" : intent.getStringExtra(
+                    OpenPhoneNotificationController.EXTRA_BACKGROUND_CONFIRMATION_ID);
+            final boolean approved =
+                    OpenPhoneNotificationController.ACTION_BACKGROUND_APPROVE.equals(action);
+            new Thread(() -> BackgroundJobReviewManager.resolve(
+                    OpenPhoneAssistantService.this, confirmationId, approved),
+                    "OpenPhoneBackgroundReview").start();
             return START_STICKY;
         }
         if (!mIslandHiddenByActivity) {

@@ -14,6 +14,7 @@ release tooling, and eval tooling must agree on:
 - audit events and audit evidence exports;
 - trajectory events;
 - background agent jobs and task reports;
+- exact, expiring background-action confirmations;
 - phone-owned adaptive surfaces and runtime-neutral assistant outputs;
 - OTA feed metadata.
 
@@ -31,9 +32,13 @@ schemas they validate against:
   `openphone-surface.schema.json` and
   `openphone-assistant-output.schema.json`, including known-valid and
   known-invalid conformance fixtures.
+- `scripts/validate-background-review-contract.mjs` —
+  `agent-job.schema.json` and `background-confirmation.schema.json`, including
+  exact parameter and approval-binding digests, checkpoint linkage, expiry,
+  size, and blocked-secret checks.
 
 Editing enums, required keys, or const markers in those schemas changes
 validator behavior directly. The remaining schemas (`action-result`,
-`agent-job`, `agent-task`, `app-policy`, `audit-log`, `model-tool`) document
+`agent-task`, `app-policy`, `audit-log`, `model-tool`) document
 contracts but are not yet wired into any validator; `scripts/check.sh` only
 verifies they exist.

@@ -26,6 +26,10 @@ flow, and device support.
 - Runtime-neutral assistant output envelopes and additive surface
   present/replace/dismiss/action-result events, including OpenClaw node-event
   mapping and recorded conformance fixtures.
+- Resumable background-action review with durable progress/checkpoint fields,
+  exact expiring approval bindings, Android notification and AI Home review
+  controls, structured denial/timeout continuation, duplicate-tap gating,
+  fail-safe interrupted-run repair, and conformance fixtures.
 
 ### Changed
 
@@ -35,6 +39,8 @@ flow, and device support.
   existing pull-down gesture continues to expose detailed status.
 - The expanded island Runs tab now reads the same durable-run projection as AI
   Home instead of maintaining a jobs-only status view.
+- AI Home run detail now supports pause/resume and exact background review;
+  approval-needed compact-island entries route the user to AI Home.
 
 ## [0.0.3] - 2026-07-03
 
