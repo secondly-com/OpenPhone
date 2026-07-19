@@ -34,7 +34,7 @@ public final class IslandStateRepository {
     }
 
     public boolean isSystemUiOwned() {
-        return SystemProperties.getBoolean(SYSTEM_UI_PROPERTY, true);
+        return SystemProperties.getBoolean(SYSTEM_UI_PROPERTY, false);
     }
 
     public void publish(String requestedMode, boolean visible, String activeTaskId,
