@@ -55,9 +55,13 @@ The current repo implements the first OpenPhone product layer:
   a calm voice-first AI Home surface, explicit conventional-launcher App Space
   handoff, text and voice task entry, stateful mic/send/stop controls, advanced
   model and developer controls, task grants, screen context, trace/audit
-  export, OTA preview controls, and audit controls. AI Home is a normal
-  application window rather than an opaque overlay, so Android retains
-  ownership of keyguard, notifications, IME, recents, and system dialogs.
+  export, OTA preview controls, and audit controls. AI Home is an immersive
+  normal application window rather than an opaque overlay: it hides Android
+  status/navigation chrome while foreground and allows transient system bars
+  by edge swipe, while Android retains ownership of secure keyguard,
+  notifications, IME, recents, emergency UI, and system dialogs. OpenPhone
+  disables only the non-secure swipe keyguard by default; configuring a
+  pattern, PIN, or password restores Android's credential gate.
 - Initial capability and policy config files. `scripts/check.sh` validates that
   the assistant fallback `PolicyEngine` covers every capability in
   `openphone_capabilities.json` with the same risk class.

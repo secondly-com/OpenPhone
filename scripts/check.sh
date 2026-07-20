@@ -96,6 +96,7 @@ required=(
   scripts/pull-latest-trajectory.sh
   scripts/check-runtime-protocol.sh
   scripts/validate-background-review-contract.mjs
+  scripts/validate-home-shell-contract.mjs
   scripts/validate-island-contract.mjs
   scripts/validate-surface-contract.mjs
   scripts/smoke-test-openclaw-device-failures.sh
@@ -1142,6 +1143,7 @@ fi
 "$root/scripts/check-runtime-protocol.sh"
 node "$root/scripts/validate-surface-contract.mjs"
 node "$root/scripts/validate-background-review-contract.mjs"
+node "$root/scripts/validate-home-shell-contract.mjs"
 node "$root/scripts/validate-island-contract.mjs"
 "$root/scripts/check-assistant-java.sh"
 

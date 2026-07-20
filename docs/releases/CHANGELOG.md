@@ -39,6 +39,10 @@ flow, and device support.
 
 ### Changed
 
+- AI Home now owns the full foreground display: Android status/navigation
+  chrome stays hidden until a transient edge swipe, and the non-secure swipe
+  keyguard is disabled by default while configured credentials continue to
+  invoke Android's secure keyguard.
 - Launcher3 remains installed for conventional app access but no longer
   advertises itself as a competing Home activity in OpenPhone products.
 - Tapping the compact idle OpenPhone island returns directly to AI Home; the
@@ -68,6 +72,8 @@ flow, and device support.
   Home activity.
 - OpenPhone Assistant development package bumped to `versionCode=171` /
   `versionName=0.1.135-dev` for the locked-boot fix.
+- OpenPhone Assistant development package bumped to `versionCode=172` /
+  `versionName=0.1.136-dev` for the immersive AI Home shell.
 
 ## [0.0.3] - 2026-07-03
 

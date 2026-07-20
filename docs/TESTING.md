@@ -269,8 +269,12 @@ On a build containing both sides of the change, verify:
   without crashing `org.openphone.assistant`;
 - clean boot/setup resolves Home to
   `org.openphone.assistant/.OpenPhoneHomeActivity`;
-- the Home surface is black and remains usable when no model runtime is
-  configured;
+- an unsecured owner boots/wakes directly into AI Home without the
+  non-secure swipe keyguard, while a configured pattern, PIN, or password
+  continues to show Android's secure keyguard;
+- the Home surface owns the full display without status or navigation chrome,
+  remains usable when no model runtime is configured, and exposes transient
+  system bars only after an edge swipe;
 - holding the orb starts voice capture and release submits it;
 - a short tap opens text entry;
 - the visible Apps action and a two-finger inward pinch open the explicit
@@ -291,8 +295,8 @@ On a build containing both sides of the change, verify:
   and never stops live work;
 - terminal results remain visible until inspected and then age out after 24
   hours; attention-required and live work sort ahead of recent terminal work;
-- the notification shade, Quick Settings, keyguard, IME, recents, system
-  dialogs, camera, dialer, and emergency surfaces are not covered by a
+- the notification shade, Quick Settings, secure keyguard, IME, recents,
+  system dialogs, camera, dialer, and emergency surfaces are not covered by a
   full-screen OpenPhone overlay;
 - TalkBack exposes the voice orb, Apps action, settings/history action, text
   composer, review actions, run bubbles, overflow control, and run actions.
