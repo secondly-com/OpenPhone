@@ -1,10 +1,8 @@
 package org.openphone.assistant;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
-import android.graphics.Matrix;
+import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -19,6 +17,8 @@ import android.os.HandlerThread;
 import android.provider.Settings;
 import android.util.Log;
 import android.util.Size;
+import android.view.Surface;
+import android.view.TextureView;
 
 import org.json.JSONObject;
 
@@ -51,7 +51,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     interface Listener {
         void onCaptureStarting();
         void onCaptureStarted();
-        void onFrameCaptured(int count, Bitmap preview);
+        void onFrameCaptured(int count);
         void onDecoding(int frameCount);
         void onDecoded(String text);
         void onError(String message);
@@ -81,6 +81,10 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private CameraDevice mCamera;
     private CameraCaptureSession mSession;
     private ImageReader mImageReader;
+    private TextureView mPreviewView;
+    private Surface mPreviewSurface;
+    private Size mCaptureSize;
+    private boolean mSessionCreating;
     private long mLastFrameTimestampNs;
     private int mSensorOrientation;
 
@@ -96,6 +100,45 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     boolean isBusy() {
         return mBusy;
+    }
+
+    void attachPreview(TextureView previewView) {
+        mPreviewView = previewView;
+        previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+            @Override
+            public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+                preparePreviewSurface(surface);
+            }
+
+            @Override
+            public void onSurfaceTextureSizeChanged(
+                    SurfaceTexture surface, int width, int height) {
+            }
+
+            @Override
+            public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+                releasePreviewSurface();
+                return true;
+            }
+
+            @Override
+            public void onSurfaceTextureUpdated(SurfaceTexture surface) {
+            }
+        });
+        if (previewView.isAvailable()) {
+            preparePreviewSurface(previewView.getSurfaceTexture());
+        }
+    }
+
+    void detachPreview(TextureView previewView) {
+        if (mPreviewView != previewView) {
+            return;
+        }
+        previewView.setSurfaceTextureListener(null);
+        mPreviewView = null;
+        if (!mRecording) {
+            releasePreviewSurface();
+        }
     }
 
     void start() {
@@ -180,9 +223,14 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             Integer orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
             mSensorOrientation = orientation == null ? 0 : orientation;
             Size size = captureSize(characteristics);
+            mCaptureSize = size;
             mImageReader = ImageReader.newInstance(
                     size.getWidth(), size.getHeight(), ImageFormat.JPEG, 4);
             mImageReader.setOnImageAvailableListener(this::onImageAvailable, mCameraHandler);
+            TextureView preview = mPreviewView;
+            if (preview != null && preview.isAvailable()) {
+                preparePreviewSurface(preview.getSurfaceTexture());
+            }
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(CameraDevice camera) {
@@ -191,7 +239,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                         return;
                     }
                     mCamera = camera;
-                    createCaptureSession();
+                    maybeCreateCaptureSession();
                 }
 
                 @Override
@@ -214,17 +262,39 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         }
     }
 
-    private void createCaptureSession() {
-        if (mCamera == null || mImageReader == null) {
-            fail("The front camera did not become ready.");
+    private void preparePreviewSurface(SurfaceTexture texture) {
+        Handler handler = mCameraHandler;
+        if (handler == null || texture == null) {
             return;
         }
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!mRecording || mCaptureSize == null) {
+                    return;
+                }
+                releasePreviewSurface();
+                texture.setDefaultBufferSize(
+                        mCaptureSize.getWidth(), mCaptureSize.getHeight());
+                mPreviewSurface = new Surface(texture);
+                maybeCreateCaptureSession();
+            }
+        });
+    }
+
+    private void maybeCreateCaptureSession() {
+        if (mSessionCreating || mSession != null || mCamera == null
+                || mImageReader == null || mPreviewSurface == null) {
+            return;
+        }
+        mSessionCreating = true;
         try {
             mCamera.createCaptureSession(
-                    Collections.singletonList(mImageReader.getSurface()),
+                    java.util.Arrays.asList(mPreviewSurface, mImageReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
+                            mSessionCreating = false;
                             if (!mRecording || mCamera == null || mImageReader == null) {
                                 session.close();
                                 return;
@@ -233,6 +303,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                             try {
                                 CaptureRequest.Builder request = mCamera.createCaptureRequest(
                                         CameraDevice.TEMPLATE_RECORD);
+                                request.addTarget(mPreviewSurface);
                                 request.addTarget(mImageReader.getSurface());
                                 request.set(CaptureRequest.CONTROL_MODE,
                                         CaptureRequest.CONTROL_MODE_AUTO);
@@ -255,11 +326,13 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
                         @Override
                         public void onConfigureFailed(CameraCaptureSession session) {
+                            mSessionCreating = false;
                             fail("The front camera could not be configured.");
                         }
                     },
                     mCameraHandler);
         } catch (CameraAccessException | IllegalStateException e) {
+            mSessionCreating = false;
             Log.e(TAG, "Unable to create camera session", e);
             fail("The front camera could not be configured.");
         }
@@ -283,15 +356,10 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             buffer.get(jpeg);
             mFrames.add(jpeg);
             int count = mFrames.size();
-            Bitmap preview = null;
-            if (count == 1 || count % 4 == 0) {
-                preview = previewBitmap(jpeg, mSensorOrientation);
-            }
-            final Bitmap deliveredPreview = preview;
             postMain(new Runnable() {
                 @Override
                 public void run() {
-                    mListener.onFrameCaptured(count, deliveredPreview);
+                    mListener.onFrameCaptured(count);
                 }
             });
             if (count >= MAX_FRAMES) {
@@ -455,6 +523,9 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         if (reader != null) {
             reader.close();
         }
+        releasePreviewSurface();
+        mCaptureSize = null;
+        mSessionCreating = false;
         HandlerThread thread = mCameraThread;
         mCameraThread = null;
         mCameraHandler = null;
@@ -495,22 +566,11 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         return candidates.get(0);
     }
 
-    private static Bitmap previewBitmap(byte[] jpeg, int orientation) {
-        Bitmap bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
-        if (bitmap == null || orientation == 0) {
-            return bitmap;
-        }
-        Matrix matrix = new Matrix();
-        matrix.postRotate(orientation);
-        try {
-            Bitmap rotated = Bitmap.createBitmap(
-                    bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-            if (rotated != bitmap) {
-                bitmap.recycle();
-            }
-            return rotated;
-        } catch (RuntimeException ignored) {
-            return bitmap;
+    private void releasePreviewSurface() {
+        Surface surface = mPreviewSurface;
+        mPreviewSurface = null;
+        if (surface != null) {
+            surface.release();
         }
     }
 

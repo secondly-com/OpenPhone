@@ -1,7 +1,7 @@
 package org.openphone.assistant
 
-import android.graphics.Bitmap
 import android.view.View
+import android.view.TextureView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -9,7 +9,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,17 +45,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -103,7 +101,6 @@ data class HomeUiState(
     val surfaceActionStatus: String = "",
     val surfaceConfirmation: Boolean = false,
     val silentSpeechFrames: Int = 0,
-    val silentSpeechPreview: Bitmap? = null,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -406,6 +403,8 @@ object OpenPhoneHomeComposeHost {
                                 state.update { it.copy(runs = refreshed) }
                             }
                         },
+                        onAttachSilentSpeechPreview = activity::attachSilentSpeechPreview,
+                        onDetachSilentSpeechPreview = activity::detachSilentSpeechPreview,
                     )
                 }
             }
@@ -432,7 +431,6 @@ object OpenPhoneHomeComposeHost {
                 status = "Silent Speech",
                 resultText = transcript,
                 silentSpeechFrames = 0,
-                silentSpeechPreview = null,
             )
         }
     }
@@ -445,7 +443,6 @@ object OpenPhoneHomeComposeHost {
                 status = "Starting front camera…",
                 resultText = "",
                 silentSpeechFrames = 0,
-                silentSpeechPreview = null,
             )
         }
     }
@@ -458,13 +455,12 @@ object OpenPhoneHomeComposeHost {
     }
 
     @JvmStatic
-    fun updateSilentSpeechFrame(count: Int, preview: Bitmap?) {
+    fun updateSilentSpeechFrame(count: Int) {
         state.update {
             it.copy(
                 mode = HomeAgentMode.Listening,
                 status = "Mouth your request",
                 silentSpeechFrames = count,
-                silentSpeechPreview = preview ?: it.silentSpeechPreview,
             )
         }
     }
@@ -496,7 +492,6 @@ object OpenPhoneHomeComposeHost {
                 status = "Silent Speech failed",
                 resultText = message,
                 silentSpeechFrames = 0,
-                silentSpeechPreview = null,
             )
         }
     }
@@ -509,7 +504,6 @@ object OpenPhoneHomeComposeHost {
                 status = "Ready",
                 resultText = "",
                 silentSpeechFrames = 0,
-                silentSpeechPreview = null,
             )
         }
     }
@@ -603,6 +597,8 @@ private fun OpenPhoneHomeScreen(
     onResolveRunReview: (AgentRunSummary, Boolean) -> Unit,
     onReadRun: (String) -> Unit,
     onDismissRun: (String) -> Unit,
+    onAttachSilentSpeechPreview: (TextureView) -> Unit,
+    onDetachSilentSpeechPreview: (TextureView) -> Unit,
 ) {
     var showTextInput by remember { mutableStateOf(false) }
     var composer by remember { mutableStateOf("") }
@@ -671,6 +667,8 @@ private fun OpenPhoneHomeScreen(
             onDeny = onDeny,
             onSurfaceAction = onSurfaceAction,
             onDismissSurface = onDismissSurface,
+            onAttachSilentSpeechPreview = onAttachSilentSpeechPreview,
+            onDetachSilentSpeechPreview = onDetachSilentSpeechPreview,
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(bottom = 112.dp),
@@ -810,6 +808,8 @@ private fun HomeResult(
     onDeny: () -> Unit,
     onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
     onDismissSurface: (AdaptiveSurface) -> Unit,
+    onAttachSilentSpeechPreview: (TextureView) -> Unit,
+    onDetachSilentSpeechPreview: (TextureView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (selectedRun != null || showAllRuns) {
@@ -869,26 +869,16 @@ private fun HomeResult(
             .padding(horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val preview = state.silentSpeechPreview
-        if (preview != null && (
-                state.mode == HomeAgentMode.Listening ||
-                    state.mode == HomeAgentMode.Thinking
-                )) {
-            Image(
-                bitmap = preview.asImageBitmap(),
-                contentDescription = "Front camera recording preview",
-                contentScale = ContentScale.Crop,
+        if (state.mode == HomeAgentMode.Listening) {
+            SilentSpeechCameraPreview(
+                onAttach = onAttachSilentSpeechPreview,
+                onDetach = onDetachSilentSpeechPreview,
                 modifier = Modifier
                     .size(220.dp)
-                    .scale(scaleX = -1f, scaleY = 1f)
                     .clip(CircleShape)
                     .border(
                         width = 3.dp,
-                        color = if (state.mode == HomeAgentMode.Listening) {
-                            Color(0xFFFF5B66)
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
+                        color = Color(0xFFFF5B66),
                         shape = CircleShape,
                     ),
             )
@@ -922,6 +912,30 @@ private fun HomeResult(
                 ReviewAction("Deny", false, onDeny)
                 ReviewAction("Approve", true, onApprove)
             }
+        }
+    }
+}
+
+@Composable
+private fun SilentSpeechCameraPreview(
+    onAttach: (TextureView) -> Unit,
+    onDetach: (TextureView) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var preview by remember { mutableStateOf<TextureView?>(null) }
+    AndroidView(
+        factory = { context ->
+            TextureView(context).also {
+                preview = it
+                onAttach(it)
+            }
+        },
+        modifier = modifier,
+    )
+    DisposableEffect(Unit) {
+        onDispose {
+            preview?.let(onDetach)
+            preview = null
         }
     }
 }
@@ -1265,7 +1279,7 @@ private fun VoiceOrb(
                     "Tap to start Silent Speech. Tap again to send. You can also press and hold."
                 role = Role.Button
             }
-            .pointerInput(Unit) {
+            .pointerInput(mode) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val longPress = awaitLongPressOrCancellation(down.id)
