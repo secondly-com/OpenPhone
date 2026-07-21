@@ -112,6 +112,14 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
         silentSpeechClient?.cancel()
     }
 
+    fun onHomeMicrophonePressed() {
+        super.onComposeMic()
+    }
+
+    fun onHomeMicrophoneStopped() {
+        super.onComposeStop()
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,

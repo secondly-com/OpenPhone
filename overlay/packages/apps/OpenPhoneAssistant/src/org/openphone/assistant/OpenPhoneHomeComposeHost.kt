@@ -3,18 +3,12 @@ package org.openphone.assistant
 import android.view.View
 import android.view.TextureView
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +44,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -76,6 +74,8 @@ import org.openphone.assistant.surface.SurfaceActionDispatcher
 import org.openphone.assistant.surface.SurfaceActionResult
 import org.openphone.assistant.surface.SurfaceRepository
 import org.openphone.assistant.surface.SurfaceRuntimeNotifier
+import org.openphone.assistant.ui.common.AssistantGlyph
+import org.openphone.assistant.ui.common.AssistantIcon
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -101,6 +101,7 @@ data class HomeUiState(
     val surfaceActionStatus: String = "",
     val surfaceConfirmation: Boolean = false,
     val silentSpeechFrames: Int = 0,
+    val silentSpeechCapturing: Boolean = false,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -233,6 +234,8 @@ object OpenPhoneHomeComposeHost {
                         onVoiceStart = activity::onHomeVoiceHoldStarted,
                         onVoiceFinish = activity::onHomeVoiceHoldFinished,
                         onVoiceCancel = activity::onHomeVoiceHoldCancelled,
+                        onMicrophoneStart = activity::onHomeMicrophonePressed,
+                        onMicrophoneStop = activity::onHomeMicrophoneStopped,
                         onSubmitText = activity::submitHomeText,
                         onOpenApps = {
                             if (!activity.openAppSpace()) {
@@ -431,6 +434,7 @@ object OpenPhoneHomeComposeHost {
                 status = "Silent Speech",
                 resultText = transcript,
                 silentSpeechFrames = 0,
+                silentSpeechCapturing = false,
             )
         }
     }
@@ -443,6 +447,7 @@ object OpenPhoneHomeComposeHost {
                 status = "Starting front camera…",
                 resultText = "",
                 silentSpeechFrames = 0,
+                silentSpeechCapturing = true,
             )
         }
     }
@@ -461,6 +466,7 @@ object OpenPhoneHomeComposeHost {
                 mode = HomeAgentMode.Listening,
                 status = "Mouth your request",
                 silentSpeechFrames = count,
+                silentSpeechCapturing = true,
             )
         }
     }
@@ -473,6 +479,7 @@ object OpenPhoneHomeComposeHost {
                 status = "Reading your lips…",
                 resultText = "",
                 silentSpeechFrames = frameCount,
+                silentSpeechCapturing = false,
             )
         }
     }
@@ -480,7 +487,12 @@ object OpenPhoneHomeComposeHost {
     @JvmStatic
     fun showSilentSpeechStatus(message: String) {
         state.update {
-            it.copy(mode = HomeAgentMode.Idle, status = message, resultText = message)
+            it.copy(
+                mode = HomeAgentMode.Idle,
+                status = message,
+                resultText = message,
+                silentSpeechCapturing = false,
+            )
         }
     }
 
@@ -492,6 +504,7 @@ object OpenPhoneHomeComposeHost {
                 status = "Silent Speech failed",
                 resultText = message,
                 silentSpeechFrames = 0,
+                silentSpeechCapturing = false,
             )
         }
     }
@@ -504,6 +517,7 @@ object OpenPhoneHomeComposeHost {
                 status = "Ready",
                 resultText = "",
                 silentSpeechFrames = 0,
+                silentSpeechCapturing = false,
             )
         }
     }
@@ -584,6 +598,8 @@ private fun OpenPhoneHomeScreen(
     onVoiceStart: () -> Unit,
     onVoiceFinish: () -> Unit,
     onVoiceCancel: () -> Unit,
+    onMicrophoneStart: () -> Unit,
+    onMicrophoneStop: () -> Unit,
     onSubmitText: (String) -> Unit,
     onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
@@ -667,8 +683,6 @@ private fun OpenPhoneHomeScreen(
             onDeny = onDeny,
             onSurfaceAction = onSurfaceAction,
             onDismissSurface = onDismissSurface,
-            onAttachSilentSpeechPreview = onAttachSilentSpeechPreview,
-            onDetachSilentSpeechPreview = onDetachSilentSpeechPreview,
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(bottom = 112.dp),
@@ -707,36 +721,18 @@ private fun OpenPhoneHomeScreen(
                     },
                 )
             }
-            Spacer(Modifier.height(18.dp))
-            VoiceOrb(
-                mode = state.mode,
-                onVoiceStart = onVoiceStart,
-                onVoiceFinish = onVoiceFinish,
-                onVoiceCancel = onVoiceCancel,
-                onShortTap = {
-                    when (state.mode) {
-                        HomeAgentMode.Listening -> onVoiceFinish()
-                        HomeAgentMode.Idle, HomeAgentMode.Error, HomeAgentMode.Result ->
-                            onVoiceStart()
-                        else -> Unit
-                    }
-                },
-            )
-            Text(
-                text = when (state.mode) {
-                    HomeAgentMode.Listening -> "Mouth your request · tap to send"
-                    HomeAgentMode.Thinking -> if (state.silentSpeechFrames > 0) {
-                        "Reading your lips…"
-                    } else {
-                        "Thinking"
-                    }
-                    HomeAgentMode.Running -> "Working"
-                    HomeAgentMode.Review -> "Review needed"
-                    else -> "Tap for Silent Speech"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 12.dp),
+            Spacer(Modifier.height(12.dp))
+            HomeInputDock(
+                state = state,
+                showTextInput = showTextInput,
+                onToggleKeyboard = { showTextInput = !showTextInput },
+                onSilentSpeechStart = onVoiceStart,
+                onSilentSpeechFinish = onVoiceFinish,
+                onSilentSpeechCancel = onVoiceCancel,
+                onMicrophoneStart = onMicrophoneStart,
+                onMicrophoneStop = onMicrophoneStop,
+                onAttachPreview = onAttachSilentSpeechPreview,
+                onDetachPreview = onDetachSilentSpeechPreview,
             )
         }
     }
@@ -808,8 +804,6 @@ private fun HomeResult(
     onDeny: () -> Unit,
     onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
     onDismissSurface: (AdaptiveSurface) -> Unit,
-    onAttachSilentSpeechPreview: (TextureView) -> Unit,
-    onDetachSilentSpeechPreview: (TextureView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (selectedRun != null || showAllRuns) {
@@ -859,39 +853,22 @@ private fun HomeResult(
         }
         return
     }
-    val visibleText = state.pending?.summary
-        ?: state.resultText.ifBlank {
-            if (state.mode == HomeAgentMode.Idle) "" else state.status
-        }
+    val visibleText = if (state.silentSpeechCapturing ||
+        (state.mode == HomeAgentMode.Thinking && state.silentSpeechFrames > 0)
+    ) {
+        ""
+    } else {
+        state.pending?.summary
+            ?: state.resultText.ifBlank {
+                if (state.mode == HomeAgentMode.Idle) "" else state.status
+            }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (state.mode == HomeAgentMode.Listening) {
-            SilentSpeechCameraPreview(
-                onAttach = onAttachSilentSpeechPreview,
-                onDetach = onDetachSilentSpeechPreview,
-                modifier = Modifier
-                    .size(220.dp)
-                    .clip(CircleShape)
-                    .border(
-                        width = 3.dp,
-                        color = Color(0xFFFF5B66),
-                        shape = CircleShape,
-                    ),
-            )
-            if (state.silentSpeechFrames > 0) {
-                Text(
-                    text = "${state.silentSpeechFrames} frames",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-            }
-            Spacer(Modifier.height(22.dp))
-        }
         if (visibleText.isNotBlank()) {
             Text(
                 text = visibleText,
@@ -917,6 +894,179 @@ private fun HomeResult(
 }
 
 @Composable
+private fun HomeInputDock(
+    state: HomeUiState,
+    showTextInput: Boolean,
+    onToggleKeyboard: () -> Unit,
+    onSilentSpeechStart: () -> Unit,
+    onSilentSpeechFinish: () -> Unit,
+    onSilentSpeechCancel: () -> Unit,
+    onMicrophoneStart: () -> Unit,
+    onMicrophoneStop: () -> Unit,
+    onAttachPreview: (TextureView) -> Unit,
+    onDetachPreview: (TextureView) -> Unit,
+) {
+    val recording = state.silentSpeechCapturing
+    val decoding = state.mode == HomeAgentMode.Thinking && state.silentSpeechFrames > 0
+    val microphoneListening = state.mode == HomeAgentMode.Listening && !recording
+    val sideControlsVisible = !recording && !decoding
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (recording) 208.dp else 64.dp),
+        ) {
+            if (recording) {
+                SilentSpeechCameraOrb(
+                    frameCount = state.silentSpeechFrames,
+                    onAttach = onAttachPreview,
+                    onDetach = onDetachPreview,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .size(196.dp),
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 70.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    if (sideControlsVisible) {
+                        InputModeButton(
+                            selected = showTextInput,
+                            enabled = state.mode != HomeAgentMode.Running,
+                            label = "Keyboard input",
+                            onClick = onToggleKeyboard,
+                        ) {
+                            KeyboardGlyph(
+                                tint = if (showTextInput) Color.White else Color(0xFFD5DCEC),
+                            )
+                        }
+                    }
+                }
+
+                SilentSpeechHoldButton(
+                    mode = state.mode,
+                    recording = recording,
+                    decoding = decoding,
+                    onStart = onSilentSpeechStart,
+                    onFinish = onSilentSpeechFinish,
+                    onCancel = onSilentSpeechCancel,
+                )
+
+                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    if (sideControlsVisible) {
+                        InputModeButton(
+                            selected = microphoneListening,
+                            enabled = state.mode != HomeAgentMode.Running,
+                            label = if (microphoneListening) "Stop microphone" else "Microphone input",
+                            selectedColor = Color(0xFFD9485F),
+                            onClick = if (microphoneListening) onMicrophoneStop else onMicrophoneStart,
+                        ) {
+                            AssistantIcon(
+                                glyph = AssistantGlyph.Mic,
+                                tint = if (microphoneListening) Color.White else Color(0xFFD5DCEC),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = when {
+                recording -> "Release to send"
+                decoding -> "Reading your lips…"
+                microphoneListening -> "Listening…"
+                state.mode == HomeAgentMode.Running -> "Working"
+                state.mode == HomeAgentMode.Review -> "Review needed"
+                else -> "Press and hold to record"
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun SilentSpeechCameraOrb(
+    frameCount: Int,
+    onAttach: (TextureView) -> Unit,
+    onDetach: (TextureView) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xFF080B12)),
+        contentAlignment = Alignment.Center,
+    ) {
+        SilentSpeechCameraPreview(
+            onAttach = onAttach,
+            onDetach = onDetach,
+            modifier = Modifier.matchParentSize(),
+        )
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = 0.24f),
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.38f),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.30f)),
+                    ),
+                ),
+        )
+        MouthGlyph(
+            tint = Color(0xFFFF5966),
+            fill = Color(0x22FF5966),
+            modifier = Modifier.size(width = 64.dp, height = 32.dp),
+        )
+        Canvas(Modifier.matchParentSize()) {
+            val progress = (frameCount / 450f).coerceIn(0f, 1f)
+            drawCircle(
+                color = Color.White.copy(alpha = 0.42f),
+                style = Stroke(width = 1.dp.toPx()),
+            )
+            drawCircle(
+                color = Color.White.copy(alpha = 0.42f),
+                radius = size.minDimension / 2f - 5.dp.toPx(),
+                style = Stroke(width = 1.5.dp.toPx()),
+            )
+            drawArc(
+                color = Color(0xFFFF5966),
+                startAngle = -90f,
+                sweepAngle = 360f * progress,
+                useCenter = false,
+                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
+            )
+        }
+    }
+}
+
+@Composable
 private fun SilentSpeechCameraPreview(
     onAttach: (TextureView) -> Unit,
     onDetach: (TextureView) -> Unit,
@@ -936,6 +1086,193 @@ private fun SilentSpeechCameraPreview(
         onDispose {
             preview?.let(onDetach)
             preview = null
+        }
+    }
+}
+
+@Composable
+private fun InputModeButton(
+    selected: Boolean,
+    enabled: Boolean,
+    label: String,
+    selectedColor: Color = Color(0xFF2A7FFF),
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                if (selected) selectedColor else Color(0xFF171C27).copy(alpha = 0.92f),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SilentSpeechHoldButton(
+    mode: HomeAgentMode,
+    recording: Boolean,
+    decoding: Boolean,
+    onStart: () -> Unit,
+    onFinish: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val currentMode by rememberUpdatedState(mode)
+    val currentStart by rememberUpdatedState(onStart)
+    val currentFinish by rememberUpdatedState(onFinish)
+    val currentCancel by rememberUpdatedState(onCancel)
+    val haptic = LocalHapticFeedback.current
+    Box(
+        modifier = Modifier
+            .size(68.dp)
+            .semantics {
+                contentDescription = if (recording) {
+                    "Release to send Silent Speech"
+                } else {
+                    "Press and hold for Silent Speech"
+                }
+                role = Role.Button
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val canStart = currentMode == HomeAgentMode.Idle ||
+                        currentMode == HomeAgentMode.Error ||
+                        currentMode == HomeAgentMode.Result
+                    if (!canStart) {
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
+                    down.consume()
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    currentStart()
+                    if (waitForUpOrCancellation() == null) {
+                        currentCancel()
+                    } else {
+                        currentFinish()
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!recording) {
+            Canvas(Modifier.matchParentSize()) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(Color(0xFF65D7FF), Color(0xFF0A4BCB)),
+                    ),
+                    radius = size.minDimension * 0.48f,
+                )
+                drawCircle(
+                    color = if (decoding) Color(0xFF5BE7D2) else Color(0xFF43B7FF),
+                    radius = size.minDimension * 0.48f,
+                    style = Stroke(width = 3.dp.toPx()),
+                )
+            }
+            if (decoding) {
+                Text("•••", color = Color.White, fontWeight = FontWeight.Bold)
+            } else {
+                MouthGlyph(
+                    tint = Color.White,
+                    fill = Color.White,
+                    modifier = Modifier.size(width = 32.dp, height = 16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyboardGlyph(
+    tint: Color,
+    modifier: Modifier = Modifier.size(22.dp),
+) {
+    Canvas(modifier) {
+        val strokeWidth = 1.8.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+            style = Stroke(width = strokeWidth),
+        )
+        val keyRadius = 1.05.dp.toPx()
+        for (row in 0..1) {
+            for (column in 0..4) {
+                drawCircle(
+                    color = tint,
+                    radius = keyRadius,
+                    center = Offset(
+                        x = size.width * (0.18f + column * 0.16f),
+                        y = size.height * (0.30f + row * 0.25f),
+                    ),
+                )
+            }
+        }
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.27f, size.height * 0.78f),
+            end = Offset(size.width * 0.73f, size.height * 0.78f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun MouthGlyph(
+    tint: Color,
+    fill: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val mouth = Path().apply {
+            moveTo(size.width * 0.03f, size.height * 0.52f)
+            cubicTo(
+                size.width * 0.18f,
+                size.height * 0.43f,
+                size.width * 0.36f,
+                size.height * 0.02f,
+                size.width * 0.50f,
+                size.height * 0.22f,
+            )
+            cubicTo(
+                size.width * 0.64f,
+                size.height * 0.02f,
+                size.width * 0.82f,
+                size.height * 0.43f,
+                size.width * 0.97f,
+                size.height * 0.52f,
+            )
+            cubicTo(
+                size.width * 0.82f,
+                size.height * 0.73f,
+                size.width * 0.65f,
+                size.height * 0.94f,
+                size.width * 0.50f,
+                size.height * 0.90f,
+            )
+            cubicTo(
+                size.width * 0.35f,
+                size.height * 0.94f,
+                size.width * 0.18f,
+                size.height * 0.73f,
+                size.width * 0.03f,
+                size.height * 0.52f,
+            )
+            close()
+        }
+        drawPath(mouth, fill)
+        if (tint != fill) {
+            drawPath(mouth, tint, style = Stroke(width = 2.dp.toPx()))
         }
     }
 }
@@ -1245,91 +1582,6 @@ private fun HomeTextComposer(
                 .clip(RoundedCornerShape(18.dp))
                 .clickable(enabled = text.isNotBlank(), onClick = onSubmit)
                 .padding(horizontal = 12.dp, vertical = 9.dp),
-        )
-    }
-}
-
-@Composable
-private fun VoiceOrb(
-    mode: HomeAgentMode,
-    onVoiceStart: () -> Unit,
-    onVoiceFinish: () -> Unit,
-    onVoiceCancel: () -> Unit,
-    onShortTap: () -> Unit,
-) {
-    val haptic = LocalHapticFeedback.current
-    val transition = rememberInfiniteTransition(label = "voice-orb")
-    val pulse by transition.animateFloat(
-        initialValue = 0.82f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (mode == HomeAgentMode.Listening) 620 else 1500),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "voice-orb-pulse",
-    )
-    val active = mode == HomeAgentMode.Listening ||
-        mode == HomeAgentMode.Thinking ||
-        mode == HomeAgentMode.Running
-    Box(
-        modifier = Modifier
-            .size(104.dp)
-            .semantics {
-                contentDescription =
-                    "Tap to start Silent Speech. Tap again to send. You can also press and hold."
-                role = Role.Button
-            }
-            .pointerInput(mode) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val longPress = awaitLongPressOrCancellation(down.id)
-                    if (longPress == null) {
-                        onShortTap()
-                        return@awaitEachGesture
-                    }
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onVoiceStart()
-                    val up = waitForUpOrCancellation()
-                    if (up == null) {
-                        onVoiceCancel()
-                    } else {
-                        onVoiceFinish()
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0x6643B7FF),
-                        Color(0x222A7FFF),
-                        Color.Transparent,
-                    ),
-                ),
-                radius = size.minDimension * 0.5f * pulse,
-            )
-            drawCircle(
-                color = if (active) Color(0xFF5BE7D2) else Color(0xFF43B7FF),
-                radius = size.minDimension * 0.27f,
-                style = Stroke(width = if (active) 6.dp.toPx() else 3.dp.toPx()),
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(Color(0xFF65D7FF), Color(0xFF0A4BCB)),
-                ),
-                radius = size.minDimension * 0.21f,
-            )
-        }
-        Text(
-            text = when (mode) {
-                HomeAgentMode.Listening -> "■"
-                HomeAgentMode.Thinking, HomeAgentMode.Running -> "•••"
-                else -> "●"
-            },
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
         )
     }
 }
