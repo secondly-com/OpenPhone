@@ -24,6 +24,7 @@ import java.util.Locale
 class OpenPhoneHomeActivity : AssistantActivityBackend() {
     private var interfacesAuthClient: InterfacesAuthClient? = null
     private var silentSpeechClient: SilentSpeechCameraClient? = null
+    private var silentSpeechPreview: TextureView? = null
     private var startAfterCameraPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +39,7 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
                     message,
                     error,
                 )
+                if (signedIn) prepareSilentSpeechCameraIfReady()
             },
         )
         OpenPhoneHomeComposeHost.setInterfacesConnectionState(
@@ -79,12 +81,15 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
                 }
             },
         )
+        silentSpeechPreview?.let { silentSpeechClient?.attachPreview(it) }
+        prepareSilentSpeechCameraIfReady()
         enterImmersiveHome()
     }
 
     override fun onDestroy() {
         silentSpeechClient?.close()
         silentSpeechClient = null
+        silentSpeechPreview = null
         interfacesAuthClient?.close()
         interfacesAuthClient = null
         super.onDestroy()
@@ -93,6 +98,7 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun onResume() {
         super.onResume()
         enterImmersiveHome()
+        prepareSilentSpeechCameraIfReady()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -105,11 +111,22 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun createActivityContentView(): View = OpenPhoneHomeComposeHost.createView(this)
 
     fun attachSilentSpeechPreview(preview: TextureView) {
+        silentSpeechPreview = preview
         silentSpeechClient?.attachPreview(preview)
+        prepareSilentSpeechCameraIfReady()
     }
 
     fun detachSilentSpeechPreview(preview: TextureView) {
+        if (silentSpeechPreview === preview) silentSpeechPreview = null
         silentSpeechClient?.detachPreview(preview)
+    }
+
+    private fun prepareSilentSpeechCameraIfReady() {
+        if (interfacesAuthClient?.isSignedIn != true) return
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        silentSpeechClient?.prepare()
     }
 
     override fun onHomeVoiceHoldStarted() {
@@ -166,6 +183,8 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
         if (granted && startAfterCameraPermission) {
             startAfterCameraPermission = false
             silentSpeechClient?.start()
+        } else if (granted) {
+            prepareSilentSpeechCameraIfReady()
         } else {
             startAfterCameraPermission = false
             OpenPhoneHomeComposeHost.failSilentSpeech(

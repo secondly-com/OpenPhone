@@ -60,6 +60,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     private volatile boolean mBusy;
     private volatile boolean mRecording;
+    private volatile boolean mClosed;
     private HandlerThread mCameraThread;
     private Handler mCameraHandler;
     private CameraDevice mCamera;
@@ -72,8 +73,12 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private Surface mPreviewSurface;
     private Size mCaptureSize;
     private boolean mSessionCreating;
+    private boolean mCameraOpening;
     private boolean mRecorderStarted;
+    private int mGraphGeneration;
     private long mLastFrameTimestampNs;
+    private long mHoldStartedAtMillis;
+    private long mRecorderStartedAtMillis;
     private int mFrameCount;
     private int mSensorOrientation;
 
@@ -91,6 +96,34 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     boolean isBusy() {
         return mBusy;
+    }
+
+    /** Opens and configures the front camera without recording user data. */
+    void prepare() {
+        if (mClosed) {
+            return;
+        }
+        ensureCameraThread();
+        Handler handler = mCameraHandler;
+        if (handler == null) {
+            return;
+        }
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mClosed) {
+                    return;
+                }
+                if (mSession != null) {
+                    return;
+                }
+                if (mCamera != null) {
+                    maybeCreateCaptureSession();
+                    return;
+                }
+                openFrontCamera();
+            }
+        });
     }
 
     void attachPreview(TextureView previewView) {
@@ -135,11 +168,12 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     }
 
     void start() {
-        if (mBusy) {
+        if (mBusy || mClosed) {
             return;
         }
         mBusy = true;
         mRecording = true;
+        mHoldStartedAtMillis = System.currentTimeMillis();
         mFrameCount = 0;
         mLastFrameTimestampNs = 0L;
         mRecorderStarted = false;
@@ -150,15 +184,33 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             }
         });
 
+        ensureCameraThread();
+        Handler handler = mCameraHandler;
+        if (handler == null) {
+            fail("The front camera could not start.");
+            return;
+        }
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mSession != null) {
+                    beginRecording();
+                } else if (mCamera != null) {
+                    maybeCreateCaptureSession();
+                } else {
+                    openFrontCamera();
+                }
+            }
+        });
+    }
+
+    private void ensureCameraThread() {
+        if (mCameraThread != null && mCameraHandler != null) {
+            return;
+        }
         mCameraThread = new HandlerThread("OpenPhoneSilentSpeechCamera");
         mCameraThread.start();
         mCameraHandler = new Handler(mCameraThread.getLooper());
-        mCameraHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                openFrontCamera();
-            }
-        });
     }
 
     void stopAndDecode() {
@@ -185,6 +237,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                 public void run() {
                     closeCameraGraph();
                     mBusy = false;
+                    prepare();
                     postMain(new Runnable() {
                         @Override
                         public void run() {
@@ -205,6 +258,11 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     }
 
     private void openFrontCamera() {
+        if (mClosed || mCameraOpening || mCamera != null) {
+            return;
+        }
+        mCameraOpening = true;
+        final int graphGeneration = mGraphGeneration;
         try {
             CameraManager manager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
             String cameraId = frontCameraId(manager);
@@ -222,7 +280,8 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(CameraDevice camera) {
-                    if (!mRecording) {
+                    mCameraOpening = false;
+                    if (mClosed || graphGeneration != mGraphGeneration) {
                         camera.close();
                         return;
                     }
@@ -232,19 +291,23 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
                 @Override
                 public void onDisconnected(CameraDevice camera) {
+                    mCameraOpening = false;
                     camera.close();
                     fail("The front camera disconnected.");
                 }
 
                 @Override
                 public void onError(CameraDevice camera, int error) {
+                    mCameraOpening = false;
                     camera.close();
                     fail("The front camera could not start (" + error + ").");
                 }
             }, mCameraHandler);
         } catch (SecurityException e) {
+            mCameraOpening = false;
             fail("Camera permission is required for Silent Speech.");
         } catch (CameraAccessException | IOException | IllegalStateException e) {
+            mCameraOpening = false;
             Log.e(TAG, "Unable to open front camera", e);
             fail("The front camera could not start.");
         }
@@ -295,7 +358,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
                             mSessionCreating = false;
-                            if (!mRecording || mCamera != camera || mRecorder == null
+                            if (mClosed || mCamera != camera || mRecorder == null
                                     || mPreviewSurface != previewSurface
                                     || mRecorderSurface != recorderSurface) {
                                 session.close();
@@ -305,33 +368,16 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                             mSession = session;
                             try {
                                 CaptureRequest.Builder request = camera.createCaptureRequest(
-                                        CameraDevice.TEMPLATE_RECORD);
+                                        CameraDevice.TEMPLATE_PREVIEW);
                                 request.addTarget(previewSurface);
-                                request.addTarget(recorderSurface);
                                 request.set(CaptureRequest.CONTROL_MODE,
                                         CaptureRequest.CONTROL_MODE_AUTO);
                                 request.set(CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                                session.setRepeatingRequest(
-                                        request.build(),
-                                        new CameraCaptureSession.CaptureCallback() {
-                                            @Override
-                                            public void onCaptureCompleted(
-                                                    CameraCaptureSession captureSession,
-                                                    CaptureRequest captureRequest,
-                                                    TotalCaptureResult result) {
-                                                onCameraFrame(result);
-                                            }
-                                        },
-                                        mCameraHandler);
-                                mRecorder.start();
-                                mRecorderStarted = true;
-                                postMain(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        mListener.onCaptureStarted();
-                                    }
-                                });
+                                session.setRepeatingRequest(request.build(), null, mCameraHandler);
+                                if (mRecording) {
+                                    beginRecording();
+                                }
                             } catch (CameraAccessException | RuntimeException e) {
                                 Log.e(TAG, "Unable to start camera capture", e);
                                 fail("The front camera could not begin recording.");
@@ -349,6 +395,48 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             mSessionCreating = false;
             Log.e(TAG, "Unable to create camera session", e);
             fail("The front camera could not be configured.");
+        }
+    }
+
+    private void beginRecording() {
+        if (!mRecording || mRecorderStarted || mSession == null || mCamera == null
+                || mPreviewSurface == null || mRecorderSurface == null || mRecorder == null) {
+            return;
+        }
+        try {
+            CaptureRequest.Builder request = mCamera.createCaptureRequest(
+                    CameraDevice.TEMPLATE_RECORD);
+            request.addTarget(mPreviewSurface);
+            request.addTarget(mRecorderSurface);
+            request.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+            request.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+            mSession.setRepeatingRequest(
+                    request.build(),
+                    new CameraCaptureSession.CaptureCallback() {
+                        @Override
+                        public void onCaptureCompleted(
+                                CameraCaptureSession captureSession,
+                                CaptureRequest captureRequest,
+                                TotalCaptureResult result) {
+                            onCameraFrame(result);
+                        }
+                    },
+                    mCameraHandler);
+            mRecorder.start();
+            mRecorderStarted = true;
+            mRecorderStartedAtMillis = System.currentTimeMillis();
+            Log.i(TAG, "recording started startup_ms="
+                    + (mRecorderStartedAtMillis - mHoldStartedAtMillis));
+            postMain(new Runnable() {
+                @Override
+                public void run() {
+                    mListener.onCaptureStarted();
+                }
+            });
+        } catch (CameraAccessException | RuntimeException e) {
+            Log.e(TAG, "Unable to start camera capture", e);
+            fail("The front camera could not begin recording.");
         }
     }
 
@@ -383,7 +471,13 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         stopRepeating();
         File captured = finishRecorder();
         int capturedFrames = mFrameCount;
+        long now = System.currentTimeMillis();
+        Log.i(TAG, "recording stopped hold_ms=" + (now - mHoldStartedAtMillis)
+                + " recorded_ms=" + (mRecorderStartedAtMillis == 0L
+                ? 0L : now - mRecorderStartedAtMillis)
+                + " frames=" + capturedFrames);
         closeCameraGraph();
+        prepare();
         if (!decode) {
             mBusy = false;
             delete(captured);
@@ -455,6 +549,8 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     }
 
     private void closeCameraGraph() {
+        mGraphGeneration++;
+        mCameraOpening = false;
         CameraCaptureSession session = mSession;
         mSession = null;
         if (session != null) {
@@ -474,6 +570,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         releasePreviewSurface();
         mCaptureSize = null;
         mSessionCreating = false;
+        mRecorderStartedAtMillis = 0L;
         HandlerThread thread = mCameraThread;
         mCameraThread = null;
         mCameraHandler = null;
@@ -650,7 +747,20 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     @Override
     public void close() {
-        cancel();
+        mClosed = true;
+        mRecording = false;
+        mBusy = false;
+        Handler handler = mCameraHandler;
+        if (handler != null) {
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    closeCameraGraph();
+                }
+            });
+        } else {
+            closeCameraGraph();
+        }
         mDecodeExecutor.shutdownNow();
     }
 }

@@ -39,6 +39,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -664,24 +665,33 @@ private fun OpenPhoneHomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTransformGestures(
-                    panZoomLock = true,
-                    onGesture = { _: Offset, _: Offset, zoom: Float, _: Float ->
-                        cumulativeZoom *= zoom
-                        if (!transitionStarted && cumulativeZoom < 0.72f) {
-                            transitionStarted = true
-                            onOpenApps()
-                        }
-                        if (cumulativeZoom > 0.96f) {
-                            transitionStarted = false
-                        }
-                    },
-                )
-            }
             .imePadding()
             .padding(horizontal = 24.dp, vertical = 18.dp),
     ) {
+        // Keep the App Space pinch target behind the interactive controls. When this
+        // detector lived on the root modifier it was an ancestor of the Silent Speech
+        // hold button, so ordinary finger drift could let transform detection consume
+        // the gesture and cancel an otherwise valid recording.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures(
+                        panZoomLock = true,
+                        onGesture = { _: Offset, _: Offset, zoom: Float, _: Float ->
+                            cumulativeZoom *= zoom
+                            if (!transitionStarted && cumulativeZoom < 0.72f) {
+                                transitionStarted = true
+                                onOpenApps()
+                            }
+                            if (cumulativeZoom > 0.96f) {
+                                transitionStarted = false
+                            }
+                        },
+                    )
+                },
+        )
+
         HomeHeader(
             now = now,
             interfacesConnected = state.interfacesConnected,
@@ -974,16 +984,18 @@ private fun HomeInputDock(
                 .fillMaxWidth()
                 .height(if (recording) 208.dp else 64.dp),
         ) {
-            if (recording) {
-                SilentSpeechCameraOrb(
-                    frameCount = state.silentSpeechFrames,
-                    onAttach = onAttachPreview,
-                    onDetach = onDetachPreview,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .size(196.dp),
-                )
-            }
+            // Keep the TextureView attached while idle so the front camera can remain
+            // prepared. Only the pixels are hidden; recording still begins exclusively
+            // on the user's press.
+            SilentSpeechCameraOrb(
+                frameCount = state.silentSpeechFrames,
+                onAttach = onAttachPreview,
+                onDetach = onDetachPreview,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .size(if (recording) 196.dp else 1.dp)
+                    .alpha(if (recording) 1f else 0f),
+            )
 
             Row(
                 modifier = Modifier
