@@ -84,7 +84,6 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun createActivityContentView(): View = OpenPhoneHomeComposeHost.createView(this)
 
     fun attachSilentSpeechPreview(preview: TextureView) {
-        preview.scaleX = -1f
         silentSpeechClient?.attachPreview(preview)
     }
 

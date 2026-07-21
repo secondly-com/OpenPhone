@@ -2,6 +2,7 @@ package org.openphone.assistant;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -63,9 +64,9 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     private static final String TAG = "OpenPhoneSilentSpeech";
     private static final int MIN_FRAMES = 8;
-    private static final int MAX_FRAMES = 300;
+    private static final int MAX_FRAMES = 450;
     private static final int MAX_RESPONSE_BYTES = 64 * 1024;
-    private static final long MIN_FRAME_INTERVAL_NS = 80_000_000L;
+    private static final long MIN_FRAME_INTERVAL_NS = 33_000_000L;
 
     private final Context mContext;
     private final Listener mListener;
@@ -114,6 +115,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             @Override
             public void onSurfaceTextureSizeChanged(
                     SurfaceTexture surface, int width, int height) {
+                configurePreviewTransform(previewView);
             }
 
             @Override
@@ -129,6 +131,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         if (previewView.isAvailable()) {
             preparePreviewSurface(previewView.getSurfaceTexture());
         }
+        configurePreviewTransform(previewView);
     }
 
     void detachPreview(TextureView previewView) {
@@ -225,6 +228,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             mSensorOrientation = orientation == null ? 0 : orientation;
             Size size = captureSize(characteristics);
             mCaptureSize = size;
+            configurePreviewTransform(mPreviewView);
             mImageReader = ImageReader.newInstance(
                     size.getWidth(), size.getHeight(), ImageFormat.JPEG, 4);
             mImageReader.setOnImageAvailableListener(this::onImageAvailable, mCameraHandler);
@@ -286,6 +290,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                         mCaptureSize.getWidth(), mCaptureSize.getHeight());
                 mPreviewTexture = texture;
                 mPreviewSurface = new Surface(texture);
+                configurePreviewTransform(mPreviewView);
                 maybeCreateCaptureSession();
             }
         });
@@ -587,6 +592,47 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         if (surface != null) {
             surface.release();
         }
+    }
+
+    private void configurePreviewTransform(TextureView previewView) {
+        final Size captureSize = mCaptureSize;
+        final int sensorOrientation = mSensorOrientation;
+        if (previewView == null || captureSize == null) {
+            return;
+        }
+        previewView.post(new Runnable() {
+            @Override
+            public void run() {
+                if (previewView != mPreviewView
+                        || previewView.getWidth() <= 0 || previewView.getHeight() <= 0) {
+                    return;
+                }
+                float bufferWidth = captureSize.getWidth();
+                float bufferHeight = captureSize.getHeight();
+                if (sensorOrientation % 180 != 0) {
+                    float swap = bufferWidth;
+                    bufferWidth = bufferHeight;
+                    bufferHeight = swap;
+                }
+                float viewWidth = previewView.getWidth();
+                float viewHeight = previewView.getHeight();
+                float bufferAspect = bufferWidth / bufferHeight;
+                float viewAspect = viewWidth / viewHeight;
+                float scaleX = 1f;
+                float scaleY = 1f;
+                if (bufferAspect > viewAspect) {
+                    scaleX = bufferAspect / viewAspect;
+                } else {
+                    scaleY = viewAspect / bufferAspect;
+                }
+                Matrix transform = new Matrix();
+                float centerX = viewWidth / 2f;
+                float centerY = viewHeight / 2f;
+                transform.postScale(scaleX, scaleY, centerX, centerY);
+                transform.postScale(-1f, 1f, centerX, centerY);
+                previewView.setTransform(transform);
+            }
+        });
     }
 
     private void postMain(Runnable runnable) {
