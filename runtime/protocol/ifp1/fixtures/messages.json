@@ -1,0 +1,398 @@
+{
+  "corpus": "ifp/1 single-message conformance",
+  "version": "1.0.0-draft",
+  "cases": [
+    {
+      "name": "valid_minimal_control_ping",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_ping000001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {}
+      }
+    },
+    {
+      "name": "valid_event_text_message",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evt0000001",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z",
+          "chain": [{ "stage": "capture", "model": null }]
+        },
+        "labels": { "consent": "product_operation", "retention": "standard" },
+        "payload": { "seq": 0, "dedup": "dev_mac_a1b2:ses_s1a2b3:0", "text": "hello" }
+      }
+    },
+    {
+      "name": "reject_wrong_major_version",
+      "expect": "reject",
+      "error_class": "unsupported_version",
+      "message": {
+        "ifp": "2",
+        "id": "msg_v2test0001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {}
+      }
+    },
+    {
+      "name": "reject_event_missing_provenance",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtnoprov1",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "labels": { "consent": "product_operation", "retention": "standard" },
+        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+      }
+    },
+    {
+      "name": "reject_event_missing_labels",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtnolab01",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z"
+        },
+        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+      }
+    },
+    {
+      "name": "reject_event_missing_generation",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtnogen01",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z"
+        },
+        "labels": { "consent": "product_operation", "retention": "standard" },
+        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+      }
+    },
+    {
+      "name": "reject_event_missing_dedup",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtnodedup",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z"
+        },
+        "labels": { "consent": "product_operation", "retention": "standard" },
+        "payload": { "seq": 0, "text": "hello" }
+      }
+    },
+    {
+      "name": "reject_ext_key_without_x_prefix",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_extbad0001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {},
+        "ext": { "vendor": "nope" }
+      }
+    },
+    {
+      "name": "accept_ext_key_with_x_prefix",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_extok00001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {},
+        "ext": { "x-vendor": "ok" }
+      }
+    },
+    {
+      "name": "accept_unknown_message_type",
+      "expect": "accept",
+      "note": "Receivers must ignore unknown types, not reject them (spec §2). Validators accept the envelope; routing may no-op.",
+      "message": {
+        "ifp": "1",
+        "id": "msg_unknown001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.future_thing",
+        "entity": "ent_abc123",
+        "payload": { "anything": true }
+      }
+    },
+    {
+      "name": "reject_bad_id_format",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "not a valid id!",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {}
+      }
+    },
+    {
+      "name": "valid_action_propose",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_actprop001",
+        "ts": "2026-07-21T00:00:02Z",
+        "type": "action.propose",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "payload": {
+          "action_id": "act_00000001",
+          "tool": "messages.send",
+          "params": { "to": "+15551234567", "body": "on my way" },
+          "params_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "reason": "You asked me to tell Dana you're leaving.",
+          "risk": "medium",
+          "idempotency_key": "act_00000001",
+          "expires_at": "2026-07-21T00:05:00Z"
+        }
+      }
+    },
+    {
+      "name": "reject_action_propose_missing_params_hash",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_actprop002",
+        "ts": "2026-07-21T00:00:02Z",
+        "type": "action.propose",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "payload": {
+          "action_id": "act_00000002",
+          "tool": "messages.send",
+          "params": {},
+          "risk": "low",
+          "idempotency_key": "act_00000002",
+          "expires_at": "2026-07-21T00:05:00Z"
+        }
+      }
+    },
+    {
+      "name": "reject_action_approve_missing_generation",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_actappr001",
+        "ts": "2026-07-21T00:00:03Z",
+        "type": "action.approve",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "payload": {
+          "action_id": "act_00000001",
+          "params_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "confirmation": { "mode": "user_confirmed", "ref": "aud_1" }
+        }
+      }
+    },
+    {
+      "name": "valid_action_reject_user_denied",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_actrej0001",
+        "ts": "2026-07-21T00:00:03Z",
+        "type": "action.reject",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "payload": { "action_id": "act_00000001", "reason_class": "user_denied" }
+      }
+    },
+    {
+      "name": "reject_action_reject_bad_reason_class",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_actrej0002",
+        "ts": "2026-07-21T00:00:03Z",
+        "type": "action.reject",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "payload": { "action_id": "act_00000001", "reason_class": "did_not_feel_like_it" }
+      }
+    },
+    {
+      "name": "valid_pair_request_null_entity",
+      "expect": "accept",
+      "note": "pair.request is the one message allowed a null entity (spec §2).",
+      "message": {
+        "ifp": "1",
+        "id": "msg_pairreq001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "pair.request",
+        "entity": null,
+        "payload": {
+          "pairing_code": "483-921",
+          "public_key": "JDInBjWvZbYAt-lFQxZbV0jkyDrkejNzq5zA5PJ07UE",
+          "capabilities": [{ "type": "console", "properties": {} }],
+          "label": "kitchen mac"
+        }
+      }
+    },
+    {
+      "name": "reject_pair_request_bad_public_key",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_pairreq002",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "pair.request",
+        "entity": null,
+        "payload": {
+          "pairing_code": "483-921",
+          "public_key": "tooshort",
+          "capabilities": []
+        }
+      }
+    },
+    {
+      "name": "reject_event_null_entity",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "note": "Only pair.request and control.hello may omit entity.",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtnoent01",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": null,
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z"
+        },
+        "labels": { "consent": "product_operation", "retention": "standard" },
+        "payload": { "seq": 0, "dedup": "k1", "text": "hi" }
+      }
+    },
+    {
+      "name": "valid_control_hello",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_hello00001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.hello",
+        "entity": null,
+        "payload": {
+          "device_id": "dev_mac_a1b2",
+          "proof": "c2lnbmF0dXJlLW92ZXItbm9uY2U",
+          "capabilities": [
+            { "type": "console", "properties": {} },
+            { "type": "tool:messages.send", "properties": {} }
+          ],
+          "protocol": { "min": 1, "max": 1 }
+        }
+      }
+    },
+    {
+      "name": "reject_error_message_unknown_class",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_err0000001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "error",
+        "entity": "ent_abc123",
+        "payload": { "class": "made_up_error", "detail": null }
+      }
+    },
+    {
+      "name": "valid_error_stale_generation",
+      "expect": "accept",
+      "message": {
+        "ifp": "1",
+        "id": "msg_err0000002",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "error",
+        "entity": "ent_abc123",
+        "parent": "msg_evt0000001",
+        "payload": { "class": "stale_generation", "detail": "home moved", "current_generation": 4 }
+      }
+    },
+    {
+      "name": "reject_bad_consent_label",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "message": {
+        "ifp": "1",
+        "id": "msg_evtbadlab1",
+        "ts": "2026-07-21T00:00:01Z",
+        "type": "event.text.message",
+        "entity": "ent_abc123",
+        "session": "ses_s1a2b3",
+        "device": "dev_mac_a1b2",
+        "generation": 1,
+        "provenance": {
+          "sensor": "dev_mac_a1b2:keyboard",
+          "captured_at": "2026-07-21T00:00:01Z"
+        },
+        "labels": { "consent": "whatever_we_want", "retention": "standard" },
+        "payload": { "seq": 0, "dedup": "k1", "text": "hi" }
+      }
+    }
+  ]
+}

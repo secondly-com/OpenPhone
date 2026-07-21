@@ -128,12 +128,22 @@ required=(
   runtime/protocol/openphone-runtime-tools.mjs
   runtime/protocol/openphone-runtime.schema.json
   runtime/protocol/validate-runtime-protocol.mjs
+  runtime/protocol/ifp1/openphone-tools.ifp1.json
+  runtime/protocol/ifp1/adapter.mjs
+  runtime/protocol/ifp1/validator.ts
+  runtime/protocol/ifp1/machine.ts
+  runtime/protocol/ifp1/MIGRATION.md
+  runtime/protocol/ifp1/fixtures/messages.json
+  runtime/protocol/ifp1/fixtures/sequences.json
+  runtime/protocol/ifp1/fixtures/params-hash-vectors.json
   integrations/adb/openphone-adb-transport.mjs
   integrations/cli/README.md
   integrations/cli/package.json
   integrations/cli/src/index.mjs
   tests/README.md
   tests/integrations/adb-stateful-gating-contract.mjs
+  tests/integrations/ifp1-conformance-contract.mjs
+  tests/integrations/ifp1-adapter-contract.mjs
   tests/integrations/runtime-cli-contract.mjs
   tests/integrations/runtime-mcp-contract.mjs
   tests/integrations/runtime-protocol-versioning-contract.mjs

@@ -1,0 +1,325 @@
+{
+  "corpus": "ifp/1 stateful sequence conformance",
+  "version": "1.0.0-draft",
+  "note": "Each scenario is a list of steps applied to a fresh conformance state machine. 'give' delivers a message; 'expect' asserts the machine's verdict and observable state. Validators implement the reference state machine described in spec §6-§8.",
+  "initial_state": { "home_generation": 3, "known_dedup": [], "sessions": {} },
+  "scenarios": [
+    {
+      "name": "replay_dedup_accept_then_drop",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_r10000", "ts": "2026-07-21T01:00:00Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_r10000", "device": "dev_d100", "generation": 3,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:00:00Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 0, "dedup": "dev_d100:ses_r10000:0", "text": "a" }
+          },
+          "expect": { "verdict": "accepted", "stored": true }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_r20000", "ts": "2026-07-21T01:00:05Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_r10000", "device": "dev_d100", "generation": 3,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:00:00Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 0, "dedup": "dev_d100:ses_r10000:0", "text": "a" }
+          },
+          "expect": { "verdict": "acknowledged_duplicate", "stored": false }
+        }
+      ]
+    },
+    {
+      "name": "ordering_violation_seq_regression_new_dedup",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_o10000", "ts": "2026-07-21T01:01:00Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_o10000", "device": "dev_d100", "generation": 3,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:01:00Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 5, "dedup": "dev_d100:ses_o10000:5", "text": "later" }
+          },
+          "expect": { "verdict": "accepted" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_o20000", "ts": "2026-07-21T01:01:01Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_o10000", "device": "dev_d100", "generation": 3,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:01:01Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 2, "dedup": "dev_d100:ses_o10000:2-new", "text": "earlier" }
+          },
+          "expect": { "verdict": "rejected", "error_class": "ordering_violation" }
+        }
+      ]
+    },
+    {
+      "name": "stale_generation_fence",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_g10000", "ts": "2026-07-21T01:02:00Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_g10000", "device": "dev_d100", "generation": 2,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:02:00Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 0, "dedup": "dev_d100:ses_g10000:0", "text": "stale writer" }
+          },
+          "expect": {
+            "verdict": "rejected",
+            "error_class": "stale_generation",
+            "error_payload_includes": { "current_generation": 3 }
+          }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_g20000", "ts": "2026-07-21T01:02:01Z",
+            "type": "event.text.message", "entity": "ent_abc123",
+            "session": "ses_g10000", "device": "dev_d100", "generation": 3,
+            "provenance": { "sensor": "dev_d100:kb", "captured_at": "2026-07-21T01:02:01Z" },
+            "labels": { "consent": "product_operation", "retention": "standard" },
+            "payload": { "seq": 0, "dedup": "dev_d100:ses_g10000:0b", "text": "resynced" }
+          },
+          "expect": { "verdict": "accepted" }
+        }
+      ]
+    },
+    {
+      "name": "action_lifecycle_approve_execute",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_a10000", "ts": "2026-07-21T01:03:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_a10000",
+            "payload": {
+              "action_id": "act_life0001", "tool": "messages.send",
+              "params": { "to": "+15551234567", "body": "hi" },
+              "params_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "risk": "medium", "idempotency_key": "act_life0001",
+              "expires_at": "2026-07-21T01:08:00Z"
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "requested" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_a20000", "ts": "2026-07-21T01:03:05Z",
+            "type": "action.approve", "entity": "ent_abc123", "session": "ses_a10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": {
+              "action_id": "act_life0001",
+              "params_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "confirmation": { "mode": "user_confirmed", "ref": "aud_local_1" }
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "approved" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_a30000", "ts": "2026-07-21T01:03:07Z",
+            "type": "action.result", "entity": "ent_abc123", "session": "ses_a10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": { "action_id": "act_life0001", "status": "executed", "error_class": null, "evidence": "aud_local_2" }
+          },
+          "expect": { "verdict": "accepted", "action_state": "executed" }
+        }
+      ]
+    },
+    {
+      "name": "action_lifecycle_device_rejection_is_terminal",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_b10000", "ts": "2026-07-21T01:04:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_b10000",
+            "payload": {
+              "action_id": "act_rej00001", "tool": "calls.place",
+              "params": { "to": "+15550000000" },
+              "params_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+              "risk": "high", "idempotency_key": "act_rej00001",
+              "expires_at": "2026-07-21T01:09:00Z"
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "requested" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_b20000", "ts": "2026-07-21T01:04:02Z",
+            "type": "action.reject", "entity": "ent_abc123", "session": "ses_b10000",
+            "device": "dev_d100",
+            "payload": { "action_id": "act_rej00001", "reason_class": "user_denied" }
+          },
+          "expect": { "verdict": "accepted", "action_state": "rejected" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_b30000", "ts": "2026-07-21T01:04:10Z",
+            "type": "action.approve", "entity": "ent_abc123", "session": "ses_b10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": {
+              "action_id": "act_rej00001",
+              "params_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+              "confirmation": { "mode": "user_confirmed", "ref": "aud_x" }
+            }
+          },
+          "expect": { "verdict": "rejected", "error_class": "invalid_envelope", "note": "terminal state; approval after rejection is a protocol violation" }
+        }
+      ]
+    },
+    {
+      "name": "action_binding_mismatch",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_c10000", "ts": "2026-07-21T01:05:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_c10000",
+            "payload": {
+              "action_id": "act_bind0001", "tool": "messages.send",
+              "params": { "to": "+15551234567", "body": "original" },
+              "params_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+              "risk": "medium", "idempotency_key": "act_bind0001",
+              "expires_at": "2026-07-21T01:10:00Z"
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "requested" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_c20000", "ts": "2026-07-21T01:05:03Z",
+            "type": "action.approve", "entity": "ent_abc123", "session": "ses_c10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": {
+              "action_id": "act_bind0001",
+              "params_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+              "confirmation": { "mode": "user_confirmed", "ref": "aud_y" }
+            }
+          },
+          "expect": { "verdict": "rejected", "error_class": "binding_mismatch", "action_state": "requested" }
+        }
+      ]
+    },
+    {
+      "name": "action_expiry",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_d10000", "ts": "2026-07-21T01:06:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_d10000",
+            "payload": {
+              "action_id": "act_exp00001", "tool": "messages.send",
+              "params": { "to": "+15551234567", "body": "late" },
+              "params_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+              "risk": "low", "idempotency_key": "act_exp00001",
+              "expires_at": "2026-07-21T01:06:30Z"
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "requested" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_d20000", "ts": "2026-07-21T01:07:00Z",
+            "type": "action.approve", "entity": "ent_abc123", "session": "ses_d10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": {
+              "action_id": "act_exp00001",
+              "params_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+              "confirmation": { "mode": "user_confirmed", "ref": "aud_z" }
+            }
+          },
+          "expect": { "verdict": "rejected", "error_class": "action_expired", "action_state": "expired" }
+        }
+      ]
+    },
+    {
+      "name": "action_cancel_before_execution",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_e10000", "ts": "2026-07-21T01:08:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_e10000",
+            "payload": {
+              "action_id": "act_can00001", "tool": "messages.send",
+              "params": { "to": "+15551234567", "body": "wait no" },
+              "params_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+              "risk": "medium", "idempotency_key": "act_can00001",
+              "expires_at": "2026-07-21T01:13:00Z"
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "requested" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_e20000", "ts": "2026-07-21T01:08:05Z",
+            "type": "action.cancel", "entity": "ent_abc123", "session": "ses_e10000",
+            "payload": { "action_id": "act_can00001" }
+          },
+          "expect": { "verdict": "accepted", "action_state": "cancelled" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_e30000", "ts": "2026-07-21T01:08:08Z",
+            "type": "action.result", "entity": "ent_abc123", "session": "ses_e10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": { "action_id": "act_can00001", "status": "executed", "error_class": null, "evidence": null }
+          },
+          "expect": { "verdict": "rejected", "error_class": "invalid_envelope", "note": "execution after cancellation is a protocol violation" }
+        }
+      ]
+    },
+    {
+      "name": "duplicate_action_result_idempotent",
+      "steps": [
+        {
+          "give": {
+            "ifp": "1", "id": "msg_f10000", "ts": "2026-07-21T01:09:00Z",
+            "type": "action.propose", "entity": "ent_abc123", "session": "ses_f10000",
+            "payload": {
+              "action_id": "act_idem0001", "tool": "messages.send",
+              "params": { "to": "+15551234567", "body": "once" },
+              "params_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+              "risk": "medium", "idempotency_key": "act_idem0001",
+              "expires_at": "2026-07-21T01:14:00Z"
+            }
+          },
+          "expect": { "verdict": "accepted" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_f20000", "ts": "2026-07-21T01:09:02Z",
+            "type": "action.approve", "entity": "ent_abc123", "session": "ses_f10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": {
+              "action_id": "act_idem0001",
+              "params_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+              "confirmation": { "mode": "policy_auto", "ref": null }
+            }
+          },
+          "expect": { "verdict": "accepted", "action_state": "approved" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_f30000", "ts": "2026-07-21T01:09:04Z",
+            "type": "action.result", "entity": "ent_abc123", "session": "ses_f10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": { "action_id": "act_idem0001", "status": "executed", "error_class": null, "evidence": "aud_1" }
+          },
+          "expect": { "verdict": "accepted", "action_state": "executed" }
+        },
+        {
+          "give": {
+            "ifp": "1", "id": "msg_f40000", "ts": "2026-07-21T01:09:06Z",
+            "type": "action.result", "entity": "ent_abc123", "session": "ses_f10000",
+            "device": "dev_d100", "generation": 3,
+            "payload": { "action_id": "act_idem0001", "status": "executed", "error_class": null, "evidence": "aud_1" }
+          },
+          "expect": { "verdict": "acknowledged_duplicate", "action_state": "executed" }
+        }
+      ]
+    }
+  ]
+}

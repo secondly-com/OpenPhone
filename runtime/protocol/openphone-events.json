@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "deprecated": true,
+  "superseded_by": "ifp1/",
   "events": [
     { "name": "runtime.presence.online", "direction": "phone_to_runtime" },
     { "name": "runtime.presence.offline", "direction": "phone_to_runtime" },

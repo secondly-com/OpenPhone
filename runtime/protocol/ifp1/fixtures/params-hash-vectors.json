@@ -1,0 +1,37 @@
+{
+  "corpus": "ifp/1 canonical params_hash test vectors (spec section 8.1)",
+  "version": "1.0.0-draft",
+  "note": "params_hash = 'sha256:' + hex SHA-256 of the canonical JSON encoding of params: UTF-8, lexicographically sorted object keys at every depth, no insignificant whitespace. These vectors are shared between the OpenPhone adapter tests and the upstream interfaces-protocol fixture corpus; upstream them to packages/interfaces-protocol/fixtures/ before the corpus freezes (WS1).",
+  "vectors": [
+    {
+      "name": "spec_8_1_example_params",
+      "params": { "to": "+15551234567", "body": "on my way" },
+      "canonical": "{\"body\":\"on my way\",\"to\":\"+15551234567\"}",
+      "params_hash": "sha256:1e920af2c02daa49a449d1ebe938e08f196a9dfa6a3c05b36adbabbd7387193b"
+    },
+    {
+      "name": "empty_params",
+      "params": {},
+      "canonical": "{}",
+      "params_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "nested_objects_and_arrays_sorted_at_every_depth",
+      "params": { "z": { "b": 2, "a": 1 }, "a": [3, { "y": true, "x": null }] },
+      "canonical": "{\"a\":[3,{\"x\":null,\"y\":true}],\"z\":{\"a\":1,\"b\":2}}",
+      "params_hash": "sha256:ec6c43224edc1d346f2e8e60a653b47df2346dabf8d9e4f8d7b378845125a250"
+    },
+    {
+      "name": "unicode_is_utf8_not_ascii_escaped",
+      "params": { "body": "café → 😀" },
+      "canonical": "{\"body\":\"café → 😀\"}",
+      "params_hash": "sha256:c8e0a199ed18106634a6a12bd76a9a2211e68028bc5846d208a6a8c77234557c"
+    },
+    {
+      "name": "key_order_of_input_is_irrelevant",
+      "params": { "body": "on my way", "to": "+15551234567" },
+      "canonical": "{\"body\":\"on my way\",\"to\":\"+15551234567\"}",
+      "params_hash": "sha256:1e920af2c02daa49a449d1ebe938e08f196a9dfa6a3c05b36adbabbd7387193b"
+    }
+  ]
+}

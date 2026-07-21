@@ -1,18 +1,15 @@
 {
-  "version": 1,
-  "deprecated": true,
-  "superseded_by": "ifp1/",
-  "commands": [
+  "ifp": "1",
+  "manifest": "openphone-tools",
+  "version": "1.0.0-draft",
+  "description": "OpenPhone surface tool capability declarations for Interfaces Protocol v1 (ifp/1). Each tool is declared at hello/pairing as a capability of type 'tool:<name>' (spec section 6.4) and invoked via the action lifecycle (spec section 8): action.propose -> action.approve/action.reject -> action.result. risk maps directly onto action.propose payload.risk. Supersedes runtime/protocol/openphone-commands.json (37 commands).",
+  "tools": [
     {
-      "name": "openphone.device.status",
-      "aliases": [
-        "device.status",
-        "device.info"
-      ],
-      "android_tool": "phone_context",
+      "tool": "device.status",
+      "capability": "tool:device.status",
+      "risk": "medium",
       "description": "Gather a call context card from call log, contacts, messages, and calendar, including missed calls not yet returned.",
-      "category": "device",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -36,26 +33,28 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "calls.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.device.status",
+        "superseded_aliases": [
+          "device.status",
+          "device.info"
+        ],
+        "android_tool": "phone_context",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calls.read"
+      }
     },
     {
-      "name": "openphone.apps.search",
-      "aliases": [
-        "device.apps"
-      ],
-      "android_tool": "apps_search",
+      "tool": "apps.search",
+      "capability": "tool:apps.search",
+      "risk": "low",
       "description": "Search launchable installed Android apps by label, package, or activity.",
-      "category": "apps",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -79,26 +78,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "apps.read",
-      "confirmation": "none",
-      "default_exposure": "safe_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.apps.search",
+        "superseded_aliases": [
+          "device.apps"
+        ],
+        "android_tool": "apps_search",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "apps.read"
+      }
     },
     {
-      "name": "openphone.screen.get",
-      "aliases": [
-        "canvas.snapshot"
-      ],
-      "android_tool": "get_screen",
+      "tool": "screen.get",
+      "capability": "tool:screen.get",
+      "risk": "low",
       "description": "Read the current phone screen and optional screenshot.",
-      "category": "screen",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "include_screenshot": {
@@ -122,26 +122,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "screen.read.visible",
-      "confirmation": "none",
-      "default_exposure": "safe_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.screen.get",
+        "superseded_aliases": [
+          "canvas.snapshot"
+        ],
+        "android_tool": "get_screen",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "screen.read.visible"
+      }
     },
     {
-      "name": "openphone.screen.understand_local",
-      "aliases": [
-        "openphone.local.screen_understanding"
-      ],
-      "android_tool": "local_screen_understanding",
+      "tool": "screen.understand_local",
+      "capability": "tool:screen.understand_local",
+      "risk": "low",
       "description": "Run bounded local screen understanding on the phone without returning screenshot bytes.",
-      "category": "screen",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "max_visible_text": {
@@ -165,26 +166,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "screen.read.visible",
-      "confirmation": "none",
-      "default_exposure": "safe_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.screen.understand_local",
+        "superseded_aliases": [
+          "openphone.local.screen_understanding"
+        ],
+        "android_tool": "local_screen_understanding",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "screen.read.visible"
+      }
     },
     {
-      "name": "openphone.notifications.list",
-      "aliases": [
-        "notifications.list"
-      ],
-      "android_tool": "notifications_list",
+      "tool": "notifications.list",
+      "capability": "tool:notifications.list",
+      "risk": "medium",
       "description": "List recent indexed Android notifications.",
-      "category": "notifications",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "limit": {
@@ -200,26 +202,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "notifications.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.list",
+        "superseded_aliases": [
+          "notifications.list"
+        ],
+        "android_tool": "notifications_list",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "notifications.read"
+      }
     },
     {
-      "name": "openphone.notifications.search",
-      "aliases": [
-        "notifications.search"
-      ],
-      "android_tool": "notifications_search",
+      "tool": "notifications.search",
+      "capability": "tool:notifications.search",
+      "risk": "medium",
       "description": "Search recent indexed Android notifications.",
-      "category": "notifications",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -240,26 +243,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "notifications.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.search",
+        "superseded_aliases": [
+          "notifications.search"
+        ],
+        "android_tool": "notifications_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "notifications.read"
+      }
     },
     {
-      "name": "openphone.notifications.open",
-      "aliases": [
-        "notifications.open"
-      ],
-      "android_tool": "notifications_open",
+      "tool": "notifications.open",
+      "capability": "tool:notifications.open",
+      "risk": "medium",
       "description": "Open an active Android notification through its content intent.",
-      "category": "notifications",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "notification_key": {
@@ -283,26 +287,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "notifications.act",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.open",
+        "superseded_aliases": [
+          "notifications.open"
+        ],
+        "android_tool": "notifications_open",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "notifications.act"
+      }
     },
     {
-      "name": "openphone.contacts.search",
-      "aliases": [
-        "contacts.search"
-      ],
-      "android_tool": "contacts_search",
+      "tool": "contacts.search",
+      "capability": "tool:contacts.search",
+      "risk": "medium",
       "description": "Search Android contacts by name, phone, email, or organization.",
-      "category": "contacts",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -326,26 +331,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "contacts.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.contacts.search",
+        "superseded_aliases": [
+          "contacts.search"
+        ],
+        "android_tool": "contacts_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "contacts.read"
+      }
     },
     {
-      "name": "openphone.calendar.search",
-      "aliases": [
-        "calendar.events"
-      ],
-      "android_tool": "calendar_search",
+      "tool": "calendar.search",
+      "capability": "tool:calendar.search",
+      "risk": "medium",
       "description": "Search Android calendar events in a bounded time window.",
-      "category": "calendar",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -373,26 +379,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "calendar.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.search",
+        "superseded_aliases": [
+          "calendar.events"
+        ],
+        "android_tool": "calendar_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calendar.read"
+      }
     },
     {
-      "name": "openphone.calendar.add",
-      "aliases": [
-        "calendar.add"
-      ],
-      "android_tool": "calendar_create_event",
+      "tool": "calendar.add",
+      "capability": "tool:calendar.add",
+      "risk": "medium",
       "description": "Create an Android calendar event in the user's writable calendar.",
-      "category": "calendar",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "title": {
@@ -438,26 +445,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "calendar.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.add",
+        "superseded_aliases": [
+          "calendar.add"
+        ],
+        "android_tool": "calendar_create_event",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.write"
+      }
     },
     {
-      "name": "openphone.calendar.update",
-      "aliases": [
-        "calendar.update"
-      ],
-      "android_tool": "calendar_update_event",
+      "tool": "calendar.update",
+      "capability": "tool:calendar.update",
+      "risk": "medium",
       "description": "Update fields of an existing Android calendar event (title, time, location, description). Recurring events update the whole series.",
-      "category": "calendar",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "event_id": {
@@ -502,26 +510,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "calendar.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.update",
+        "superseded_aliases": [
+          "calendar.update"
+        ],
+        "android_tool": "calendar_update_event",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.write"
+      }
     },
     {
-      "name": "openphone.calendar.delete",
-      "aliases": [
-        "calendar.delete"
-      ],
-      "android_tool": "calendar_delete_event",
+      "tool": "calendar.delete",
+      "capability": "tool:calendar.delete",
+      "risk": "high",
       "description": "Delete an Android calendar event permanently. Recurring events delete the whole series.",
-      "category": "calendar",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "event_id": {
@@ -538,26 +547,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "high",
-      "capability": "calendar.delete",
-      "confirmation": "always",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.delete",
+        "superseded_aliases": [
+          "calendar.delete"
+        ],
+        "android_tool": "calendar_delete_event",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.delete"
+      }
     },
     {
-      "name": "openphone.messages.search",
-      "aliases": [
-        "sms.search"
-      ],
-      "android_tool": "messages_search",
+      "tool": "messages.search",
+      "capability": "tool:messages.search",
+      "risk": "medium",
       "description": "Search Android SMS message history by sender, body, or address.",
-      "category": "messages",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -581,26 +591,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "messages.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.messages.search",
+        "superseded_aliases": [
+          "sms.search"
+        ],
+        "android_tool": "messages_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "messages.read"
+      }
     },
     {
-      "name": "openphone.messages.draft",
-      "aliases": [
-        "sms.draft"
-      ],
-      "android_tool": "messages_draft",
+      "tool": "messages.draft",
+      "capability": "tool:messages.draft",
+      "risk": "medium",
       "description": "Prepare a structured SMS draft for review without sending it.",
-      "category": "messages",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "to": {
@@ -625,26 +636,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "messages.draft",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.messages.draft",
+        "superseded_aliases": [
+          "sms.draft"
+        ],
+        "android_tool": "messages_draft",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "messages.draft"
+      }
     },
     {
-      "name": "openphone.messages.send",
-      "aliases": [
-        "sms.send"
-      ],
-      "android_tool": "messages_send",
+      "tool": "messages.send",
+      "capability": "tool:messages.send",
+      "risk": "high",
       "description": "Send an SMS message to a phone number.",
-      "category": "messages",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "to": {
@@ -666,26 +678,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "high",
-      "capability": "messages.send",
-      "confirmation": "always",
-      "default_exposure": "dangerous",
-      "mcp": false,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.messages.send",
+        "superseded_aliases": [
+          "sms.send"
+        ],
+        "android_tool": "messages_send",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "messages.send"
+      }
     },
     {
-      "name": "openphone.calls.search",
-      "aliases": [
-        "callLog.search"
-      ],
-      "android_tool": "calls_search",
+      "tool": "calls.search",
+      "capability": "tool:calls.search",
+      "risk": "medium",
       "description": "Search Android call log entries by number, contact name (joined from contacts when the log has none), type, or date range.",
-      "category": "calls",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -717,26 +730,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "calls.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calls.search",
+        "superseded_aliases": [
+          "callLog.search"
+        ],
+        "android_tool": "calls_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calls.read"
+      }
     },
     {
-      "name": "openphone.calls.place",
-      "aliases": [
-        "calls.place"
-      ],
-      "android_tool": "calls_place",
+      "tool": "calls.place",
+      "capability": "tool:calls.place",
+      "risk": "high",
       "description": "Place a phone call to a number.",
-      "category": "calls",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "number": {
@@ -756,23 +770,27 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "high",
-      "capability": "calls.place",
-      "confirmation": "always",
-      "default_exposure": "dangerous",
-      "mcp": false,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.calls.place",
+        "superseded_aliases": [
+          "calls.place"
+        ],
+        "android_tool": "calls_place",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "calls.place"
+      }
     },
     {
-      "name": "openphone.memory.search",
-      "android_tool": "memory_search",
+      "tool": "memory.search",
+      "capability": "tool:memory.search",
+      "risk": "low",
       "description": "Search durable OpenPhone memories: user preferences, facts, standing instructions, and long-lived personal context. Use before answering questions that depend on remembered user preferences or identity.",
-      "category": "memory",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -792,23 +810,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "memory.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.memory.search",
+        "superseded_aliases": [],
+        "android_tool": "memory_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "memory.read"
+      }
     },
     {
-      "name": "openphone.memory.save",
-      "android_tool": "memory_save",
+      "tool": "memory.save",
+      "capability": "tool:memory.save",
+      "risk": "medium",
       "description": "Save explicit durable user memory: stable preferences, facts, or standing instructions that should affect future phone behavior. Do not use for one-off reminders or future conditions; use commitments or watchers for those.",
-      "category": "memory",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "type": {
@@ -837,23 +857,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "memory.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.memory.save",
+        "superseded_aliases": [],
+        "android_tool": "memory_save",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "memory.write"
+      }
     },
     {
-      "name": "openphone.watchers.list",
-      "android_tool": "watcher_list",
+      "tool": "watchers.list",
+      "capability": "tool:watchers.list",
+      "risk": "low",
       "description": "List active OpenPhone watchers: external-condition monitors that may alert later. Use when the user asks what OpenPhone is watching or what conditions are being monitored. Do not use for queued background agent jobs; use background_job_list for those.",
-      "category": "watchers",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -873,23 +895,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "watchers.read",
-      "confirmation": "none",
-      "default_exposure": "private_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.list",
+        "superseded_aliases": [],
+        "android_tool": "watcher_list",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "watchers.read"
+      }
     },
     {
-      "name": "openphone.watchers.create",
-      "android_tool": "watcher_create",
+      "tool": "watchers.create",
+      "capability": "tool:watchers.create",
+      "risk": "medium",
       "description": "Create a durable OpenPhone watcher: a future trigger plus an optional reaction. Use for proactive monitoring of message replies/no-reply deadlines, calls/no-call deadlines, notification matches, web/page changes, semantic page conditions, and requests like tell me when, remind me if, watch this, let me know, or make sure I do not forget. If the user asks the phone to do something when the trigger happens, store that reaction in delivery using delivery.tool plus delivery.arguments, or delivery.prompt for a background agent job. Tool arguments may reference trigger data with templates such as {{event.number}}, {{event.address}}, {{event.title}}, {{event.text}}, {{event.url}}, {{watcher.id}}, and {{watcher.title}}. For requests to monitor incoming SMS/messages and check, research, classify, summarize, or otherwise reason about each message, create a message watcher with match_any=true and recurring=true, then use delivery.prompt so the fired watcher starts a background agent job; the prompt should include {{event.text}} and may tell the agent to use browser_search or browser_fetch_page for internet context before notifying the user. Do not use watcher_create for explicit run-as-soon-as-possible queued agent work; use background_job_create for that.",
-      "category": "watchers",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "source": {
@@ -994,23 +1018,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "watchers.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.create",
+        "superseded_aliases": [],
+        "android_tool": "watcher_create",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "watchers.write"
+      }
     },
     {
-      "name": "openphone.watchers.stop",
-      "android_tool": "watcher_stop",
+      "tool": "watchers.stop",
+      "capability": "tool:watchers.stop",
+      "risk": "medium",
       "description": "Stop active OpenPhone watchers. Use watcher_id when the user names a specific watcher id. Use scope=all or all=true when the user asks to turn off, disable, clear, remove, delete, cancel, stop, or kill all watchers. Use query when the user describes a watcher by title, source, or condition instead of giving an id.",
-      "category": "watchers",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "watcher_id": {
@@ -1038,23 +1064,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "watchers.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.stop",
+        "superseded_aliases": [],
+        "android_tool": "watcher_stop",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "watchers.write"
+      }
     },
     {
-      "name": "openphone.jobs.list",
-      "android_tool": "background_job_list",
+      "tool": "jobs.list",
+      "capability": "tool:jobs.list",
+      "risk": "low",
       "description": "List durable OpenPhone background agent jobs, including active, running, completed, failed, and stopped jobs. Use when the user asks what OpenPhone is working on in the background or what background jobs are active.",
-      "category": "background",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "query": {
@@ -1074,23 +1102,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "tasks.observe",
-      "confirmation": "none",
-      "default_exposure": "safe_read",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.list",
+        "superseded_aliases": [],
+        "android_tool": "background_job_list",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "tasks.observe"
+      }
     },
     {
-      "name": "openphone.jobs.create",
-      "android_tool": "background_job_create",
+      "tool": "jobs.create",
+      "capability": "tool:jobs.create",
+      "risk": "medium",
       "description": "Create a durable OpenPhone background agent job: a queued agent turn that can run after the current conversation. Use for explicit requests like create a background job, do this in the background, run this as soon as possible, keep working and notify me, periodically summarize, check later by running an agent task, or run a non-urgent retrieval task. Do not use watcher_create for these queued agent jobs. Background jobs may observe and summarize; state-changing tools require foreground review.",
-      "category": "background",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "title": {
@@ -1148,23 +1178,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "background.run",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.create",
+        "superseded_aliases": [],
+        "android_tool": "background_job_create",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "background.run"
+      }
     },
     {
-      "name": "openphone.jobs.stop",
-      "android_tool": "background_job_stop",
+      "tool": "jobs.stop",
+      "capability": "tool:jobs.stop",
+      "risk": "medium",
       "description": "Stop a durable OpenPhone background agent job.",
-      "category": "background",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "job_id": {
@@ -1181,23 +1213,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "background.run",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.stop",
+        "superseded_aliases": [],
+        "android_tool": "background_job_stop",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "background.run"
+      }
     },
     {
-      "name": "openphone.app.open",
-      "android_tool": "open_app",
+      "tool": "app.open",
+      "capability": "tool:app.open",
+      "risk": "low",
       "description": "Open an installed Android app. This tool completes only simple goals whose whole intent is to open, launch, or show the app. If the user wants something done inside the app, such as playing media, searching, selecting content, changing settings, ordering, booking, posting, sending, or any other in-app workflow, use the autonomous multi-step agent: open the app as one step, then keep observing and acting until the requested result is visibly complete or blocked.",
-      "category": "apps",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "package_or_label": {
@@ -1217,23 +1251,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "apps.launch",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.app.open",
+        "superseded_aliases": [],
+        "android_tool": "open_app",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "apps.launch"
+      }
     },
     {
-      "name": "openphone.url.open",
-      "android_tool": "open_url",
+      "tool": "url.open",
+      "capability": "tool:url.open",
+      "risk": "medium",
       "description": "Open a URL directly in the browser.",
-      "category": "apps",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "url": {
@@ -1250,23 +1286,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "network.use",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.url.open",
+        "superseded_aliases": [],
+        "android_tool": "open_url",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "network.use"
+      }
     },
     {
-      "name": "openphone.ui.tap",
-      "android_tool": "tap",
+      "tool": "ui.tap",
+      "capability": "tool:ui.tap",
+      "risk": "medium",
       "description": "Tap absolute screen coordinates.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "x": {
@@ -1288,23 +1326,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.tap",
+        "superseded_aliases": [],
+        "android_tool": "tap",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.ui.tap_element",
-      "android_tool": "tap_element",
+      "tool": "ui.tap_element",
+      "capability": "tool:ui.tap_element",
+      "risk": "medium",
       "description": "Tap an enabled interactive element by screen element id.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "element_id": {
@@ -1321,23 +1361,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.tap_element",
+        "superseded_aliases": [],
+        "android_tool": "tap_element",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.ui.long_press",
-      "android_tool": "long_press",
+      "tool": "ui.long_press",
+      "capability": "tool:ui.long_press",
+      "risk": "medium",
       "description": "Long press absolute screen coordinates.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "x": {
@@ -1363,23 +1405,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.long_press",
+        "superseded_aliases": [],
+        "android_tool": "long_press",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.ui.long_press_element",
-      "android_tool": "long_press_element",
+      "tool": "ui.long_press_element",
+      "capability": "tool:ui.long_press_element",
+      "risk": "medium",
       "description": "Long press an enabled interactive element by screen element id.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "element_id": {
@@ -1400,23 +1444,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.long_press_element",
+        "superseded_aliases": [],
+        "android_tool": "long_press_element",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.ui.swipe",
-      "android_tool": "swipe",
+      "tool": "ui.swipe",
+      "capability": "tool:ui.swipe",
+      "risk": "medium",
       "description": "Swipe from one coordinate to another.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "start_x": {
@@ -1448,23 +1494,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.swipe",
+        "superseded_aliases": [],
+        "android_tool": "swipe",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.ui.type_text",
-      "android_tool": "type_text",
+      "tool": "ui.type_text",
+      "capability": "tool:ui.type_text",
+      "risk": "medium",
       "description": "Type text into the focused field.",
-      "category": "ui",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "text": {
@@ -1481,23 +1529,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.ui.type_text",
+        "superseded_aliases": [],
+        "android_tool": "type_text",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.input.press_key",
-      "android_tool": "press_key",
+      "tool": "input.press_key",
+      "capability": "tool:input.press_key",
+      "risk": "medium",
       "description": "Press a supported Android navigation or IME key.",
-      "category": "input",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "key": {
@@ -1514,23 +1564,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "input.perform",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.input.press_key",
+        "superseded_aliases": [],
+        "android_tool": "press_key",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
     },
     {
-      "name": "openphone.clipboard.set",
-      "android_tool": "set_clipboard",
+      "tool": "clipboard.set",
+      "capability": "tool:clipboard.set",
+      "risk": "low",
       "description": "Set clipboard text.",
-      "category": "clipboard",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "text": {
@@ -1547,23 +1599,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "low",
-      "capability": "clipboard.write",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.clipboard.set",
+        "superseded_aliases": [],
+        "android_tool": "set_clipboard",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "clipboard.write"
+      }
     },
     {
-      "name": "openphone.clipboard.paste",
-      "android_tool": "paste",
+      "tool": "clipboard.paste",
+      "capability": "tool:clipboard.paste",
+      "risk": "medium",
       "description": "Paste clipboard into the focused field.",
-      "category": "clipboard",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "reason": {
@@ -1575,23 +1629,25 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "medium",
-      "capability": "clipboard.read",
-      "confirmation": "ask_before_action",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.clipboard.paste",
+        "superseded_aliases": [],
+        "android_tool": "paste",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "clipboard.read"
+      }
     },
     {
-      "name": "openphone.share.text",
-      "android_tool": "share_text",
+      "tool": "share.text",
+      "capability": "tool:share.text",
+      "risk": "high",
       "description": "Share text through Android's mediated share flow.",
-      "category": "share",
-      "input_schema": {
+      "params_schema": {
         "type": "object",
         "properties": {
           "text": {
@@ -1612,16 +1668,18 @@
           "reason"
         ]
       },
-      "output_schema": {
+      "result_schema": {
         "type": "object",
         "additionalProperties": true
       },
-      "risk": "high",
-      "capability": "share.content",
-      "confirmation": "always",
-      "default_exposure": "dangerous",
-      "mcp": true,
-      "remote_runtime": true
+      "x-openphone": {
+        "superseded_command": "openphone.share.text",
+        "superseded_aliases": [],
+        "android_tool": "share_text",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "share.content"
+      }
     }
   ]
 }
