@@ -54,9 +54,18 @@ public final class OpenPhoneOrchestrator {
                 return OrchestratorDecision.inspectScreen(reason, operatingMode);
             }
             if (OrchestratorDecision.MODE_CLARIFY.equals(mode)) {
-                return OrchestratorDecision.clarify(
-                        reply.isEmpty() ? "Can you tell me more about what you want?" : reply,
-                        reason, operatingMode);
+                // The orchestrator is not allowed to hand an actionable request back to the
+                // user before the phone agent has tried the available context and tools. The
+                // agent loop can search contacts, messages, memory, the current screen, and
+                // other phone state; it should be the component that establishes whether a
+                // request is genuinely blocked. This also keeps ordinary ambiguity (for
+                // example, "call Adam") inside the capable loop instead of turning it into an
+                // unnecessary questionnaire.
+                String clarifyReason = reason.isEmpty()
+                        ? "clarification_deferred_to_agent"
+                        : "clarification_deferred_to_agent: " + reason;
+                return OrchestratorDecision.agentTask(originalMessage, clarifyReason,
+                        operatingMode);
             }
             if (OrchestratorDecision.MODE_RETRIEVE.equals(mode)
                     || OrchestratorDecision.MODE_WATCH.equals(mode)
