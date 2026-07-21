@@ -40,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -725,10 +727,16 @@ private fun OpenPhoneHomeScreen(
                 state = state,
                 showTextInput = showTextInput,
                 onToggleKeyboard = { showTextInput = !showTextInput },
-                onSilentSpeechStart = onVoiceStart,
+                onSilentSpeechStart = {
+                    showTextInput = false
+                    onVoiceStart()
+                },
                 onSilentSpeechFinish = onVoiceFinish,
                 onSilentSpeechCancel = onVoiceCancel,
-                onMicrophoneStart = onMicrophoneStart,
+                onMicrophoneStart = {
+                    showTextInput = false
+                    onMicrophoneStart()
+                },
                 onMicrophoneStop = onMicrophoneStop,
                 onAttachPreview = onAttachSilentSpeechPreview,
                 onDetachPreview = onDetachSilentSpeechPreview,
@@ -1538,6 +1546,10 @@ private fun HomeTextComposer(
     onTextChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1556,6 +1568,7 @@ private fun HomeTextComposer(
             maxLines = 4,
             modifier = Modifier
                 .weight(1f)
+                .focusRequester(focusRequester)
                 .padding(vertical = 10.dp),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
