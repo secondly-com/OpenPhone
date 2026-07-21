@@ -344,7 +344,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         handler.post(new Runnable() {
             @Override
             public void run() {
-                if (!mRecording || mCaptureSize == null) {
+                if (mCaptureSize == null) {
                     return;
                 }
                 if (mPreviewTexture == texture && mPreviewSurface != null) {
