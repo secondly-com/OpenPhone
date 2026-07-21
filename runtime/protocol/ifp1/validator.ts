@@ -52,7 +52,7 @@ const ACTION_REJECT_REASONS = new Set([
 
 const RISK_LEVELS = new Set(["low", "medium", "high"]);
 
-const ENTITYLESS_TYPES = new Set(["pair.request", "control.hello", "error"]);
+const ENTITYLESS_TYPES = new Set(["pair.request", "pair.complete", "control.hello", "error"]);
 
 const ID_RE = /^[a-z]+_[A-Za-z0-9]{6,64}$/;
 const TYPE_RE = /^[a-z][a-z0-9_.]*$/;

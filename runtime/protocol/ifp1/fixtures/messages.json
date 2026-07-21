@@ -529,6 +529,40 @@
         },
         "payload": {}
       }
+    },
+    {
+      "name": "accept_control_ack_duplicate",
+      "expect": "accept",
+      "note": "control.ack acknowledges messages with no substantive reply (spec section 3).",
+      "message": {
+        "ifp": "1",
+        "id": "msg_ack0000001",
+        "ts": "2026-07-21T00:00:05Z",
+        "type": "control.ack",
+        "entity": "ent_abc123",
+        "payload": {
+          "of": "msg_evt0000001",
+          "verdict": "acknowledged_duplicate",
+          "stored": false
+        }
+      }
+    },
+    {
+      "name": "accept_pair_complete_null_entity",
+      "expect": "accept",
+      "note": "pair.complete may omit envelope entity; it is learned from pair.grant and echoed in the signed payload (spec section 6.2 step 3).",
+      "message": {
+        "ifp": "1",
+        "id": "msg_paircmp001",
+        "ts": "2026-07-21T00:00:06Z",
+        "type": "pair.complete",
+        "entity": null,
+        "payload": {
+          "device_id": "dev_kitchen01",
+          "entity": "ent_abc123",
+          "signature": "c2lnbmF0dXJlLW92ZXItY2hhbGxlbmdlLWRldmljZS1lbnRpdHk"
+        }
+      }
     }
   ]
 }
