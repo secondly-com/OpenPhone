@@ -10,6 +10,10 @@ flow, and device support.
 
 ### Added
 
+- An explicit `PhoneToolGateway` app/OS boundary: runtime and adaptive-surface
+  execution no longer import hidden OpenPhone framework APIs directly, and the
+  framework-backed implementation reports its platform profile and supported
+  tools through the shared contract.
 - Dedicated OpenPhone Android Home activity with a calm black AI Home surface,
   press-and-hold/release voice input, text fallback, accessible controls, and a
   two-finger App Space gesture.
@@ -43,6 +47,8 @@ flow, and device support.
   chrome stays hidden until a transient edge swipe, and the non-secure swipe
   keyguard is disabled by default while configured credentials continue to
   invoke Android's secure keyguard.
+- OpenPhone Assistant development package bumped to `versionCode=173` /
+  `versionName=0.1.137-dev` for the app/OS execution boundary.
 - Launcher3 remains installed for conventional app access but no longer
   advertises itself as a competing Home activity in OpenPhone products.
 - Tapping the compact idle OpenPhone island returns directly to AI Home; the

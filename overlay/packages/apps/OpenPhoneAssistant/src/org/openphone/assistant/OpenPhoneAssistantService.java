@@ -29,6 +29,7 @@ import org.openphone.assistant.model.ModelEndpointConfig;
 import org.openphone.assistant.model.OpenAiResponsesAgentAdapter;
 import org.openphone.assistant.jobs.BackgroundJobReviewManager;
 import org.openphone.assistant.jobs.OpenPhoneAgentJobScheduler;
+import org.openphone.assistant.platform.OpenPhoneOsToolGateway;
 import org.openphone.assistant.policy.AuditLog;
 import org.openphone.assistant.policy.PolicyDecision;
 import org.openphone.assistant.policy.PolicyEngine;
@@ -421,7 +422,8 @@ public final class OpenPhoneAssistantService extends Service {
             return false;
         }
         if (mRuntimeManager == null) {
-            mRuntimeManager = new RuntimeManager(this, mAgentManager);
+            mRuntimeManager = new RuntimeManager(
+                    this, new OpenPhoneOsToolGateway(this, mAgentManager));
             configureRuntimeCallback();
             mRuntimeManager.start();
         }
@@ -440,7 +442,8 @@ public final class OpenPhoneAssistantService extends Service {
             return;
         }
         if (mRuntimeManager == null) {
-            mRuntimeManager = new RuntimeManager(this, mAgentManager);
+            mRuntimeManager = new RuntimeManager(
+                    this, new OpenPhoneOsToolGateway(this, mAgentManager));
         }
         configureRuntimeCallback();
         mRuntimeManager.start();

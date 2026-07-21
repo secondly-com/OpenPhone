@@ -1,12 +1,12 @@
 package org.openphone.assistant.surface;
 
 import android.content.Context;
-import android.openphone.OpenPhoneAgentManager;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.actions.ActionRegistry;
 import org.openphone.assistant.actions.ToolCatalog;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.runtime.RuntimeIdentity;
 import org.openphone.assistant.runtime.RuntimeConfirmationResolution;
 import org.openphone.assistant.runtime.RuntimeToolBridge;
@@ -32,12 +32,13 @@ public final class SurfaceActionDispatcher {
     private final Context mContext;
     private final Map<String, PendingSurfaceAction> mPending = new HashMap<>();
 
-    public SurfaceActionDispatcher(Context context, OpenPhoneAgentManager agentManager) {
+    public SurfaceActionDispatcher(Context context, PhoneToolGateway phoneGateway) {
         Context app = context.getApplicationContext();
         mContext = app;
         mRepository = new SurfaceRepository(app);
         mEvents = new SurfaceEventLog(app);
-        mToolBridge = agentManager == null ? null : new RuntimeToolBridge(app, agentManager);
+        mToolBridge = phoneGateway == null || !phoneGateway.isAvailable()
+                ? null : new RuntimeToolBridge(app, phoneGateway);
     }
 
     public synchronized SurfaceActionResult invoke(String surfaceId, int revision,

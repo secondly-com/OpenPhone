@@ -26,6 +26,8 @@ it locally with:
 
 - [Architecture](ARCHITECTURE.md) — system layers, OS services, agent
   runtime, and current implementation boundaries.
+- [App and OS Boundary](APP_OS_BOUNDARY.md) — shared product layers, the
+  phone-tool gateway, and the Play-app versus privileged-OS split.
 - [Capabilities](CAPABILITIES.md) — named capabilities, risk levels, and
   policy configuration.
 - [Agent Runtime](AGENT_RUNTIME_V1.md) — background job model, scheduling,

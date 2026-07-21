@@ -19,6 +19,7 @@ required=(
   docs/README.md
   docs/AI_FIRST_ENGINEERING.md
   docs/AGENT_RUNTIME_V1.md
+  docs/APP_OS_BOUNDARY.md
   docs/ARCHITECTURE.md
   docs/BUILD.md
   docs/CAPABILITIES.md
@@ -96,6 +97,7 @@ required=(
   scripts/pull-latest-trajectory.sh
   scripts/check-runtime-protocol.sh
   scripts/validate-background-review-contract.mjs
+  scripts/validate-app-os-boundary.mjs
   scripts/validate-home-shell-contract.mjs
   scripts/validate-island-contract.mjs
   scripts/validate-surface-contract.mjs
@@ -217,6 +219,8 @@ required=(
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/model/LocalHeuristicModelAdapter.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/model/OpenAiRealtimeAdapter.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/ota/OtaUpdateClient.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/platform/PhoneToolGateway.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/platform/OpenPhoneOsToolGateway.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/policy/AppCapabilityPolicy.java
   patches/frameworks_base/0001-OpenPhone-add-agent-manager-framework-service.patch
   patches/frameworks_base/0002-OpenPhone-add-foreground-context-and-audit-mediation.patch
@@ -1143,6 +1147,7 @@ fi
 "$root/scripts/check-runtime-protocol.sh"
 node "$root/scripts/validate-surface-contract.mjs"
 node "$root/scripts/validate-background-review-contract.mjs"
+node "$root/scripts/validate-app-os-boundary.mjs"
 node "$root/scripts/validate-home-shell-contract.mjs"
 node "$root/scripts/validate-island-contract.mjs"
 "$root/scripts/check-assistant-java.sh"
