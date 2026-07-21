@@ -415,6 +415,19 @@ object OpenPhoneHomeComposeHost {
         }
     }
 
+    @JvmStatic
+    fun deliverSilentSpeechTranscript(message: String) {
+        val transcript = message.trim()
+        if (transcript.isEmpty()) return
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Thinking,
+                status = "Silent Speech",
+                resultText = transcript,
+            )
+        }
+    }
+
     private fun applySurfaceActionResult(result: SurfaceActionResult) {
         if (result.status == "needs_confirmation") {
             val confirmationId = result.result.optString("confirmation_id", "")

@@ -87,6 +87,8 @@ public class AssistantActivityBackend extends ComponentActivity {
     private static final String EXTRA_GOAL = "org.openphone.assistant.extra.GOAL";
     private static final String EXTRA_GOAL_BASE64 =
             "org.openphone.assistant.extra.GOAL_BASE64";
+    private static final String EXTRA_INPUT_SOURCE =
+            "org.openphone.assistant.extra.INPUT_SOURCE";
     private static final String EXTRA_RUN = "org.openphone.assistant.extra.RUN";
     static final String EXTRA_START_VOICE =
             "org.openphone.assistant.extra.START_VOICE";
@@ -598,12 +600,16 @@ public class AssistantActivityBackend extends ComponentActivity {
         String goal = debugGoalFromIntent(intent);
         if (goal != null) {
             setCurrentGoalText(goal);
+            if (isHomeSurface() && "silent_speech".equals(debugInputSourceFromIntent(intent))) {
+                OpenPhoneHomeComposeHost.deliverSilentSpeechTranscript(goal);
+            }
         }
         if (intent.getBooleanExtra(EXTRA_RUN, false)) {
+            final String inputSource = debugInputSourceFromIntent(intent);
             postToUi(new Runnable() {
                 @Override
                 public void run() {
-                    routeMessageFromCurrentMessage();
+                    routeMessageFromCurrentMessage(inputSource);
                     if (isControlSurface()) {
                         moveTaskToBack(true);
                     }
@@ -614,6 +620,11 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     private static boolean debugIntentExtrasAllowed() {
         return "userdebug".equals(Build.TYPE) || "eng".equals(Build.TYPE);
+    }
+
+    private static String debugInputSourceFromIntent(Intent intent) {
+        return "silent_speech".equals(intent.getStringExtra(EXTRA_INPUT_SOURCE))
+                ? "silent_speech" : "chat";
     }
 
     protected boolean isControlSurface() {
