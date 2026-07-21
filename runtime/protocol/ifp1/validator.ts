@@ -52,11 +52,12 @@ const ACTION_REJECT_REASONS = new Set([
 
 const RISK_LEVELS = new Set(["low", "medium", "high"]);
 
-const ENTITYLESS_TYPES = new Set(["pair.request", "control.hello"]);
+const ENTITYLESS_TYPES = new Set(["pair.request", "control.hello", "error"]);
 
 const ID_RE = /^[a-z]+_[A-Za-z0-9]{6,64}$/;
 const TYPE_RE = /^[a-z][a-z0-9_.]*$/;
-const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+// Z suffix required (spec section 2): keeps ordering well-defined on the wire.
+const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 const PUBKEY_RE = /^[A-Za-z0-9_-]{43}$/;
 const ENTITY_RE = /^ent_[A-Za-z0-9]{6,64}$/;

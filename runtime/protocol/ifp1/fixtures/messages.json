@@ -29,10 +29,22 @@
         "provenance": {
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z",
-          "chain": [{ "stage": "capture", "model": null }]
+          "chain": [
+            {
+              "stage": "capture",
+              "model": null
+            }
+          ]
         },
-        "labels": { "consent": "product_operation", "retention": "standard" },
-        "payload": { "seq": 0, "dedup": "dev_mac_a1b2:ses_s1a2b3:0", "text": "hello" }
+        "labels": {
+          "consent": "product_operation",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "dedup": "dev_mac_a1b2:ses_s1a2b3:0",
+          "text": "hello"
+        }
       }
     },
     {
@@ -61,8 +73,15 @@
         "session": "ses_s1a2b3",
         "device": "dev_mac_a1b2",
         "generation": 1,
-        "labels": { "consent": "product_operation", "retention": "standard" },
-        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+        "labels": {
+          "consent": "product_operation",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "dedup": "k1",
+          "text": "hello"
+        }
       }
     },
     {
@@ -82,7 +101,11 @@
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z"
         },
-        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+        "payload": {
+          "seq": 0,
+          "dedup": "k1",
+          "text": "hello"
+        }
       }
     },
     {
@@ -101,8 +124,15 @@
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z"
         },
-        "labels": { "consent": "product_operation", "retention": "standard" },
-        "payload": { "seq": 0, "dedup": "k1", "text": "hello" }
+        "labels": {
+          "consent": "product_operation",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "dedup": "k1",
+          "text": "hello"
+        }
       }
     },
     {
@@ -122,8 +152,14 @@
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z"
         },
-        "labels": { "consent": "product_operation", "retention": "standard" },
-        "payload": { "seq": 0, "text": "hello" }
+        "labels": {
+          "consent": "product_operation",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "text": "hello"
+        }
       }
     },
     {
@@ -137,7 +173,9 @@
         "type": "control.ping",
         "entity": "ent_abc123",
         "payload": {},
-        "ext": { "vendor": "nope" }
+        "ext": {
+          "vendor": "nope"
+        }
       }
     },
     {
@@ -150,7 +188,9 @@
         "type": "control.ping",
         "entity": "ent_abc123",
         "payload": {},
-        "ext": { "x-vendor": "ok" }
+        "ext": {
+          "x-vendor": "ok"
+        }
       }
     },
     {
@@ -163,7 +203,9 @@
         "ts": "2026-07-21T00:00:00Z",
         "type": "control.future_thing",
         "entity": "ent_abc123",
-        "payload": { "anything": true }
+        "payload": {
+          "anything": true
+        }
       }
     },
     {
@@ -192,7 +234,10 @@
         "payload": {
           "action_id": "act_00000001",
           "tool": "messages.send",
-          "params": { "to": "+15551234567", "body": "on my way" },
+          "params": {
+            "to": "+15551234567",
+            "body": "on my way"
+          },
           "params_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "reason": "You asked me to tell Dana you're leaving.",
           "risk": "medium",
@@ -237,7 +282,10 @@
         "payload": {
           "action_id": "act_00000001",
           "params_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "confirmation": { "mode": "user_confirmed", "ref": "aud_1" }
+          "confirmation": {
+            "mode": "user_confirmed",
+            "ref": "aud_1"
+          }
         }
       }
     },
@@ -252,7 +300,10 @@
         "entity": "ent_abc123",
         "session": "ses_s1a2b3",
         "device": "dev_mac_a1b2",
-        "payload": { "action_id": "act_00000001", "reason_class": "user_denied" }
+        "payload": {
+          "action_id": "act_00000001",
+          "reason_class": "user_denied"
+        }
       }
     },
     {
@@ -267,7 +318,10 @@
         "entity": "ent_abc123",
         "session": "ses_s1a2b3",
         "device": "dev_mac_a1b2",
-        "payload": { "action_id": "act_00000001", "reason_class": "did_not_feel_like_it" }
+        "payload": {
+          "action_id": "act_00000001",
+          "reason_class": "did_not_feel_like_it"
+        }
       }
     },
     {
@@ -283,7 +337,12 @@
         "payload": {
           "pairing_code": "483-921",
           "public_key": "JDInBjWvZbYAt-lFQxZbV0jkyDrkejNzq5zA5PJ07UE",
-          "capabilities": [{ "type": "console", "properties": {} }],
+          "capabilities": [
+            {
+              "type": "console",
+              "properties": {}
+            }
+          ],
           "label": "kitchen mac"
         }
       }
@@ -323,8 +382,15 @@
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z"
         },
-        "labels": { "consent": "product_operation", "retention": "standard" },
-        "payload": { "seq": 0, "dedup": "k1", "text": "hi" }
+        "labels": {
+          "consent": "product_operation",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "dedup": "k1",
+          "text": "hi"
+        }
       }
     },
     {
@@ -340,10 +406,19 @@
           "device_id": "dev_mac_a1b2",
           "proof": "c2lnbmF0dXJlLW92ZXItbm9uY2U",
           "capabilities": [
-            { "type": "console", "properties": {} },
-            { "type": "tool:messages.send", "properties": {} }
+            {
+              "type": "console",
+              "properties": {}
+            },
+            {
+              "type": "tool:messages.send",
+              "properties": {}
+            }
           ],
-          "protocol": { "min": 1, "max": 1 }
+          "protocol": {
+            "min": 1,
+            "max": 1
+          }
         }
       }
     },
@@ -357,7 +432,10 @@
         "ts": "2026-07-21T00:00:00Z",
         "type": "error",
         "entity": "ent_abc123",
-        "payload": { "class": "made_up_error", "detail": null }
+        "payload": {
+          "class": "made_up_error",
+          "detail": null
+        }
       }
     },
     {
@@ -370,7 +448,11 @@
         "type": "error",
         "entity": "ent_abc123",
         "parent": "msg_evt0000001",
-        "payload": { "class": "stale_generation", "detail": "home moved", "current_generation": 4 }
+        "payload": {
+          "class": "stale_generation",
+          "detail": "home moved",
+          "current_generation": 4
+        }
       }
     },
     {
@@ -390,8 +472,62 @@
           "sensor": "dev_mac_a1b2:keyboard",
           "captured_at": "2026-07-21T00:00:01Z"
         },
-        "labels": { "consent": "whatever_we_want", "retention": "standard" },
-        "payload": { "seq": 0, "dedup": "k1", "text": "hi" }
+        "labels": {
+          "consent": "whatever_we_want",
+          "retention": "standard"
+        },
+        "payload": {
+          "seq": 0,
+          "dedup": "k1",
+          "text": "hi"
+        }
+      }
+    },
+    {
+      "name": "reject_ts_with_numeric_offset",
+      "expect": "reject",
+      "error_class": "invalid_envelope",
+      "note": "Z suffix required so timestamp ordering is well-defined (spec section 2).",
+      "message": {
+        "ifp": "1",
+        "id": "msg_tsoffset01",
+        "ts": "2026-07-21T00:00:00+02:00",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "payload": {}
+      }
+    },
+    {
+      "name": "accept_error_with_null_entity",
+      "expect": "accept",
+      "note": "An error responder rejecting an unparseable message may not know the entity.",
+      "message": {
+        "ifp": "1",
+        "id": "msg_errnoent01",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "error",
+        "entity": null,
+        "payload": {
+          "class": "invalid_envelope",
+          "detail": "unparseable"
+        }
+      }
+    },
+    {
+      "name": "accept_provenance_on_control_message",
+      "expect": "accept",
+      "note": "Provenance is required on events, tolerated elsewhere (spec section 2).",
+      "message": {
+        "ifp": "1",
+        "id": "msg_provctl001",
+        "ts": "2026-07-21T00:00:00Z",
+        "type": "control.ping",
+        "entity": "ent_abc123",
+        "provenance": {
+          "sensor": "dev_x1y2:mic",
+          "captured_at": "2026-07-21T00:00:00Z"
+        },
+        "payload": {}
       }
     }
   ]
