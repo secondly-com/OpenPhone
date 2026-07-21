@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -1015,11 +1014,11 @@ private fun SilentSpeechCameraOrb(
         SilentSpeechCameraPreview(
             onAttach = onAttach,
             onDetach = onDetach,
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.fillMaxSize(),
         )
         Box(
             Modifier
-                .matchParentSize()
+                .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         listOf(
@@ -1032,7 +1031,7 @@ private fun SilentSpeechCameraOrb(
         )
         Box(
             Modifier
-                .matchParentSize()
+                .fillMaxSize()
                 .background(
                     Brush.radialGradient(
                         listOf(Color.Transparent, Color.Black.copy(alpha = 0.30f)),
@@ -1044,7 +1043,7 @@ private fun SilentSpeechCameraOrb(
             fill = Color(0x22FF5966),
             modifier = Modifier.size(width = 64.dp, height = 32.dp),
         )
-        Canvas(Modifier.matchParentSize()) {
+        Canvas(Modifier.fillMaxSize()) {
             val progress = (frameCount / 450f).coerceIn(0f, 1f)
             drawCircle(
                 color = Color.White.copy(alpha = 0.42f),
@@ -1166,7 +1165,7 @@ private fun SilentSpeechHoldButton(
         contentAlignment = Alignment.Center,
     ) {
         if (!recording) {
-            Canvas(Modifier.matchParentSize()) {
+            Canvas(Modifier.fillMaxSize()) {
                 drawCircle(
                     brush = Brush.radialGradient(
                         listOf(Color(0xFF65D7FF), Color(0xFF0A4BCB)),
