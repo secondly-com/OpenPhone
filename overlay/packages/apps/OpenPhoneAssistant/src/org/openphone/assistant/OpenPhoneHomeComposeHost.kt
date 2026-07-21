@@ -160,7 +160,7 @@ object OpenPhoneHomeComposeHost {
                     it.copy(
                         mode = when {
                             listening -> HomeAgentMode.Listening
-                            running || activeTaskId != null -> HomeAgentMode.Running
+                            running -> HomeAgentMode.Running
                             it.pending != null -> HomeAgentMode.Review
                             text.contains("error", ignoreCase = true) ||
                                 text.contains("failed", ignoreCase = true) -> HomeAgentMode.Error
@@ -594,7 +594,8 @@ object OpenPhoneHomeComposeHost {
             clean.startsWith("working") || clean.startsWith("starting") -> HomeAgentMode.Running
             clean.contains("approval") || clean.contains("review") -> HomeAgentMode.Review
             clean.contains("failed") || clean.contains("error") ||
-                clean.contains("unavailable") -> HomeAgentMode.Error
+                clean.contains("unavailable") || clean == "try again" -> HomeAgentMode.Error
+            clean == "done" -> HomeAgentMode.Result
             clean == "ready" || clean.contains("is ready") || clean == "stopped" -> HomeAgentMode.Idle
             else -> fallback
         }

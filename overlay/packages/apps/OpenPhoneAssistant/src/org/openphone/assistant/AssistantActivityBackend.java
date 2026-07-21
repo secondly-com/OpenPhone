@@ -3475,6 +3475,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                         showConfirmationIfNeeded(result);
                         boolean finished = result.contains("\"status\":\"task.finished\"")
                                 || result.contains("\"status\": \"task.finished\"");
+                        boolean failed = isActionResultFailure(result);
                         if (finished) {
                             AdaptiveSurface surface =
                                     presentDeterministicSurface(result, taskId);
@@ -3490,7 +3491,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                                 displayReply,
                                 taskId, result);
                         updateIsland(finished
-                                ? "Done" : "Needs review");
+                                ? "Done" : failed ? "Try again" : "Needs review");
                         if (finished && displayReply != null
                                 && !displayReply.trim().isEmpty()
                                 && mPointerOverlayController != null) {
@@ -4402,7 +4403,11 @@ public class AssistantActivityBackend extends ComponentActivity {
         return status.contains("error")
                 || status.contains("failed")
                 || status.contains("denied")
-                || status.contains("blocked");
+                || status.contains("blocked")
+                || "step_limit_reached".equals(status)
+                || "duration_limit_reached".equals(status)
+                || "provider_unavailable".equals(status)
+                || "unavailable".equals(status);
     }
 
     private static String confirmationBodyFromActionResult(String json) {
