@@ -1,13 +1,13 @@
 package org.openphone.assistant.runtime;
 
 import android.content.Context;
-import android.openphone.OpenPhoneAgentManager;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.OpenPhoneNotificationController;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.runtime.adapters.openclaw.OpenClawRuntimeAdapter;
 import org.openphone.assistant.session.PhoneExecutionSession;
 import org.openphone.assistant.session.PhoneSessionStore;
@@ -24,7 +24,7 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
     private static final String TAG = "OpenPhoneRuntime";
 
     private final Context mContext;
-    private final OpenPhoneAgentManager mAgentManager;
+    private final PhoneToolGateway mPhoneGateway;
     private final RuntimeToolBridge mToolBridge;
     private final PhoneSessionStore mSessionStore;
     private final SurfaceRepository mSurfaceRepository;
@@ -32,19 +32,21 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
     private RuntimeCallback mRuntimeCallback;
     private String mStatus = "disabled";
 
-    public RuntimeManager(Context context, OpenPhoneAgentManager agentManager) {
+    public RuntimeManager(Context context, PhoneToolGateway phoneGateway) {
         mContext = context;
-        mAgentManager = agentManager;
+        mPhoneGateway = phoneGateway;
         mSessionStore = new PhoneSessionStore(context);
         mSurfaceRepository = new SurfaceRepository(context);
-        mToolBridge = new RuntimeToolBridge(context, agentManager, mSessionStore);
+        mToolBridge = new RuntimeToolBridge(context, phoneGateway, mSessionStore);
         mToolBridge.setConfirmationCallback(this);
     }
 
     public synchronized void start() {
         stopLocked();
         RuntimeConfig config = RuntimeConfig.load(mContext);
-        if (mAgentManager == null) {
+        if (mPhoneGateway == null || !mPhoneGateway.isAvailable()) {
+            // Preserve the existing wire/status value while the Play profile
+            // is introduced behind the new gateway contract.
             mStatus = "framework_unavailable";
             return;
         }
@@ -106,6 +108,8 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
                     .put("status", aggregateStatus)
                     .put("manager_status", aggregateStatus)
                     .put("lifecycle_status", mStatus)
+                    .put("phone_platform", mPhoneGateway == null
+                            ? "unavailable" : mPhoneGateway.profile())
                     .put("updated_at_ms", System.currentTimeMillis())
                     .put("adapters", adapters)
                     .toString();

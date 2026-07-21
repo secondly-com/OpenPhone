@@ -62,6 +62,12 @@ The current repo implements the first OpenPhone product layer:
   notifications, IME, recents, emergency UI, and system dialogs. OpenPhone
   disables only the non-secure swipe keyguard by default; configuring a
   pattern, PIN, or password restores Android's credential gate.
+- A `PhoneToolGateway` boundary keeps model, runtime, and adaptive-surface
+  packages independent from hidden `android.openphone` APIs. The current
+  `OpenPhoneOsToolGateway` binds that portable contract to the framework-backed
+  executor; a future public-SDK implementation can expose a smaller supported
+  tool set without forking the product runtime. See
+  [APP_OS_BOUNDARY.md](APP_OS_BOUNDARY.md).
 - Initial capability and policy config files. `scripts/check.sh` validates that
   the assistant fallback `PolicyEngine` covers every capability in
   `openphone_capabilities.json` with the same risk class.

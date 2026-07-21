@@ -46,6 +46,8 @@ import org.openphone.assistant.orchestrator.OpenPhoneOrchestrator;
 import org.openphone.assistant.orchestrator.OperatingMode;
 import org.openphone.assistant.orchestrator.OrchestratorDecision;
 import org.openphone.assistant.ota.OtaUpdateClient;
+import org.openphone.assistant.platform.OpenPhoneOsToolGateway;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.policy.AppCapabilityPolicy;
 import org.openphone.assistant.surface.AdaptiveSurface;
 import org.openphone.assistant.surface.AssistantOutput;
@@ -279,8 +281,8 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean mComposeAdvancedVisible;
     private ComposeStateCallbacks mComposeStateCallbacks;
 
-    OpenPhoneAgentManager agentManagerForSurfaces() {
-        return mAgentManager;
+    PhoneToolGateway phoneToolGatewayForSurfaces() {
+        return new OpenPhoneOsToolGateway(this, mAgentManager);
     }
 
     @Override

@@ -109,7 +109,7 @@ object OpenPhoneHomeComposeHost {
         val surfaceRepository = SurfaceRepository(activity)
         val surfaceDispatcher = SurfaceActionDispatcher(
             activity,
-            activity.agentManagerForSurfaces(),
+            activity.phoneToolGatewayForSurfaces(),
         )
         activity.setComposeStateCallbacks(object : AssistantActivityBackend.ComposeStateCallbacks {
             override fun setTaskStatus(text: String) {
