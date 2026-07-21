@@ -3,6 +3,7 @@
     package="org.openphone.assistant"
     android:versionCode="173"
     android:versionName="0.1.137-dev">
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
     <uses-permission android:name="android.permission.GET_TASKS" />

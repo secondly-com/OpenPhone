@@ -1,5 +1,6 @@
 package org.openphone.assistant
 
+import android.graphics.Bitmap
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,14 +45,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -97,6 +102,8 @@ data class HomeUiState(
     val surface: AdaptiveSurface? = null,
     val surfaceActionStatus: String = "",
     val surfaceConfirmation: Boolean = false,
+    val silentSpeechFrames: Int = 0,
+    val silentSpeechPreview: Bitmap? = null,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -424,6 +431,85 @@ object OpenPhoneHomeComposeHost {
                 mode = HomeAgentMode.Thinking,
                 status = "Silent Speech",
                 resultText = transcript,
+                silentSpeechFrames = 0,
+                silentSpeechPreview = null,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun beginSilentSpeechCapture() {
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Listening,
+                status = "Starting front camera…",
+                resultText = "",
+                silentSpeechFrames = 0,
+                silentSpeechPreview = null,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun silentSpeechCameraReady() {
+        state.update {
+            it.copy(mode = HomeAgentMode.Listening, status = "Mouth your request")
+        }
+    }
+
+    @JvmStatic
+    fun updateSilentSpeechFrame(count: Int, preview: Bitmap?) {
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Listening,
+                status = "Mouth your request",
+                silentSpeechFrames = count,
+                silentSpeechPreview = preview ?: it.silentSpeechPreview,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun beginSilentSpeechDecode(frameCount: Int) {
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Thinking,
+                status = "Reading your lips…",
+                resultText = "",
+                silentSpeechFrames = frameCount,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun showSilentSpeechStatus(message: String) {
+        state.update {
+            it.copy(mode = HomeAgentMode.Idle, status = message, resultText = message)
+        }
+    }
+
+    @JvmStatic
+    fun failSilentSpeech(message: String) {
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Error,
+                status = "Silent Speech failed",
+                resultText = message,
+                silentSpeechFrames = 0,
+                silentSpeechPreview = null,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun cancelSilentSpeech() {
+        state.update {
+            it.copy(
+                mode = HomeAgentMode.Idle,
+                status = "Ready",
+                resultText = "",
+                silentSpeechFrames = 0,
+                silentSpeechPreview = null,
             )
         }
     }
@@ -629,15 +715,26 @@ private fun OpenPhoneHomeScreen(
                 onVoiceStart = onVoiceStart,
                 onVoiceFinish = onVoiceFinish,
                 onVoiceCancel = onVoiceCancel,
-                onShortTap = { showTextInput = true },
+                onShortTap = {
+                    when (state.mode) {
+                        HomeAgentMode.Listening -> onVoiceFinish()
+                        HomeAgentMode.Idle, HomeAgentMode.Error, HomeAgentMode.Result ->
+                            onVoiceStart()
+                        else -> Unit
+                    }
+                },
             )
             Text(
                 text = when (state.mode) {
-                    HomeAgentMode.Listening -> "Release to send"
-                    HomeAgentMode.Thinking -> "Thinking"
+                    HomeAgentMode.Listening -> "Mouth your request · tap to send"
+                    HomeAgentMode.Thinking -> if (state.silentSpeechFrames > 0) {
+                        "Reading your lips…"
+                    } else {
+                        "Thinking"
+                    }
                     HomeAgentMode.Running -> "Working"
                     HomeAgentMode.Review -> "Review needed"
-                    else -> "Hold to talk · tap to type"
+                    else -> "Tap for Silent Speech"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
@@ -772,6 +869,39 @@ private fun HomeResult(
             .padding(horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val preview = state.silentSpeechPreview
+        if (preview != null && (
+                state.mode == HomeAgentMode.Listening ||
+                    state.mode == HomeAgentMode.Thinking
+                )) {
+            Image(
+                bitmap = preview.asImageBitmap(),
+                contentDescription = "Front camera recording preview",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(220.dp)
+                    .scale(scaleX = -1f, scaleY = 1f)
+                    .clip(CircleShape)
+                    .border(
+                        width = 3.dp,
+                        color = if (state.mode == HomeAgentMode.Listening) {
+                            Color(0xFFFF5B66)
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        shape = CircleShape,
+                    ),
+            )
+            if (state.silentSpeechFrames > 0) {
+                Text(
+                    text = "${state.silentSpeechFrames} frames",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+            Spacer(Modifier.height(22.dp))
+        }
         if (visibleText.isNotBlank()) {
             Text(
                 text = visibleText,
@@ -1131,7 +1261,8 @@ private fun VoiceOrb(
         modifier = Modifier
             .size(104.dp)
             .semantics {
-                contentDescription = "Hold to talk to OpenPhone. Tap to type."
+                contentDescription =
+                    "Tap to start Silent Speech. Tap again to send. You can also press and hold."
                 role = Role.Button
             }
             .pointerInput(Unit) {

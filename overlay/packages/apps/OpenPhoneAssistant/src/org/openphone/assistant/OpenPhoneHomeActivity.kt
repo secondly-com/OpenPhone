@@ -1,8 +1,10 @@
 package org.openphone.assistant
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.View
 import android.view.WindowInsets
@@ -20,10 +22,51 @@ import java.util.Locale
  * system dialogs, and task navigation.
  */
 class OpenPhoneHomeActivity : AssistantActivityBackend() {
+    private var silentSpeechClient: SilentSpeechCameraClient? = null
+    private var startAfterCameraPermission = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         configureImmersiveWindow()
         super.onCreate(savedInstanceState)
+        silentSpeechClient = SilentSpeechCameraClient(
+            this,
+            object : SilentSpeechCameraClient.Listener {
+                override fun onCaptureStarting() {
+                    OpenPhoneHomeComposeHost.beginSilentSpeechCapture()
+                }
+
+                override fun onCaptureStarted() {
+                    OpenPhoneHomeComposeHost.silentSpeechCameraReady()
+                }
+
+                override fun onFrameCaptured(count: Int, preview: Bitmap?) {
+                    OpenPhoneHomeComposeHost.updateSilentSpeechFrame(count, preview)
+                }
+
+                override fun onDecoding(frameCount: Int) {
+                    OpenPhoneHomeComposeHost.beginSilentSpeechDecode(frameCount)
+                }
+
+                override fun onDecoded(text: String) {
+                    onSilentSpeechDecoded(text)
+                }
+
+                override fun onError(message: String) {
+                    OpenPhoneHomeComposeHost.failSilentSpeech(message)
+                }
+
+                override fun onCancelled() {
+                    OpenPhoneHomeComposeHost.cancelSilentSpeech()
+                }
+            },
+        )
         enterImmersiveHome()
+    }
+
+    override fun onDestroy() {
+        silentSpeechClient?.close()
+        silentSpeechClient = null
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -39,6 +82,47 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun isHomeSurface(): Boolean = true
 
     override fun createActivityContentView(): View = OpenPhoneHomeComposeHost.createView(this)
+
+    override fun onHomeVoiceHoldStarted() {
+        val client = silentSpeechClient ?: return
+        if (client.isRecording || client.isBusy) return
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            startAfterCameraPermission = true
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_SILENT_SPEECH_CAMERA)
+            OpenPhoneHomeComposeHost.showSilentSpeechStatus("Allow the front camera to continue.")
+            return
+        }
+        client.start()
+    }
+
+    override fun onHomeVoiceHoldFinished() {
+        silentSpeechClient?.stopAndDecode()
+    }
+
+    override fun onHomeVoiceHoldCancelled() {
+        silentSpeechClient?.cancel()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (requestCode != REQUEST_SILENT_SPEECH_CAMERA) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+            return
+        }
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        if (granted && startAfterCameraPermission) {
+            startAfterCameraPermission = false
+            silentSpeechClient?.start()
+        } else {
+            startAfterCameraPermission = false
+            OpenPhoneHomeComposeHost.failSilentSpeech(
+                "Camera permission is required for Silent Speech.",
+            )
+        }
+    }
 
     fun submitHomeText(text: String) {
         if (requestsAppSpace(text)) {
@@ -118,6 +202,8 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     }
 
     companion object {
+        private const val REQUEST_SILENT_SPEECH_CAMERA = 2101
+
         private fun requestsAppSpace(text: String): Boolean {
             val clean = text.trim().lowercase(Locale.US)
             return clean == "apps" ||

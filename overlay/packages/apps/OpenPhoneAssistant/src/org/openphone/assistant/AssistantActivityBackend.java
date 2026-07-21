@@ -902,6 +902,18 @@ public class AssistantActivityBackend extends ComponentActivity {
         routeMessageFromCurrentMessage("ai_home");
     }
 
+    public void onSilentSpeechDecoded(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            setTaskText("Silent Speech did not detect a request.");
+            updateIsland("Ready");
+            return;
+        }
+        OpenPhoneHomeComposeHost.deliverSilentSpeechTranscript(clean);
+        setCurrentGoalText(clean);
+        routeMessageFromCurrentMessage("silent_speech");
+    }
+
     public void onComposeStop() {
         if (mActiveTaskId == null && mAgentThread == null && mChatThread != null) {
             cancelChatRun();
