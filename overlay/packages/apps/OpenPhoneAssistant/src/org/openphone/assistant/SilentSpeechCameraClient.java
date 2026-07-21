@@ -163,7 +163,18 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         previewView.setSurfaceTextureListener(null);
         mPreviewView = null;
         if (!mRecording) {
-            releasePreviewSurface();
+            Handler handler = mCameraHandler;
+            if (handler != null) {
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        closeCaptureSession();
+                        releasePreviewSurface();
+                    }
+                });
+            } else {
+                releasePreviewSurface();
+            }
         }
     }
 
@@ -328,8 +339,11 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                     maybeCreateCaptureSession();
                     return;
                 }
-                if (mSessionCreating || mSession != null) {
+                if (mSessionCreating) {
                     return;
+                }
+                if (mSession != null) {
+                    closeCaptureSession();
                 }
                 releasePreviewSurface();
                 texture.setDefaultBufferSize(
@@ -642,6 +656,20 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             session.abortCaptures();
         } catch (CameraAccessException | IllegalStateException ignored) {
         }
+    }
+
+    private void closeCaptureSession() {
+        CameraCaptureSession session = mSession;
+        mSession = null;
+        if (session == null) {
+            return;
+        }
+        try {
+            session.stopRepeating();
+            session.abortCaptures();
+        } catch (CameraAccessException | IllegalStateException ignored) {
+        }
+        session.close();
     }
 
     private File finishRecorder() {
