@@ -103,6 +103,8 @@ data class HomeUiState(
     val surfaceConfirmation: Boolean = false,
     val silentSpeechFrames: Int = 0,
     val silentSpeechCapturing: Boolean = false,
+    val interfacesConnected: Boolean = false,
+    val interfacesAuthBusy: Boolean = false,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -244,6 +246,7 @@ object OpenPhoneHomeComposeHost {
                             }
                         },
                         onOpenAssistant = activity::openAssistant,
+                        onConnectInterfaces = activity::connectInterfaces,
                         onApprove = {
                             val current = state.value
                             if (!current.surfaceConfirmation) {
@@ -523,6 +526,29 @@ object OpenPhoneHomeComposeHost {
         }
     }
 
+    @JvmStatic
+    fun setInterfacesConnectionState(
+        signedIn: Boolean,
+        busy: Boolean,
+        message: String,
+        error: Boolean,
+    ) {
+        state.update {
+            it.copy(
+                interfacesConnected = signedIn,
+                interfacesAuthBusy = busy,
+                mode = when {
+                    error -> HomeAgentMode.Error
+                    busy -> HomeAgentMode.Running
+                    message.isNotBlank() -> HomeAgentMode.Result
+                    else -> it.mode
+                },
+                status = message.ifBlank { it.status },
+                resultText = message.ifBlank { it.resultText },
+            )
+        }
+    }
+
     private fun applySurfaceActionResult(result: SurfaceActionResult) {
         if (result.status == "needs_confirmation") {
             val confirmationId = result.result.optString("confirmation_id", "")
@@ -604,6 +630,7 @@ private fun OpenPhoneHomeScreen(
     onSubmitText: (String) -> Unit,
     onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
+    onConnectInterfaces: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     onSurfaceAction: (AdaptiveSurface, String, JSONObject) -> Unit,
@@ -657,8 +684,11 @@ private fun OpenPhoneHomeScreen(
     ) {
         HomeHeader(
             now = now,
+            interfacesConnected = state.interfacesConnected,
+            interfacesAuthBusy = state.interfacesAuthBusy,
             onOpenApps = onOpenApps,
             onOpenAssistant = onOpenAssistant,
+            onConnectInterfaces = onConnectInterfaces,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -748,8 +778,11 @@ private fun OpenPhoneHomeScreen(
 @Composable
 private fun HomeHeader(
     now: Date,
+    interfacesConnected: Boolean,
+    interfacesAuthBusy: Boolean,
     onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
+    onConnectInterfaces: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val time = remember(now) { SimpleDateFormat("h:mm", Locale.getDefault()).format(now) }
@@ -772,6 +805,20 @@ private fun HomeHeader(
             )
         }
         Spacer(Modifier.weight(1f))
+        HomeHeaderAction(
+            label = when {
+                interfacesAuthBusy -> "Connecting…"
+                interfacesConnected -> "Interfaces ✓"
+                else -> "Connect"
+            },
+            description = if (interfacesConnected) {
+                "Interfaces account connected"
+            } else {
+                "Connect an Interfaces account"
+            },
+            onClick = onConnectInterfaces,
+        )
+        Spacer(Modifier.size(8.dp))
         HomeHeaderAction("Apps", "Open apps", onOpenApps)
         Spacer(Modifier.size(8.dp))
         HomeHeaderAction("•••", "Open OpenPhone history and settings", onOpenAssistant)

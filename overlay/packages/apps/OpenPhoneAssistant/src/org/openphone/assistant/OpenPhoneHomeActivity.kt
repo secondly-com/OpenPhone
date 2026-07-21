@@ -22,14 +22,33 @@ import java.util.Locale
  * system dialogs, and task navigation.
  */
 class OpenPhoneHomeActivity : AssistantActivityBackend() {
+    private var interfacesAuthClient: InterfacesAuthClient? = null
     private var silentSpeechClient: SilentSpeechCameraClient? = null
     private var startAfterCameraPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         configureImmersiveWindow()
         super.onCreate(savedInstanceState)
+        interfacesAuthClient = InterfacesAuthClient(
+            this,
+            InterfacesAuthClient.Listener { signedIn, busy, message, error ->
+                OpenPhoneHomeComposeHost.setInterfacesConnectionState(
+                    signedIn,
+                    busy,
+                    message,
+                    error,
+                )
+            },
+        )
+        OpenPhoneHomeComposeHost.setInterfacesConnectionState(
+            interfacesAuthClient?.isSignedIn == true,
+            false,
+            "",
+            false,
+        )
         silentSpeechClient = SilentSpeechCameraClient(
             this,
+            interfacesAuthClient,
             object : SilentSpeechCameraClient.Listener {
                 override fun onCaptureStarting() {
                     OpenPhoneHomeComposeHost.beginSilentSpeechCapture()
@@ -66,6 +85,8 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun onDestroy() {
         silentSpeechClient?.close()
         silentSpeechClient = null
+        interfacesAuthClient?.close()
+        interfacesAuthClient = null
         super.onDestroy()
     }
 
@@ -94,6 +115,10 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
     override fun onHomeVoiceHoldStarted() {
         val client = silentSpeechClient ?: return
         if (client.isRecording || client.isBusy) return
+        if (interfacesAuthClient?.isSignedIn != true) {
+            connectInterfaces()
+            return
+        }
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             startAfterCameraPermission = true
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_SILENT_SPEECH_CAMERA)
@@ -117,6 +142,15 @@ class OpenPhoneHomeActivity : AssistantActivityBackend() {
 
     fun onHomeMicrophoneStopped() {
         super.onComposeStop()
+    }
+
+    fun connectInterfaces() {
+        val auth = interfacesAuthClient ?: return
+        if (auth.isSignedIn) {
+            OpenPhoneHomeComposeHost.showSilentSpeechStatus("Interfaces connected")
+            return
+        }
+        auth.signIn(this)
     }
 
     override fun onRequestPermissionsResult(

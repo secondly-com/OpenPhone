@@ -1,7 +1,6 @@
 package org.openphone.assistant;
 
 import android.content.Context;
-import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -10,43 +9,32 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.Image;
-import android.media.ImageReader;
+import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.provider.Settings;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
 
-import org.json.JSONObject;
-
-import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Temporary, developer-configured Silent Speech capture path for AI Home.
+ * Authenticated Silent Speech capture path for AI Home.
  *
- * <p>The front camera produces bounded JPEG frames. On release, those frames
- * are uploaded to the existing private demo decoder. The URL and bearer token
- * live in Settings.Secure on the userdebug device and are never compiled into
- * the APK.</p>
+ * <p>The front camera records an H.264 MP4. On release, the video is uploaded
+ * through the user's Interfaces Firebase session, allowing the API to derive
+ * the active personal model from the authenticated UID.</p>
  */
 final class SilentSpeechCameraClient implements AutoCloseable {
     interface Listener {
@@ -59,39 +47,40 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         void onCancelled();
     }
 
-    static final String SECURE_DECODE_URL = "openphone_silent_speech_decode_url";
-    static final String SECURE_BEARER_TOKEN = "openphone_silent_speech_bearer_token";
-
     private static final String TAG = "OpenPhoneSilentSpeech";
     private static final int MIN_FRAMES = 8;
     private static final int MAX_FRAMES = 450;
-    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
     private static final long MIN_FRAME_INTERVAL_NS = 33_000_000L;
 
     private final Context mContext;
+    private final InterfacesAuthClient mAuthClient;
     private final Listener mListener;
     private final Handler mMainHandler;
-    private final ExecutorService mUploadExecutor = Executors.newSingleThreadExecutor();
-    private final ArrayList<byte[]> mFrames = new ArrayList<>();
+    private final ExecutorService mDecodeExecutor = Executors.newSingleThreadExecutor();
 
     private volatile boolean mBusy;
     private volatile boolean mRecording;
-    private volatile HttpURLConnection mActiveConnection;
     private HandlerThread mCameraThread;
     private Handler mCameraHandler;
     private CameraDevice mCamera;
     private CameraCaptureSession mSession;
-    private ImageReader mImageReader;
+    private MediaRecorder mRecorder;
+    private Surface mRecorderSurface;
+    private File mOutputFile;
     private TextureView mPreviewView;
     private SurfaceTexture mPreviewTexture;
     private Surface mPreviewSurface;
     private Size mCaptureSize;
     private boolean mSessionCreating;
+    private boolean mRecorderStarted;
     private long mLastFrameTimestampNs;
+    private int mFrameCount;
     private int mSensorOrientation;
 
-    SilentSpeechCameraClient(Context context, Listener listener) {
+    SilentSpeechCameraClient(
+            Context context, InterfacesAuthClient authClient, Listener listener) {
         mContext = context.getApplicationContext();
+        mAuthClient = authClient;
         mListener = listener;
         mMainHandler = new Handler(context.getMainLooper());
     }
@@ -151,8 +140,9 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         }
         mBusy = true;
         mRecording = true;
-        mFrames.clear();
+        mFrameCount = 0;
         mLastFrameTimestampNs = 0L;
+        mRecorderStarted = false;
         postMain(new Runnable() {
             @Override
             public void run() {
@@ -188,17 +178,12 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             return;
         }
         mRecording = false;
-        HttpURLConnection connection = mActiveConnection;
-        if (connection != null) {
-            connection.disconnect();
-        }
         Handler handler = mCameraHandler;
         if (handler != null) {
             handler.post(new Runnable() {
                 @Override
                 public void run() {
                     closeCameraGraph();
-                    mFrames.clear();
                     mBusy = false;
                     postMain(new Runnable() {
                         @Override
@@ -228,10 +213,8 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             mSensorOrientation = orientation == null ? 0 : orientation;
             Size size = captureSize(characteristics);
             mCaptureSize = size;
+            prepareRecorder(size);
             configurePreviewTransform(mPreviewView);
-            mImageReader = ImageReader.newInstance(
-                    size.getWidth(), size.getHeight(), ImageFormat.JPEG, 4);
-            mImageReader.setOnImageAvailableListener(this::onImageAvailable, mCameraHandler);
             TextureView preview = mPreviewView;
             if (preview != null && preview.isAvailable()) {
                 preparePreviewSurface(preview.getSurfaceTexture());
@@ -261,7 +244,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             }, mCameraHandler);
         } catch (SecurityException e) {
             fail("Camera permission is required for Silent Speech.");
-        } catch (CameraAccessException | IllegalStateException e) {
+        } catch (CameraAccessException | IOException | IllegalStateException e) {
             Log.e(TAG, "Unable to open front camera", e);
             fail("The front camera could not start.");
         }
@@ -298,22 +281,23 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     private void maybeCreateCaptureSession() {
         if (mSessionCreating || mSession != null || mCamera == null
-                || mImageReader == null || mPreviewSurface == null) {
+                || mRecorder == null || mRecorderSurface == null || mPreviewSurface == null) {
             return;
         }
         mSessionCreating = true;
         final CameraDevice camera = mCamera;
         final Surface previewSurface = mPreviewSurface;
-        final Surface imageSurface = mImageReader.getSurface();
+        final Surface recorderSurface = mRecorderSurface;
         try {
             camera.createCaptureSession(
-                    java.util.Arrays.asList(previewSurface, imageSurface),
+                    java.util.Arrays.asList(previewSurface, recorderSurface),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
                             mSessionCreating = false;
-                            if (!mRecording || mCamera != camera || mImageReader == null
-                                    || mPreviewSurface != previewSurface) {
+                            if (!mRecording || mCamera != camera || mRecorder == null
+                                    || mPreviewSurface != previewSurface
+                                    || mRecorderSurface != recorderSurface) {
                                 session.close();
                                 maybeCreateCaptureSession();
                                 return;
@@ -323,21 +307,32 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                                 CaptureRequest.Builder request = camera.createCaptureRequest(
                                         CameraDevice.TEMPLATE_RECORD);
                                 request.addTarget(previewSurface);
-                                request.addTarget(imageSurface);
+                                request.addTarget(recorderSurface);
                                 request.set(CaptureRequest.CONTROL_MODE,
                                         CaptureRequest.CONTROL_MODE_AUTO);
                                 request.set(CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                                request.set(CaptureRequest.JPEG_QUALITY, (byte) 65);
-                                request.set(CaptureRequest.JPEG_ORIENTATION, mSensorOrientation);
-                                session.setRepeatingRequest(request.build(), null, mCameraHandler);
+                                session.setRepeatingRequest(
+                                        request.build(),
+                                        new CameraCaptureSession.CaptureCallback() {
+                                            @Override
+                                            public void onCaptureCompleted(
+                                                    CameraCaptureSession captureSession,
+                                                    CaptureRequest captureRequest,
+                                                    TotalCaptureResult result) {
+                                                onCameraFrame(result);
+                                            }
+                                        },
+                                        mCameraHandler);
+                                mRecorder.start();
+                                mRecorderStarted = true;
                                 postMain(new Runnable() {
                                     @Override
                                     public void run() {
                                         mListener.onCaptureStarted();
                                     }
                                 });
-                            } catch (CameraAccessException | IllegalStateException e) {
+                            } catch (CameraAccessException | RuntimeException e) {
                                 Log.e(TAG, "Unable to start camera capture", e);
                                 fail("The front camera could not begin recording.");
                             }
@@ -357,39 +352,26 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         }
     }
 
-    private void onImageAvailable(ImageReader reader) {
-        Image image = null;
-        try {
-            image = reader.acquireLatestImage();
-            if (image == null || !mRecording) {
-                return;
+    private void onCameraFrame(TotalCaptureResult result) {
+        if (!mRecording || !mRecorderStarted) {
+            return;
+        }
+        Long sensorTimestamp = result.get(CaptureResult.SENSOR_TIMESTAMP);
+        long timestamp = sensorTimestamp == null ? System.nanoTime() : sensorTimestamp;
+        if (mLastFrameTimestampNs != 0L
+                && timestamp - mLastFrameTimestampNs < MIN_FRAME_INTERVAL_NS) {
+            return;
+        }
+        mLastFrameTimestampNs = timestamp;
+        int count = ++mFrameCount;
+        postMain(new Runnable() {
+            @Override
+            public void run() {
+                mListener.onFrameCaptured(count);
             }
-            long timestamp = image.getTimestamp();
-            if (mLastFrameTimestampNs != 0L
-                    && timestamp - mLastFrameTimestampNs < MIN_FRAME_INTERVAL_NS) {
-                return;
-            }
-            mLastFrameTimestampNs = timestamp;
-            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-            byte[] jpeg = new byte[buffer.remaining()];
-            buffer.get(jpeg);
-            mFrames.add(jpeg);
-            int count = mFrames.size();
-            postMain(new Runnable() {
-                @Override
-                public void run() {
-                    mListener.onFrameCaptured(count);
-                }
-            });
-            if (count >= MAX_FRAMES) {
-                finishCapture(true);
-            }
-        } catch (RuntimeException e) {
-            Log.w(TAG, "Unable to read camera frame", e);
-        } finally {
-            if (image != null) {
-                image.close();
-            }
+        });
+        if (count >= MAX_FRAMES) {
+            finishCapture(true);
         }
     }
 
@@ -398,25 +380,28 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             return;
         }
         mRecording = false;
+        stopRepeating();
+        File captured = finishRecorder();
+        int capturedFrames = mFrameCount;
         closeCameraGraph();
-        ArrayList<byte[]> captured = new ArrayList<>(mFrames);
-        mFrames.clear();
         if (!decode) {
             mBusy = false;
+            delete(captured);
             return;
         }
-        if (captured.size() < MIN_FRAMES) {
+        if (capturedFrames < MIN_FRAMES || captured == null || captured.length() == 0L) {
             mBusy = false;
+            delete(captured);
             postError("Hold still and mouth your request a little longer.");
             return;
         }
         postMain(new Runnable() {
             @Override
             public void run() {
-                mListener.onDecoding(captured.size());
+                mListener.onDecoding(capturedFrames);
             }
         });
-        mUploadExecutor.execute(new Runnable() {
+        mDecodeExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 upload(captured);
@@ -424,57 +409,9 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         });
     }
 
-    private void upload(List<byte[]> frames) {
-        String urlValue = Settings.Secure.getString(
-                mContext.getContentResolver(), SECURE_DECODE_URL);
-        String token = Settings.Secure.getString(
-                mContext.getContentResolver(), SECURE_BEARER_TOKEN);
-        if (urlValue == null || urlValue.trim().isEmpty()
-                || token == null || token.trim().isEmpty()) {
-            finishUploadWithError("Silent Speech demo access is not configured on this phone.");
-            return;
-        }
-
-        HttpURLConnection connection = null;
+    private void upload(File video) {
         try {
-            URL url = new URL(urlValue.trim());
-            if (!"https".equalsIgnoreCase(url.getProtocol())) {
-                throw new IOException("HTTPS is required");
-            }
-            String boundary = "OpenPhoneSilentSpeech-" + UUID.randomUUID();
-            connection = (HttpURLConnection) url.openConnection();
-            mActiveConnection = connection;
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(120_000);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setChunkedStreamingMode(64 * 1024);
-            connection.setRequestProperty("Authorization", "Bearer " + token.trim());
-            connection.setRequestProperty("Content-Type",
-                    "multipart/form-data; boundary=" + boundary);
-            try (OutputStream output = connection.getOutputStream()) {
-                for (int i = 0; i < frames.size(); i++) {
-                    writeUtf8(output, "--" + boundary + "\r\n");
-                    writeUtf8(output, "Content-Disposition: form-data; name=\"frames\"; "
-                            + "filename=\"frame_" + String.format(Locale.US, "%06d", i)
-                            + ".jpg\"\r\n");
-                    writeUtf8(output, "Content-Type: image/jpeg\r\n\r\n");
-                    output.write(frames.get(i));
-                    writeUtf8(output, "\r\n");
-                }
-                writeUtf8(output, "--" + boundary + "--\r\n");
-            }
-
-            int status = connection.getResponseCode();
-            InputStream stream = status >= 200 && status < 300
-                    ? connection.getInputStream() : connection.getErrorStream();
-            String body = readBounded(stream, MAX_RESPONSE_BYTES);
-            JSONObject response = new JSONObject(body);
-            String text = response.optString("text", "").trim();
-            if (status < 200 || status >= 300 || text.isEmpty()) {
-                String detail = response.optString("error", "Silent Speech could not decode this take.");
-                throw new IOException(detail);
-            }
+            String text = mAuthClient.decodeSilentSpeech(video);
             mBusy = false;
             postMain(new Runnable() {
                 @Override
@@ -490,10 +427,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             }
             finishUploadWithError(message);
         } finally {
-            mActiveConnection = null;
-            if (connection != null) {
-                connection.disconnect();
-            }
+            delete(video);
         }
     }
 
@@ -506,7 +440,6 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         mRecording = false;
         mBusy = false;
         closeCameraGraph();
-        mFrames.clear();
         postError(message);
     }
 
@@ -537,11 +470,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         if (camera != null) {
             camera.close();
         }
-        ImageReader reader = mImageReader;
-        mImageReader = null;
-        if (reader != null) {
-            reader.close();
-        }
+        releaseRecorder(true);
         releasePreviewSurface();
         mCaptureSize = null;
         mSessionCreating = false;
@@ -568,11 +497,14 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private static Size captureSize(CameraCharacteristics characteristics) {
         StreamConfigurationMap map = characteristics.get(
                 CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        if (map == null || map.getOutputSizes(ImageFormat.JPEG) == null) {
+        if (map == null || map.getOutputSizes(MediaRecorder.class) == null) {
             return new Size(640, 480);
         }
         ArrayList<Size> candidates = new ArrayList<>();
-        Collections.addAll(candidates, map.getOutputSizes(ImageFormat.JPEG));
+        Collections.addAll(candidates, map.getOutputSizes(MediaRecorder.class));
+        if (candidates.isEmpty()) {
+            return new Size(640, 480);
+        }
         candidates.sort(Comparator.comparingLong(
                 size -> (long) size.getWidth() * (long) size.getHeight()));
         for (Size size : candidates) {
@@ -583,6 +515,83 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             }
         }
         return candidates.get(0);
+    }
+
+    private void prepareRecorder(Size size) throws IOException {
+        File output = new File(
+                mContext.getCacheDir(), "silent-speech-" + UUID.randomUUID() + ".mp4");
+        MediaRecorder recorder = new MediaRecorder(mContext);
+        recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+        recorder.setOutputFile(output.getAbsolutePath());
+        recorder.setVideoEncodingBitRate(2_500_000);
+        recorder.setVideoFrameRate(30);
+        recorder.setVideoSize(size.getWidth(), size.getHeight());
+        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+        recorder.setOrientationHint(mSensorOrientation);
+        recorder.prepare();
+        mRecorder = recorder;
+        mRecorderSurface = recorder.getSurface();
+        mOutputFile = output;
+    }
+
+    private void stopRepeating() {
+        CameraCaptureSession session = mSession;
+        if (session == null) {
+            return;
+        }
+        try {
+            session.stopRepeating();
+            session.abortCaptures();
+        } catch (CameraAccessException | IllegalStateException ignored) {
+        }
+    }
+
+    private File finishRecorder() {
+        MediaRecorder recorder = mRecorder;
+        File output = mOutputFile;
+        if (recorder == null || !mRecorderStarted) {
+            releaseRecorder(true);
+            return null;
+        }
+        try {
+            recorder.stop();
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Unable to finish Silent Speech video", error);
+            delete(output);
+            output = null;
+        }
+        releaseRecorder(false);
+        return output;
+    }
+
+    private void releaseRecorder(boolean deleteOutput) {
+        MediaRecorder recorder = mRecorder;
+        mRecorder = null;
+        mRecorderStarted = false;
+        if (recorder != null) {
+            try {
+                recorder.reset();
+            } catch (RuntimeException ignored) {
+            }
+            recorder.release();
+        }
+        Surface surface = mRecorderSurface;
+        mRecorderSurface = null;
+        if (surface != null) {
+            surface.release();
+        }
+        File output = mOutputFile;
+        mOutputFile = null;
+        if (deleteOutput) {
+            delete(output);
+        }
+    }
+
+    private static void delete(File file) {
+        if (file != null && file.exists() && !file.delete()) {
+            Log.w(TAG, "Unable to delete temporary Silent Speech video");
+        }
     }
 
     private void releasePreviewSurface() {
@@ -639,32 +648,9 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         mMainHandler.post(runnable);
     }
 
-    private static void writeUtf8(OutputStream output, String value) throws IOException {
-        output.write(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String readBounded(InputStream input, int maxBytes) throws IOException {
-        if (input == null) {
-            return "{}";
-        }
-        try (InputStream stream = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[4096];
-            int total = 0;
-            int read;
-            while ((read = stream.read(buffer)) != -1) {
-                total += read;
-                if (total > maxBytes) {
-                    throw new IOException("Silent Speech returned an oversized response");
-                }
-                output.write(buffer, 0, read);
-            }
-            return output.toString(StandardCharsets.UTF_8.name());
-        }
-    }
-
     @Override
     public void close() {
         cancel();
-        mUploadExecutor.shutdownNow();
+        mDecodeExecutor.shutdownNow();
     }
 }
