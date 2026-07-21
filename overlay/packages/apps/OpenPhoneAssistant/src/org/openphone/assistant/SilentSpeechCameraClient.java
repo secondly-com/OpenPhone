@@ -128,15 +128,19 @@ final class SilentSpeechCameraClient implements AutoCloseable {
 
     void attachPreview(TextureView previewView) {
         mPreviewView = previewView;
+        Log.i(TAG, "preview attached available=" + previewView.isAvailable()
+                + " size=" + previewView.getWidth() + "x" + previewView.getHeight());
         previewView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+                Log.i(TAG, "preview surface available size=" + width + "x" + height);
                 preparePreviewSurface(surface);
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(
                     SurfaceTexture surface, int width, int height) {
+                preparePreviewSurface(surface);
                 configurePreviewTransform(previewView);
             }
 
@@ -204,6 +208,10 @@ final class SilentSpeechCameraClient implements AutoCloseable {
         handler.post(new Runnable() {
             @Override
             public void run() {
+                Log.i(TAG, "recording requested session=" + (mSession != null)
+                        + " camera=" + (mCamera != null)
+                        + " preview=" + (mPreviewSurface != null)
+                        + " recorder=" + (mRecorder != null));
                 if (mSession != null) {
                     beginRecording();
                 } else if (mCamera != null) {
@@ -285,6 +293,8 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             prepareRecorder(size);
             configurePreviewTransform(mPreviewView);
             TextureView preview = mPreviewView;
+            Log.i(TAG, "camera opening preview=" + (preview != null)
+                    + " available=" + (preview != null && preview.isAvailable()));
             if (preview != null && preview.isAvailable()) {
                 preparePreviewSurface(preview.getSurfaceTexture());
             }
@@ -327,6 +337,8 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private void preparePreviewSurface(SurfaceTexture texture) {
         Handler handler = mCameraHandler;
         if (handler == null || texture == null) {
+            Log.i(TAG, "preview surface waiting handler=" + (handler != null)
+                    + " texture=" + (texture != null));
             return;
         }
         handler.post(new Runnable() {
@@ -380,6 +392,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                                 return;
                             }
                             mSession = session;
+                            Log.i(TAG, "camera session configured recording=" + mRecording);
                             try {
                                 CaptureRequest.Builder request = camera.createCaptureRequest(
                                         CameraDevice.TEMPLATE_PREVIEW);
@@ -415,6 +428,13 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private void beginRecording() {
         if (!mRecording || mRecorderStarted || mSession == null || mCamera == null
                 || mPreviewSurface == null || mRecorderSurface == null || mRecorder == null) {
+            Log.w(TAG, "recording not ready recording=" + mRecording
+                    + " started=" + mRecorderStarted
+                    + " session=" + (mSession != null)
+                    + " camera=" + (mCamera != null)
+                    + " preview=" + (mPreviewSurface != null)
+                    + " recorderSurface=" + (mRecorderSurface != null)
+                    + " recorder=" + (mRecorder != null));
             return;
         }
         try {

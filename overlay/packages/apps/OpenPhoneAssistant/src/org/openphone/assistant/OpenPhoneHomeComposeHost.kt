@@ -993,8 +993,8 @@ private fun HomeInputDock(
                 onDetach = onDetachPreview,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .size(if (recording) 196.dp else 1.dp)
-                    .alpha(if (recording) 1f else 0f),
+                    .size(196.dp)
+                    .alpha(if (recording) 1f else 0.01f),
             )
 
             Row(
