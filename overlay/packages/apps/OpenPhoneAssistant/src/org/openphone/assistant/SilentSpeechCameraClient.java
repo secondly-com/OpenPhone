@@ -82,6 +82,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private CameraCaptureSession mSession;
     private ImageReader mImageReader;
     private TextureView mPreviewView;
+    private SurfaceTexture mPreviewTexture;
     private Surface mPreviewSurface;
     private Size mCaptureSize;
     private boolean mSessionCreating;
@@ -273,9 +274,17 @@ final class SilentSpeechCameraClient implements AutoCloseable {
                 if (!mRecording || mCaptureSize == null) {
                     return;
                 }
+                if (mPreviewTexture == texture && mPreviewSurface != null) {
+                    maybeCreateCaptureSession();
+                    return;
+                }
+                if (mSessionCreating || mSession != null) {
+                    return;
+                }
                 releasePreviewSurface();
                 texture.setDefaultBufferSize(
                         mCaptureSize.getWidth(), mCaptureSize.getHeight());
+                mPreviewTexture = texture;
                 mPreviewSurface = new Surface(texture);
                 maybeCreateCaptureSession();
             }
@@ -288,23 +297,28 @@ final class SilentSpeechCameraClient implements AutoCloseable {
             return;
         }
         mSessionCreating = true;
+        final CameraDevice camera = mCamera;
+        final Surface previewSurface = mPreviewSurface;
+        final Surface imageSurface = mImageReader.getSurface();
         try {
-            mCamera.createCaptureSession(
-                    java.util.Arrays.asList(mPreviewSurface, mImageReader.getSurface()),
+            camera.createCaptureSession(
+                    java.util.Arrays.asList(previewSurface, imageSurface),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
                             mSessionCreating = false;
-                            if (!mRecording || mCamera == null || mImageReader == null) {
+                            if (!mRecording || mCamera != camera || mImageReader == null
+                                    || mPreviewSurface != previewSurface) {
                                 session.close();
+                                maybeCreateCaptureSession();
                                 return;
                             }
                             mSession = session;
                             try {
-                                CaptureRequest.Builder request = mCamera.createCaptureRequest(
+                                CaptureRequest.Builder request = camera.createCaptureRequest(
                                         CameraDevice.TEMPLATE_RECORD);
-                                request.addTarget(mPreviewSurface);
-                                request.addTarget(mImageReader.getSurface());
+                                request.addTarget(previewSurface);
+                                request.addTarget(imageSurface);
                                 request.set(CaptureRequest.CONTROL_MODE,
                                         CaptureRequest.CONTROL_MODE_AUTO);
                                 request.set(CaptureRequest.CONTROL_AF_MODE,
@@ -569,6 +583,7 @@ final class SilentSpeechCameraClient implements AutoCloseable {
     private void releasePreviewSurface() {
         Surface surface = mPreviewSurface;
         mPreviewSurface = null;
+        mPreviewTexture = null;
         if (surface != null) {
             surface.release();
         }
