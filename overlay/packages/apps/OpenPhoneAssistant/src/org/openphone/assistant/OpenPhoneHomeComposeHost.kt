@@ -106,6 +106,7 @@ data class HomeUiState(
     val silentSpeechCapturing: Boolean = false,
     val interfacesConnected: Boolean = false,
     val interfacesAuthBusy: Boolean = false,
+    val agentRunning: Boolean = false,
 )
 
 object OpenPhoneHomeComposeHost {
@@ -167,6 +168,7 @@ object OpenPhoneHomeComposeHost {
                             else -> modeForStatus(text, HomeAgentMode.Idle)
                         },
                         status = text.ifBlank { "Ready" },
+                        agentRunning = running,
                     )
                 }
             }
@@ -182,6 +184,7 @@ object OpenPhoneHomeComposeHost {
                             resultText = message.trim(),
                             status = "Ready",
                             mode = HomeAgentMode.Result,
+                            agentRunning = false,
                         )
                     }
                 }
@@ -240,6 +243,7 @@ object OpenPhoneHomeComposeHost {
                         onVoiceCancel = activity::onHomeVoiceHoldCancelled,
                         onMicrophoneStart = activity::onHomeMicrophonePressed,
                         onMicrophoneStop = activity::onHomeMicrophoneStopped,
+                        onAgentStop = activity::onComposeStop,
                         onSubmitText = activity::submitHomeText,
                         onOpenApps = {
                             if (!activity.openAppSpace()) {
@@ -629,6 +633,7 @@ private fun OpenPhoneHomeScreen(
     onVoiceCancel: () -> Unit,
     onMicrophoneStart: () -> Unit,
     onMicrophoneStop: () -> Unit,
+    onAgentStop: () -> Unit,
     onSubmitText: (String) -> Unit,
     onOpenApps: () -> Unit,
     onOpenAssistant: () -> Unit,
@@ -779,6 +784,7 @@ private fun OpenPhoneHomeScreen(
                     onMicrophoneStart()
                 },
                 onMicrophoneStop = onMicrophoneStop,
+                onAgentStop = onAgentStop,
                 onAttachPreview = onAttachSilentSpeechPreview,
                 onDetachPreview = onDetachSilentSpeechPreview,
             )
@@ -968,13 +974,15 @@ private fun HomeInputDock(
     onSilentSpeechCancel: () -> Unit,
     onMicrophoneStart: () -> Unit,
     onMicrophoneStop: () -> Unit,
+    onAgentStop: () -> Unit,
     onAttachPreview: (TextureView) -> Unit,
     onDetachPreview: (TextureView) -> Unit,
 ) {
     val recording = state.silentSpeechCapturing
     val decoding = state.mode == HomeAgentMode.Thinking && state.silentSpeechFrames > 0
     val microphoneListening = state.mode == HomeAgentMode.Listening && !recording
-    val sideControlsVisible = !recording && !decoding
+    val agentRunning = state.agentRunning
+    val sideControlsVisible = !recording && !decoding && !agentRunning
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1021,14 +1029,18 @@ private fun HomeInputDock(
                     }
                 }
 
-                SilentSpeechHoldButton(
-                    mode = state.mode,
-                    recording = recording,
-                    decoding = decoding,
-                    onStart = onSilentSpeechStart,
-                    onFinish = onSilentSpeechFinish,
-                    onCancel = onSilentSpeechCancel,
-                )
+                if (agentRunning) {
+                    AgentStopButton(onStop = onAgentStop)
+                } else {
+                    SilentSpeechHoldButton(
+                        mode = state.mode,
+                        recording = recording,
+                        decoding = decoding,
+                        onStart = onSilentSpeechStart,
+                        onFinish = onSilentSpeechFinish,
+                        onCancel = onSilentSpeechCancel,
+                    )
+                }
 
                 Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                     if (sideControlsVisible) {
@@ -1055,6 +1067,7 @@ private fun HomeInputDock(
                 recording -> "Release to send"
                 decoding -> "Reading your lips…"
                 microphoneListening -> "Listening…"
+                agentRunning -> "Tap to stop"
                 state.mode == HomeAgentMode.Running -> "Working"
                 state.mode == HomeAgentMode.Review -> "Review needed"
                 else -> "Press and hold to record"
@@ -1063,6 +1076,30 @@ private fun HomeInputDock(
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
+}
+
+@Composable
+private fun AgentStopButton(onStop: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(68.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFD92D45))
+            .border(2.dp, Color(0xFFFF7182), CircleShape)
+            .clickable(onClick = onStop)
+            .semantics {
+                contentDescription = "Stop agent"
+                role = Role.Button
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(22.dp)) {
+            drawRoundRect(
+                color = Color.White,
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+            )
+        }
     }
 }
 
