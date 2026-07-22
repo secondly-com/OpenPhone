@@ -3387,7 +3387,6 @@ public class AssistantActivityBackend extends ComponentActivity {
         final String taskId = mActiveTaskId;
         final ModelEndpointConfig endpointConfig = modelEndpointConfig();
         setTaskText("Working on: " + goal);
-        updateIsland("Agent is working");
         FrameworkToolExecutor toolExecutor = new FrameworkToolExecutor(this, mAgentManager);
         ModelAdapter adapter = selectedModelAdapter(endpointConfig);
         mRunningModelAdapter = adapter;
@@ -3504,6 +3503,7 @@ public class AssistantActivityBackend extends ComponentActivity {
         }, "OpenPhoneModelRunner");
         mAgentThread = agentThread;
         updateComposerActionButton();
+        updateIsland("Agent is working");
         agentThread.start();
     }
 
