@@ -1,8 +1,10 @@
 name: GCP Cache Refresh
 
 on:
-  schedule:
-    - cron: "17 9 * * *"
+  # Scheduled refresh disabled to stop daily GCP prewarm-VM spend while
+  # OpenPhone is dormant. Re-enable by uncommenting when active again.
+  # schedule:
+  #   - cron: "17 9 * * *"
   workflow_dispatch:
     inputs:
       ref:
