@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/openphone-assistant-output.schema.json",
+  "title": "OpenPhone Assistant Output V1",
+  "type": "object",
+  "required": ["schema", "session_id", "speech", "text"],
+  "properties": {
+    "schema": {
+      "const": "openphone.assistant_output.v1"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "speech": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 12000
+    },
+    "surface": {
+      "oneOf": [
+        {
+          "$ref": "openphone-surface.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "background_run": {
+      "type": ["object", "null"]
+    }
+  },
+  "additionalProperties": false
+}

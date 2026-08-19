@@ -24,5 +24,6 @@ PRODUCT_COPY_FILES += \
 
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     ro.openphone.version=0.1.0-dev \
+    ro.openphone.systemui_island=true \
     ro.openphone.source_available=true \
     ro.openphone.commercial_license_required=true

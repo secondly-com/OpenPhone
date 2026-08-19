@@ -8,6 +8,73 @@ flow, and device support.
 
 ## [Unreleased]
 
+### Added
+
+- Dedicated OpenPhone Android Home activity with a calm black AI Home surface,
+  press-and-hold/release voice input, text fallback, accessible controls, and a
+  two-finger App Space gesture.
+- Explicit App Space handoff to the installed Launcher3 implementation while
+  preserving Home as a reliable return to AI Home.
+- Unified durable-run projection across agent jobs, watchers, commitments, and
+  foreground sessions, with stable AI Home activity bubbles, overflow/detail
+  UI, unread/attention states, and source-routed stop controls.
+- Adaptive Surface V1 schemas, fail-closed validator, revisioned durable
+  repository, bounded Compose component renderer, artifact provenance, and
+  policy-routed surface action dispatcher.
+- Deterministic AI Home agenda and message/notification summary surfaces built
+  from trusted phone tool results.
+- Runtime-neutral assistant output envelopes and additive surface
+  present/replace/dismiss/action-result events, including OpenClaw node-event
+  mapping and recorded conformance fixtures.
+- Resumable background-action review with durable progress/checkpoint fields,
+  exact expiring approval bindings, Android notification and AI Home review
+  controls, structured denial/timeout continuation, duplicate-tap gating,
+  fail-safe interrupted-run repair, and conformance fixtures.
+- A versioned compact-island state contract cached by `system_server`, with an
+  assistant-only publisher, one-way Binder listeners, bounded fields,
+  secret-like-content rejection, and known-valid/invalid conformance fixtures.
+- A SystemUI-owned compact OpenPhone island with a fixed non-modal touch
+  window, keyguard privacy redaction, stale-publisher degradation, AI Home
+  routing, and unlocked active-task long-press stop.
+
+### Changed
+
+- AI Home now owns the full foreground display: Android status/navigation
+  chrome stays hidden until a transient edge swipe, and the non-secure swipe
+  keyguard is disabled by default while configured credentials continue to
+  invoke Android's secure keyguard.
+- Launcher3 remains installed for conventional app access but no longer
+  advertises itself as a competing Home activity in OpenPhone products.
+- Tapping the compact idle OpenPhone island returns directly to AI Home; the
+  existing pull-down gesture continues to expose detailed status.
+- The expanded island Runs tab now reads the same durable-run projection as AI
+  Home instead of maintaining a jobs-only status view.
+- AI Home run detail now supports pause/resume and exact background review;
+  approval-needed compact-island entries route the user to AI Home.
+- The assistant no longer owns the product compact-island window. Its
+  `TYPE_SYSTEM_ERROR` overlay is reduced to a non-touchable pointer/glow layer
+  during active device control, with the previous island retained only behind
+  a product compatibility property.
+- OpenPhone Assistant development package bumped to `versionCode=168` /
+  `versionName=0.1.132-dev` for the SystemUI island integration.
+
+### Fixed
+
+- The SystemUI-owned App Space island now preserves the previous compact
+  geometry, black capsule, centered typography, and icon-first state language
+  instead of replacing it with a wide, verbose status pill.
+- AI Home now renders a minimal black locked-boot shell, while its
+  direct-boot-aware assistant service remains bindable with a locked status;
+  both wait for `USER_UNLOCKED` before initializing credential-encrypted
+  agent, island, or runtime state during early boot.
+- Launcher3 App Space keeps its internal HOME resolution at a lower priority,
+  preventing Quickstep startup crashes while AI Home remains the preferred
+  Home activity.
+- OpenPhone Assistant development package bumped to `versionCode=171` /
+  `versionName=0.1.135-dev` for the locked-boot fix.
+- OpenPhone Assistant development package bumped to `versionCode=172` /
+  `versionName=0.1.136-dev` for the immersive AI Home shell.
+
 ## [0.0.3] - 2026-07-03
 
 ### Added

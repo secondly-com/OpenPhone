@@ -1,0 +1,56 @@
+From 7f5f6f8a0ec4e79f2c5be3f13dbf8a08d0cda801 Mon Sep 17 00:00:00 2001
+From: OpenPhone <dev@openphone.local>
+Date: Sat, 18 Jul 2026 18:05:00 -0700
+Subject: [PATCH] OpenPhone: prefer AI Home as the default home surface
+
+Keep Launcher3's HOME intent resolvable inside Quickstep, which uses its own
+HOME activity to initialize overview even when another launcher is the
+default. Give that filter a lower priority so OpenPhoneHomeActivity remains
+the deterministic default while AI Home can launch Launcher3 explicitly as
+App Space.
+
+Change-Id: I5d2b98f67bc5fe81472841fd35e536af983a411c
+---
+ AndroidManifest.xml                    | 2 +-
+ go/AndroidManifest-launcher.xml        | 2 +-
+ quickstep/AndroidManifest-launcher.xml | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -62,7 +62,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
+                 <action android:name="android.intent.action.MAIN" />
+                 <action android:name="android.intent.action.SHOW_WORK_APPS" />
+                 <action android:name="android.intent.action.ALL_APPS" />
+diff --git a/go/AndroidManifest-launcher.xml b/go/AndroidManifest-launcher.xml
+--- a/go/AndroidManifest-launcher.xml
++++ b/go/AndroidManifest-launcher.xml
+@@ -55,7 +55,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
+                 <action android:name="android.intent.action.MAIN" />
+                 <action android:name="android.intent.action.ALL_APPS" />
+                 <category android:name="android.intent.category.HOME" />
+diff --git a/quickstep/AndroidManifest-launcher.xml b/quickstep/AndroidManifest-launcher.xml
+--- a/quickstep/AndroidManifest-launcher.xml
++++ b/quickstep/AndroidManifest-launcher.xml
+@@ -54,7 +54,7 @@
+             android:taskAffinity=""
+             android:exported="true"
+             android:enabled="true">
+-            <intent-filter>
++            <intent-filter android:priority="-1000">
+                 <action android:name="android.intent.action.MAIN" />
+                 <action android:name="android.intent.action.SHOW_WORK_APPS" />
+                 <action android:name="android.intent.action.ALL_APPS" />
+-- 
+2.50.1

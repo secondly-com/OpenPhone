@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+         OpenPhone boots directly into AI Home when the owner has not
+         configured a credential. LockPatternUtils ignores this default once
+         a pattern, PIN, or password exists, preserving Android's secure
+         keyguard and credential-encrypted user-data boundary.
+    -->
+    <bool name="config_disableLockscreenByDefault">true</bool>
+</resources>
