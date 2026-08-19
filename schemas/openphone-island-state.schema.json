@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/openphone-island-state.schema.json",
+  "title": "OpenPhone SystemUI Island State V1",
+  "type": "object",
+  "required": [
+    "schema",
+    "revision",
+    "mode",
+    "label",
+    "title",
+    "detail",
+    "visible",
+    "needs_attention",
+    "sensitivity",
+    "active_task_id",
+    "pending_confirmation_id",
+    "live_runs",
+    "updated_at",
+    "published_at",
+    "published_elapsed_ms",
+    "source"
+  ],
+  "properties": {
+    "schema": {
+      "const": "openphone.island_state.v1"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mode": {
+      "enum": [
+        "idle",
+        "listening",
+        "transcript",
+        "thinking",
+        "realtime",
+        "action_running",
+        "answer_ready",
+        "reply",
+        "needs_review",
+        "error",
+        "watching",
+        "unavailable"
+      ]
+    },
+    "label": {
+      "type": "string",
+      "maxLength": 48
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "visible": {
+      "type": "boolean"
+    },
+    "needs_attention": {
+      "type": "boolean"
+    },
+    "sensitivity": {
+      "enum": ["public", "personal", "sensitive", "restricted"]
+    },
+    "active_task_id": {
+      "type": "string",
+      "maxLength": 96
+    },
+    "pending_confirmation_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "live_runs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "published_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "published_elapsed_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source": {
+      "enum": ["assistant", "system_server"]
+    }
+  },
+  "additionalProperties": false
+}

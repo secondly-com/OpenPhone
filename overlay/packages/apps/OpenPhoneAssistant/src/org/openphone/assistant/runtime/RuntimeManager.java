@@ -1,16 +1,20 @@
 package org.openphone.assistant.runtime;
 
 import android.content.Context;
-import android.openphone.OpenPhoneAgentManager;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.OpenPhoneNotificationController;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.runtime.adapters.openclaw.OpenClawRuntimeAdapter;
 import org.openphone.assistant.session.PhoneExecutionSession;
 import org.openphone.assistant.session.PhoneSessionStore;
+import org.openphone.assistant.surface.AdaptiveSurface;
+import org.openphone.assistant.surface.AssistantOutput;
+import org.openphone.assistant.surface.SurfaceMutationResult;
+import org.openphone.assistant.surface.SurfaceRepository;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,25 +24,29 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
     private static final String TAG = "OpenPhoneRuntime";
 
     private final Context mContext;
-    private final OpenPhoneAgentManager mAgentManager;
+    private final PhoneToolGateway mPhoneGateway;
     private final RuntimeToolBridge mToolBridge;
     private final PhoneSessionStore mSessionStore;
+    private final SurfaceRepository mSurfaceRepository;
     private final List<RuntimeAdapter> mAdapters = new ArrayList<>();
     private RuntimeCallback mRuntimeCallback;
     private String mStatus = "disabled";
 
-    public RuntimeManager(Context context, OpenPhoneAgentManager agentManager) {
+    public RuntimeManager(Context context, PhoneToolGateway phoneGateway) {
         mContext = context;
-        mAgentManager = agentManager;
+        mPhoneGateway = phoneGateway;
         mSessionStore = new PhoneSessionStore(context);
-        mToolBridge = new RuntimeToolBridge(context, agentManager, mSessionStore);
+        mSurfaceRepository = new SurfaceRepository(context);
+        mToolBridge = new RuntimeToolBridge(context, phoneGateway, mSessionStore);
         mToolBridge.setConfirmationCallback(this);
     }
 
     public synchronized void start() {
         stopLocked();
         RuntimeConfig config = RuntimeConfig.load(mContext);
-        if (mAgentManager == null) {
+        if (mPhoneGateway == null || !mPhoneGateway.isAvailable()) {
+            // Preserve the existing wire/status value while the Play profile
+            // is introduced behind the new gateway contract.
             mStatus = "framework_unavailable";
             return;
         }
@@ -53,6 +61,18 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
                         public void onRuntimeMessage(String runtime, String sessionKey,
                                 String message, boolean terminal) {
                             dispatchRuntimeMessage(runtime, sessionKey, message, terminal);
+                        }
+
+                        @Override
+                        public void onRuntimeOutput(String runtime, String sessionKey,
+                                AssistantOutput output, boolean terminal) {
+                            acceptRuntimeOutput(runtime, sessionKey, output, terminal, "auto", -1);
+                        }
+
+                        @Override
+                        public void onRuntimeSurfaceEvent(String runtime, String sessionKey,
+                                String event, JSONObject payload) {
+                            handleRuntimeSurfaceEvent(runtime, sessionKey, event, payload);
                         }
                     }));
         }
@@ -88,6 +108,8 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
                     .put("status", aggregateStatus)
                     .put("manager_status", aggregateStatus)
                     .put("lifecycle_status", mStatus)
+                    .put("phone_platform", mPhoneGateway == null
+                            ? "unavailable" : mPhoneGateway.profile())
                     .put("updated_at_ms", System.currentTimeMillis())
                     .put("adapters", adapters)
                     .toString();
@@ -197,10 +219,155 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
 
     private void dispatchRuntimeMessage(String runtime, String sessionKey, String message,
             boolean terminal) {
+        String phoneSessionId = PhoneSessionStore.extractPhoneSessionId(sessionKey);
+        if (!phoneSessionId.isEmpty()) {
+            String lower = message == null ? "" : message.toLowerCase();
+            String status = terminal
+                    ? (lower.contains("error") || lower.contains("failed")
+                            || lower.contains("disconnected") ? "failed" : "completed")
+                    : "running";
+            mSessionStore.touchStatus(phoneSessionId, status);
+        }
         RuntimeCallback callback = mRuntimeCallback;
         if (callback != null) {
             callback.onRuntimeMessage(runtime, sessionKey, message, terminal);
         }
+    }
+
+    private void dispatchRuntimeOutput(String runtime, String sessionKey,
+            AssistantOutput output, boolean terminal) {
+        RuntimeCallback callback = mRuntimeCallback;
+        if (callback != null) {
+            callback.onRuntimeOutput(runtime, sessionKey, output, terminal);
+        }
+    }
+
+    private synchronized void handleRuntimeSurfaceEvent(String runtime, String sessionKey,
+            String event, JSONObject payload) {
+        if ("runtime.surface.dismiss".equals(event)) {
+            handleRuntimeSurfaceDismiss(runtime, sessionKey, payload);
+            return;
+        }
+        if (!"runtime.surface.present".equals(event)
+                && !"runtime.surface.replace".equals(event)) {
+            sendSurfaceProtocolResult(runtime, null, "event_unsupported",
+                    "Unsupported runtime surface event.", event);
+            return;
+        }
+        AssistantOutput output = AssistantOutput.fromJson(
+                payload == null ? null : payload.optJSONObject("output"));
+        if (output == null) {
+            sendSurfaceProtocolResult(runtime, null, "output_invalid",
+                    "Surface event requires an explicit assistant output envelope.", event);
+            return;
+        }
+        int expectedRevision = payload.optInt("expected_revision", -1);
+        acceptRuntimeOutput(runtime, sessionKey, output, false,
+                "runtime.surface.replace".equals(event) ? "replace" : "present",
+                expectedRevision);
+    }
+
+    private synchronized void acceptRuntimeOutput(String runtime, String sessionKey,
+            AssistantOutput output, boolean terminal, String operation, int expectedRevision) {
+        if (output == null) {
+            sendSurfaceProtocolResult(runtime, null, "output_invalid",
+                    "Assistant output is malformed.", operation);
+            return;
+        }
+        AdaptiveSurface surface = output.surface;
+        if (surface != null) {
+            if (!RuntimeRegistry.normalize(runtime).equals(
+                    RuntimeRegistry.normalize(surface.runtime))) {
+                sendSurfaceProtocolResult(runtime, surface, "runtime_mismatch",
+                        "Surface runtime ownership does not match its transport.", operation);
+                return;
+            }
+            if (!output.sessionId.equals(surface.sessionId)
+                    || (!sessionKey.isEmpty() && !sessionKey.contains(output.sessionId))) {
+                sendSurfaceProtocolResult(runtime, surface, "session_mismatch",
+                        "Surface session ownership does not match its output.", operation);
+                return;
+            }
+            SurfaceMutationResult mutation;
+            AdaptiveSurface current = mSurfaceRepository.getActive(surface.surfaceId);
+            if ("replace".equals(operation)) {
+                int expected = expectedRevision < 1
+                        ? surface.revision - 1 : expectedRevision;
+                mutation = mSurfaceRepository.replace(surface, expected);
+            } else if ("present".equals(operation)) {
+                mutation = mSurfaceRepository.present(surface);
+            } else if (current == null) {
+                mutation = mSurfaceRepository.present(surface);
+            } else if (surface.revision == current.revision
+                    && surface.toJson().toString().equals(current.toJson().toString())) {
+                mutation = SurfaceMutationResult.ok("already_presented", current);
+            } else {
+                mutation = mSurfaceRepository.replace(surface, current.revision);
+            }
+            if (!mutation.ok) {
+                sendSurfaceProtocolResult(runtime, surface, mutation.code,
+                        mutation.message, operation);
+                return;
+            }
+            sendSurfaceProtocolResult(runtime, surface, mutation.code,
+                    "Surface accepted by the phone.", operation);
+        }
+        if (!output.sessionId.isEmpty()) {
+            mSessionStore.touchStatus(output.sessionId, terminal ? "completed" : "running");
+        }
+        dispatchRuntimeOutput(runtime, sessionKey, output, terminal);
+    }
+
+    private void handleRuntimeSurfaceDismiss(String runtime, String sessionKey,
+            JSONObject payload) {
+        String surfaceId = payload == null ? "" : payload.optString("surface_id", "");
+        AdaptiveSurface surface = mSurfaceRepository.getActive(surfaceId);
+        if (surface == null) {
+            sendSurfaceProtocolResult(runtime, null, "surface_not_active",
+                    "Surface is missing, expired, or already dismissed.", "dismiss");
+            return;
+        }
+        if (!RuntimeRegistry.normalize(runtime).equals(
+                RuntimeRegistry.normalize(surface.runtime))) {
+            sendSurfaceProtocolResult(runtime, surface, "runtime_mismatch",
+                    "Runtime cannot dismiss another runtime's surface.", "dismiss");
+            return;
+        }
+        String claimedSession = payload.optString("session_id", "");
+        if (claimedSession.isEmpty()) {
+            claimedSession = PhoneSessionStore.extractPhoneSessionId(sessionKey);
+        }
+        if (!claimedSession.isEmpty() && !claimedSession.equals(surface.sessionId)) {
+            sendSurfaceProtocolResult(runtime, surface, "session_mismatch",
+                    "Runtime cannot dismiss another session's surface.", "dismiss");
+            return;
+        }
+        int revision = payload.optInt("revision", 0);
+        if (revision != surface.revision) {
+            sendSurfaceProtocolResult(runtime, surface, "stale_revision",
+                    "Runtime dismissal revision is stale.", "dismiss");
+            return;
+        }
+        SurfaceMutationResult result = mSurfaceRepository.dismiss(
+                surface.surfaceId, payload.optString("reason", "runtime_dismissed"));
+        sendSurfaceProtocolResult(runtime, surface, result.code,
+                result.ok ? "Surface dismissed." : result.message, "dismiss");
+    }
+
+    private void sendSurfaceProtocolResult(String runtime, AdaptiveSurface surface,
+            String status, String message, String operation) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("surface_id", surface == null ? "" : surface.surfaceId)
+                    .put("revision", surface == null ? 0 : surface.revision)
+                    .put("session_id", surface == null ? "" : surface.sessionId)
+                    .put("operation", operation == null ? "" : operation)
+                    .put("status", status == null ? "" : status)
+                    .put("message", message == null ? "" : message);
+        } catch (JSONException ignored) {
+        }
+        sendEventToRuntime(runtime,
+                new RuntimeEvent("runtime.surface.action_result", payload));
     }
 
     private void sendResultToRuntime(String runtime, RuntimeToolRequest request,
@@ -212,7 +379,7 @@ public final class RuntimeManager implements RuntimeConfirmationCallback {
         }
     }
 
-    private void sendEventToRuntime(String runtime, RuntimeEvent event) {
+    public synchronized void sendEventToRuntime(String runtime, RuntimeEvent event) {
         if (runtime == null || runtime.isEmpty() || event == null) {
             return;
         }

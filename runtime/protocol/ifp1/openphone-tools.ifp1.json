@@ -1,0 +1,1685 @@
+{
+  "ifp": "1",
+  "manifest": "openphone-tools",
+  "version": "1.0.0-draft",
+  "description": "OpenPhone surface tool capability declarations for Interfaces Protocol v1 (ifp/1). Each tool is declared at hello/pairing as a capability of type 'tool:<name>' (spec section 6.4) and invoked via the action lifecycle (spec section 8): action.propose -> action.approve/action.reject -> action.result. risk maps directly onto action.propose payload.risk. Supersedes runtime/protocol/openphone-commands.json (37 commands).",
+  "tools": [
+    {
+      "tool": "device.status",
+      "capability": "tool:device.status",
+      "risk": "medium",
+      "description": "Gather a call context card from call log, contacts, messages, and calendar, including missed calls not yet returned.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional person, business, trip, or confirmation query."
+          },
+          "number": {
+            "type": "string",
+            "description": "Optional phone number."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of rows per source."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why phone context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.device.status",
+        "superseded_aliases": [
+          "device.status",
+          "device.info"
+        ],
+        "android_tool": "phone_context",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calls.read"
+      }
+    },
+    {
+      "tool": "apps.search",
+      "capability": "tool:apps.search",
+      "risk": "low",
+      "description": "Search launchable installed Android apps by label, package, or activity.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional app label, package, or activity query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of apps to return."
+          },
+          "include_system": {
+            "type": "boolean",
+            "description": "Include system apps."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why installed app context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.apps.search",
+        "superseded_aliases": [
+          "device.apps"
+        ],
+        "android_tool": "apps_search",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "apps.read"
+      }
+    },
+    {
+      "tool": "screen.get",
+      "capability": "tool:screen.get",
+      "risk": "low",
+      "description": "Read the current phone screen and optional screenshot.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "include_screenshot": {
+            "type": "boolean",
+            "description": "Include screenshot image bytes."
+          },
+          "include_activity": {
+            "type": "boolean",
+            "description": "Include foreground app/activity."
+          },
+          "include_ui_tree": {
+            "type": "boolean",
+            "description": "Include accessibility UI tree."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this observation is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.screen.get",
+        "superseded_aliases": [
+          "canvas.snapshot"
+        ],
+        "android_tool": "get_screen",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "screen.read.visible"
+      }
+    },
+    {
+      "tool": "screen.understand_local",
+      "capability": "tool:screen.understand_local",
+      "risk": "low",
+      "description": "Run bounded local screen understanding on the phone without returning screenshot bytes.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "max_visible_text": {
+            "type": "integer",
+            "description": "Maximum visible text entries to return, capped by the phone."
+          },
+          "max_interactive_elements": {
+            "type": "integer",
+            "description": "Maximum interactive elements to return, capped by the phone."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "description": "Requested compute timeout in milliseconds, capped by the phone."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why local screen understanding is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.screen.understand_local",
+        "superseded_aliases": [
+          "openphone.local.screen_understanding"
+        ],
+        "android_tool": "local_screen_understanding",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "screen.read.visible"
+      }
+    },
+    {
+      "tool": "notifications.list",
+      "capability": "tool:notifications.list",
+      "risk": "medium",
+      "description": "List recent indexed Android notifications.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of notifications to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why notification context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.list",
+        "superseded_aliases": [
+          "notifications.list"
+        ],
+        "android_tool": "notifications_list",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "notifications.read"
+      }
+    },
+    {
+      "tool": "notifications.search",
+      "capability": "tool:notifications.search",
+      "risk": "medium",
+      "description": "Search recent indexed Android notifications.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of notifications to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why notification context is needed."
+          }
+        },
+        "required": [
+          "query",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.search",
+        "superseded_aliases": [
+          "notifications.search"
+        ],
+        "android_tool": "notifications_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "notifications.read"
+      }
+    },
+    {
+      "tool": "notifications.open",
+      "capability": "tool:notifications.open",
+      "risk": "medium",
+      "description": "Open an active Android notification through its content intent.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "notification_key": {
+            "type": "string",
+            "description": "Optional notification key."
+          },
+          "package": {
+            "type": "string",
+            "description": "Optional source package."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional title/text/package search query."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this notification should open."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.notifications.open",
+        "superseded_aliases": [
+          "notifications.open"
+        ],
+        "android_tool": "notifications_open",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "notifications.act"
+      }
+    },
+    {
+      "tool": "contacts.search",
+      "capability": "tool:contacts.search",
+      "risk": "medium",
+      "description": "Search Android contacts by name, phone, email, or organization.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional name, phone, or email query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of contacts to return."
+          },
+          "include_details": {
+            "type": "boolean",
+            "description": "Include phone and email details."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why contact context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.contacts.search",
+        "superseded_aliases": [
+          "contacts.search"
+        ],
+        "android_tool": "contacts_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "contacts.read"
+      }
+    },
+    {
+      "tool": "calendar.search",
+      "capability": "tool:calendar.search",
+      "risk": "medium",
+      "description": "Search Android calendar events in a bounded time window.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional search query."
+          },
+          "start_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds, or 0."
+          },
+          "end_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds, or 0."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of events to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why calendar context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.search",
+        "superseded_aliases": [
+          "calendar.events"
+        ],
+        "android_tool": "calendar_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calendar.read"
+      }
+    },
+    {
+      "tool": "calendar.add",
+      "capability": "tool:calendar.add",
+      "risk": "medium",
+      "description": "Create an Android calendar event in the user's writable calendar.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Event title."
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional event details."
+          },
+          "location": {
+            "type": "string",
+            "description": "Optional location."
+          },
+          "start_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds."
+          },
+          "end_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds, or 0."
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "description": "Duration if end_at is omitted."
+          },
+          "all_day": {
+            "type": "boolean",
+            "description": "Whether this is an all-day event."
+          },
+          "calendar_id": {
+            "type": "integer",
+            "description": "Optional target calendar id."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this event should be created."
+          }
+        },
+        "required": [
+          "title",
+          "start_at",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.add",
+        "superseded_aliases": [
+          "calendar.add"
+        ],
+        "android_tool": "calendar_create_event",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.write"
+      }
+    },
+    {
+      "tool": "calendar.update",
+      "capability": "tool:calendar.update",
+      "risk": "medium",
+      "description": "Update fields of an existing Android calendar event (title, time, location, description). Recurring events update the whole series.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "description": "Calendar event id from calendar_search."
+          },
+          "title": {
+            "type": "string",
+            "description": "New event title."
+          },
+          "description": {
+            "type": "string",
+            "description": "New event details."
+          },
+          "location": {
+            "type": "string",
+            "description": "New location."
+          },
+          "start_at": {
+            "type": "integer",
+            "description": "New start, Unix time in milliseconds."
+          },
+          "end_at": {
+            "type": "integer",
+            "description": "New end, Unix time in milliseconds."
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "description": "New duration if end_at is omitted."
+          },
+          "all_day": {
+            "type": "boolean",
+            "description": "Whether this is an all-day event."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this event should be changed."
+          }
+        },
+        "required": [
+          "event_id",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.update",
+        "superseded_aliases": [
+          "calendar.update"
+        ],
+        "android_tool": "calendar_update_event",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.write"
+      }
+    },
+    {
+      "tool": "calendar.delete",
+      "capability": "tool:calendar.delete",
+      "risk": "high",
+      "description": "Delete an Android calendar event permanently. Recurring events delete the whole series.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "description": "Calendar event id from calendar_search."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this event should be deleted."
+          }
+        },
+        "required": [
+          "event_id",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calendar.delete",
+        "superseded_aliases": [
+          "calendar.delete"
+        ],
+        "android_tool": "calendar_delete_event",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "calendar.delete"
+      }
+    },
+    {
+      "tool": "messages.search",
+      "capability": "tool:messages.search",
+      "risk": "medium",
+      "description": "Search Android SMS message history by sender, body, or address.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional sender, body, or address query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of messages to return."
+          },
+          "thread_id": {
+            "type": "integer",
+            "description": "Optional SMS thread id, or 0."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why message context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.messages.search",
+        "superseded_aliases": [
+          "sms.search"
+        ],
+        "android_tool": "messages_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "messages.read"
+      }
+    },
+    {
+      "tool": "messages.draft",
+      "capability": "tool:messages.draft",
+      "risk": "medium",
+      "description": "Prepare a structured SMS draft for review without sending it.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "Phone number if known."
+          },
+          "body": {
+            "type": "string",
+            "description": "Draft message body."
+          },
+          "contact_query": {
+            "type": "string",
+            "description": "Contact name if recipient should be resolved."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this draft is needed."
+          }
+        },
+        "required": [
+          "body",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.messages.draft",
+        "superseded_aliases": [
+          "sms.draft"
+        ],
+        "android_tool": "messages_draft",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "messages.draft"
+      }
+    },
+    {
+      "tool": "messages.send",
+      "capability": "tool:messages.send",
+      "risk": "high",
+      "description": "Send an SMS message to a phone number.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "Phone number."
+          },
+          "body": {
+            "type": "string",
+            "description": "Message body."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this SMS should be sent."
+          }
+        },
+        "required": [
+          "to",
+          "body",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.messages.send",
+        "superseded_aliases": [
+          "sms.send"
+        ],
+        "android_tool": "messages_send",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "messages.send"
+      }
+    },
+    {
+      "tool": "calls.search",
+      "capability": "tool:calls.search",
+      "risk": "medium",
+      "description": "Search Android call log entries by number, contact name (joined from contacts when the log has none), type, or date range.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional number or cached contact name."
+          },
+          "type": {
+            "type": "string",
+            "description": "Optional call type filter: missed, incoming, outgoing, voicemail, rejected, or blocked."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of calls to return."
+          },
+          "since": {
+            "type": "integer",
+            "description": "Only calls at or after this Unix time in milliseconds, or 0."
+          },
+          "until": {
+            "type": "integer",
+            "description": "Only calls at or before this Unix time in milliseconds, or 0."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why call history context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calls.search",
+        "superseded_aliases": [
+          "callLog.search"
+        ],
+        "android_tool": "calls_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "calls.read"
+      }
+    },
+    {
+      "tool": "calls.place",
+      "capability": "tool:calls.place",
+      "risk": "high",
+      "description": "Place a phone call to a number.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "Phone number if known."
+          },
+          "contact_query": {
+            "type": "string",
+            "description": "Contact name if number should be resolved."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this call should be placed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.calls.place",
+        "superseded_aliases": [
+          "calls.place"
+        ],
+        "android_tool": "calls_place",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "calls.place"
+      }
+    },
+    {
+      "tool": "memory.search",
+      "capability": "tool:memory.search",
+      "risk": "low",
+      "description": "Search durable OpenPhone memories: user preferences, facts, standing instructions, and long-lived personal context. Use before answering questions that depend on remembered user preferences or identity.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of memories to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this memory is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.memory.search",
+        "superseded_aliases": [],
+        "android_tool": "memory_search",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "memory.read"
+      }
+    },
+    {
+      "tool": "memory.save",
+      "capability": "tool:memory.save",
+      "risk": "medium",
+      "description": "Save explicit durable user memory: stable preferences, facts, or standing instructions that should affect future phone behavior. Do not use for one-off reminders or future conditions; use commitments or watchers for those.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "fact, preference, or standing_instruction."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Memory subject, usually user."
+          },
+          "text": {
+            "type": "string",
+            "description": "Durable memory text."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence from 0 to 1."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this should become memory."
+          }
+        },
+        "required": [
+          "text",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.memory.save",
+        "superseded_aliases": [],
+        "android_tool": "memory_save",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "memory.write"
+      }
+    },
+    {
+      "tool": "watchers.list",
+      "capability": "tool:watchers.list",
+      "risk": "low",
+      "description": "List active OpenPhone watchers: external-condition monitors that may alert later. Use when the user asks what OpenPhone is watching or what conditions are being monitored. Do not use for queued background agent jobs; use background_job_list for those.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional search query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of watchers to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why watcher context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.list",
+        "superseded_aliases": [],
+        "android_tool": "watcher_list",
+        "confirmation": "none",
+        "default_exposure": "private_read",
+        "surface_capability": "watchers.read"
+      }
+    },
+    {
+      "tool": "watchers.create",
+      "capability": "tool:watchers.create",
+      "risk": "medium",
+      "description": "Create a durable OpenPhone watcher: a future trigger plus an optional reaction. Use for proactive monitoring of message replies/no-reply deadlines, calls/no-call deadlines, notification matches, web/page changes, semantic page conditions, and requests like tell me when, remind me if, watch this, let me know, or make sure I do not forget. If the user asks the phone to do something when the trigger happens, store that reaction in delivery using delivery.tool plus delivery.arguments, or delivery.prompt for a background agent job. Tool arguments may reference trigger data with templates such as {{event.number}}, {{event.address}}, {{event.title}}, {{event.text}}, {{event.url}}, {{watcher.id}}, and {{watcher.title}}. For requests to monitor incoming SMS/messages and check, research, classify, summarize, or otherwise reason about each message, create a message watcher with match_any=true and recurring=true, then use delivery.prompt so the fired watcher starts a background agent job; the prompt should include {{event.text}} and may tell the agent to use browser_search or browser_fetch_page for internet context before notifying the user. Do not use watcher_create for explicit run-as-soon-as-possible queued agent work; use background_job_create for that.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Generic source such as web, notification, message, call, time, or screen."
+          },
+          "evaluator": {
+            "type": "string",
+            "description": "hash_change, text_contains, or semantic_match."
+          },
+          "query": {
+            "type": "string",
+            "description": "Condition text for text or semantic evaluators."
+          },
+          "url": {
+            "type": "string",
+            "description": "Web URL when source is web."
+          },
+          "type": {
+            "type": "string",
+            "description": "Compatibility type: time, notification, web_change, message_reply, or call_back."
+          },
+          "address": {
+            "type": "string",
+            "description": "Phone number or sender to watch when source is message."
+          },
+          "number": {
+            "type": "string",
+            "description": "Phone number to watch when source is call. Omit and set match_any=true for every caller."
+          },
+          "match_any": {
+            "type": "boolean",
+            "description": "For call watchers, true means match any phone number. Use for requests like every incoming call or any caller."
+          },
+          "direction": {
+            "type": "string",
+            "description": "For call watchers: any (default), incoming, or outgoing."
+          },
+          "thread_id": {
+            "type": "integer",
+            "description": "SMS thread id to watch when source is message."
+          },
+          "deadline_at": {
+            "type": "integer",
+            "description": "Unix milliseconds deadline for message or call watchers; with notify_on no_reply or no_call, fires if nothing arrived by then."
+          },
+          "notify_on": {
+            "type": "string",
+            "description": "For message watchers: reply (default) or no_reply. For call watchers: call (default; alert when a call with the number appears) or no_call (alert only if the deadline passes without one)."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short watcher title."
+          },
+          "condition": {
+            "type": "object",
+            "description": "Structured condition."
+          },
+          "schedule": {
+            "type": "object",
+            "description": "Schedule, including next_run_at or interval_ms."
+          },
+          "delivery": {
+            "type": "object",
+            "description": "Delivery or reaction details. Use {\"mode\":\"notification\"} for alerts, {\"tool\":\"model_tool_name\",\"arguments\":{...}} for a stored tool reaction, or {\"mode\":\"background_job\",\"prompt\":\"...\"} for an observe-first background agent turn. For SMS research/classification/evaluation watchers, use delivery.prompt with {{event.text}} and browser_search/browser_fetch_page instructions rather than hardcoding the check in the watcher. Set notify=false or mode=silent to avoid a notification after the reaction."
+          },
+          "tool": {
+            "type": "string",
+            "description": "Shortcut for delivery.tool: the model-facing tool to run when the watcher fires."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Shortcut for delivery.arguments. Values may use event templates such as {{event.number}}."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Shortcut for delivery.prompt when the watcher should enqueue a background agent job after the trigger."
+          },
+          "recurring": {
+            "type": "boolean",
+            "description": "True when the watcher should continue after matching, such as every matching call or notification."
+          },
+          "sms_body": {
+            "type": "string",
+            "description": "Legacy shortcut only; prefer delivery.tool with delivery.arguments for new watcher reactions."
+          },
+          "next_run_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds, or 0."
+          },
+          "interval_ms": {
+            "type": "integer",
+            "description": "Polling interval in milliseconds if relevant."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this watcher should exist."
+          }
+        },
+        "required": [
+          "title",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.create",
+        "superseded_aliases": [],
+        "android_tool": "watcher_create",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "watchers.write"
+      }
+    },
+    {
+      "tool": "watchers.stop",
+      "capability": "tool:watchers.stop",
+      "risk": "medium",
+      "description": "Stop active OpenPhone watchers. Use watcher_id when the user names a specific watcher id. Use scope=all or all=true when the user asks to turn off, disable, clear, remove, delete, cancel, stop, or kill all watchers. Use query when the user describes a watcher by title, source, or condition instead of giving an id.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "watcher_id": {
+            "type": "integer",
+            "description": "Specific watcher id. Omit when stopping all watchers or a query-matched set."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Use all to stop every active watcher."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "True to stop every active watcher."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional search text to stop matching active watchers when the user described the watcher but did not provide an id."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this watcher should stop."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.watchers.stop",
+        "superseded_aliases": [],
+        "android_tool": "watcher_stop",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "watchers.write"
+      }
+    },
+    {
+      "tool": "jobs.list",
+      "capability": "tool:jobs.list",
+      "risk": "low",
+      "description": "List durable OpenPhone background agent jobs, including active, running, completed, failed, and stopped jobs. Use when the user asks what OpenPhone is working on in the background or what background jobs are active.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional search query."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of jobs to return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why background job context is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.list",
+        "superseded_aliases": [],
+        "android_tool": "background_job_list",
+        "confirmation": "none",
+        "default_exposure": "safe_read",
+        "surface_capability": "tasks.observe"
+      }
+    },
+    {
+      "tool": "jobs.create",
+      "capability": "tool:jobs.create",
+      "risk": "medium",
+      "description": "Create a durable OpenPhone background agent job: a queued agent turn that can run after the current conversation. Use for explicit requests like create a background job, do this in the background, run this as soon as possible, keep working and notify me, periodically summarize, check later by running an agent task, or run a non-urgent retrieval task. Do not use watcher_create for these queued agent jobs. Background jobs may observe and summarize; state-changing tools require foreground review.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short user-visible job title."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The agent turn to run when the job wakes."
+          },
+          "type": {
+            "type": "string",
+            "description": "agent_turn, system_event, or heartbeat. Default agent_turn."
+          },
+          "schedule": {
+            "type": "object",
+            "description": "Schedule fields such as next_run_at or interval_ms."
+          },
+          "run_at": {
+            "type": "integer",
+            "description": "Unix milliseconds when the job should first run. Omit or 0 to run soon."
+          },
+          "next_run_at": {
+            "type": "integer",
+            "description": "Unix milliseconds when the job should next run."
+          },
+          "interval_ms": {
+            "type": "integer",
+            "description": "Optional recurrence interval in milliseconds."
+          },
+          "session_target": {
+            "type": "string",
+            "description": "main, isolated, current, or session:<id>."
+          },
+          "delivery": {
+            "type": "object",
+            "description": "Delivery mode. Use {\"mode\":\"notification\"}, {\"mode\":\"silent\"}, or {\"mode\":\"none\"}. If the user gives exact notification wording, include it as notification_text, text, or message."
+          },
+          "notification_text": {
+            "type": "string",
+            "description": "Optional exact notification body to show when the background job completes. Use this when the user says to notify them with an exact phrase."
+          },
+          "payload": {
+            "type": "object",
+            "description": "Optional structured payload for future runtime integrations."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this background job should exist."
+          }
+        },
+        "required": [
+          "title",
+          "prompt",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.create",
+        "superseded_aliases": [],
+        "android_tool": "background_job_create",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "background.run"
+      }
+    },
+    {
+      "tool": "jobs.stop",
+      "capability": "tool:jobs.stop",
+      "risk": "medium",
+      "description": "Stop a durable OpenPhone background agent job.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "description": "Background job id."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this background job should stop."
+          }
+        },
+        "required": [
+          "job_id",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.jobs.stop",
+        "superseded_aliases": [],
+        "android_tool": "background_job_stop",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "background.run"
+      }
+    },
+    {
+      "tool": "app.open",
+      "capability": "tool:app.open",
+      "risk": "low",
+      "description": "Open an installed Android app. This tool completes only simple goals whose whole intent is to open, launch, or show the app. If the user wants something done inside the app, such as playing media, searching, selecting content, changing settings, ordering, booking, posting, sending, or any other in-app workflow, use the autonomous multi-step agent: open the app as one step, then keep observing and acting until the requested result is visibly complete or blocked.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "package_or_label": {
+            "type": "string",
+            "description": "Package name or app label."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional explicit app label when package_or_label is a package name."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this app is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.app.open",
+        "superseded_aliases": [],
+        "android_tool": "open_app",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "apps.launch"
+      }
+    },
+    {
+      "tool": "url.open",
+      "capability": "tool:url.open",
+      "risk": "medium",
+      "description": "Open a URL directly in the browser.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to open."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this URL is needed."
+          }
+        },
+        "required": [
+          "url",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.url.open",
+        "superseded_aliases": [],
+        "android_tool": "open_url",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "network.use"
+      }
+    },
+    {
+      "tool": "ui.tap",
+      "capability": "tool:ui.tap",
+      "risk": "medium",
+      "description": "Tap absolute screen coordinates.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "description": "X coordinate."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y coordinate."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this coordinate should be tapped."
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.tap",
+        "superseded_aliases": [],
+        "android_tool": "tap",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "ui.tap_element",
+      "capability": "tool:ui.tap_element",
+      "risk": "medium",
+      "description": "Tap an enabled interactive element by screen element id.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "description": "Element id from interactive_elements."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this element should be tapped."
+          }
+        },
+        "required": [
+          "element_id",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.tap_element",
+        "superseded_aliases": [],
+        "android_tool": "tap_element",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "ui.long_press",
+      "capability": "tool:ui.long_press",
+      "risk": "medium",
+      "description": "Long press absolute screen coordinates.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "description": "X coordinate."
+          },
+          "y": {
+            "type": "number",
+            "description": "Y coordinate."
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "Press duration."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this coordinate should be long-pressed."
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.long_press",
+        "superseded_aliases": [],
+        "android_tool": "long_press",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "ui.long_press_element",
+      "capability": "tool:ui.long_press_element",
+      "risk": "medium",
+      "description": "Long press an enabled interactive element by screen element id.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "description": "Element id from interactive_elements."
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "Press duration."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this element should be long-pressed."
+          }
+        },
+        "required": [
+          "element_id",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.long_press_element",
+        "superseded_aliases": [],
+        "android_tool": "long_press_element",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "ui.swipe",
+      "capability": "tool:ui.swipe",
+      "risk": "medium",
+      "description": "Swipe from one coordinate to another.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "start_x": {
+            "type": "number",
+            "description": "Start X."
+          },
+          "start_y": {
+            "type": "number",
+            "description": "Start Y."
+          },
+          "end_x": {
+            "type": "number",
+            "description": "End X."
+          },
+          "end_y": {
+            "type": "number",
+            "description": "End Y."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this swipe is needed."
+          }
+        },
+        "required": [
+          "start_x",
+          "start_y",
+          "end_x",
+          "end_y",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.swipe",
+        "superseded_aliases": [],
+        "android_tool": "swipe",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "ui.type_text",
+      "capability": "tool:ui.type_text",
+      "risk": "medium",
+      "description": "Type text into the focused field.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to type."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this text is needed."
+          }
+        },
+        "required": [
+          "text",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.ui.type_text",
+        "superseded_aliases": [],
+        "android_tool": "type_text",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "input.press_key",
+      "capability": "tool:input.press_key",
+      "risk": "medium",
+      "description": "Press a supported Android navigation or IME key.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "back, home, recents, enter, search, or go."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this key is needed."
+          }
+        },
+        "required": [
+          "key",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.input.press_key",
+        "superseded_aliases": [],
+        "android_tool": "press_key",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "input.perform"
+      }
+    },
+    {
+      "tool": "clipboard.set",
+      "capability": "tool:clipboard.set",
+      "risk": "low",
+      "description": "Set clipboard text.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Clipboard text."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why clipboard is needed."
+          }
+        },
+        "required": [
+          "text",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.clipboard.set",
+        "superseded_aliases": [],
+        "android_tool": "set_clipboard",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "clipboard.write"
+      }
+    },
+    {
+      "tool": "clipboard.paste",
+      "capability": "tool:clipboard.paste",
+      "risk": "medium",
+      "description": "Paste clipboard into the focused field.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why paste is needed."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.clipboard.paste",
+        "superseded_aliases": [],
+        "android_tool": "paste",
+        "confirmation": "ask_before_action",
+        "default_exposure": "dangerous",
+        "surface_capability": "clipboard.read"
+      }
+    },
+    {
+      "tool": "share.text",
+      "capability": "tool:share.text",
+      "risk": "high",
+      "description": "Share text through Android's mediated share flow.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to share."
+          },
+          "chooser_title": {
+            "type": "string",
+            "description": "Optional chooser title."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why sharing is needed."
+          }
+        },
+        "required": [
+          "text",
+          "reason"
+        ]
+      },
+      "result_schema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-openphone": {
+        "superseded_command": "openphone.share.text",
+        "superseded_aliases": [],
+        "android_tool": "share_text",
+        "confirmation": "always",
+        "default_exposure": "dangerous",
+        "surface_capability": "share.content"
+      }
+    }
+  ]
+}

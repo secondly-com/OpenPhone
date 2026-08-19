@@ -14,4 +14,18 @@
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:colorAccent">@color/openphone_text_primary</item>
     </style>
+
+    <style name="HomeTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/openphone_home_background</item>
+        <item name="android:navigationBarColor">@color/openphone_home_background</item>
+        <item name="android:statusBarColor">@color/openphone_home_background</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/openphone_home_accent</item>
+    </style>
 </resources>

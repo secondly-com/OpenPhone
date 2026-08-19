@@ -1,7 +1,10 @@
 package org.openphone.assistant;
 
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.RemoteException;
@@ -24,7 +27,9 @@ import org.openphone.assistant.runtime.RuntimeManager;
 import org.openphone.assistant.runtime.RuntimeRegistry;
 import org.openphone.assistant.model.ModelEndpointConfig;
 import org.openphone.assistant.model.OpenAiResponsesAgentAdapter;
+import org.openphone.assistant.jobs.BackgroundJobReviewManager;
 import org.openphone.assistant.jobs.OpenPhoneAgentJobScheduler;
+import org.openphone.assistant.platform.OpenPhoneOsToolGateway;
 import org.openphone.assistant.policy.AuditLog;
 import org.openphone.assistant.policy.PolicyDecision;
 import org.openphone.assistant.policy.PolicyEngine;
@@ -56,6 +61,14 @@ public final class OpenPhoneAssistantService extends Service {
             "org.openphone.assistant.extra.RUNTIME_ATTENTION_AUTONOMY";
     public static final String EXTRA_RUNTIME_ATTENTION_INCLUDE_SCREEN =
             "org.openphone.assistant.extra.RUNTIME_ATTENTION_INCLUDE_SCREEN";
+    public static final String ACTION_RUNTIME_SURFACE_EVENT =
+            "org.openphone.assistant.action.RUNTIME_SURFACE_EVENT";
+    public static final String EXTRA_RUNTIME_SURFACE_RUNTIME =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_RUNTIME";
+    public static final String EXTRA_RUNTIME_SURFACE_EVENT =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_EVENT";
+    public static final String EXTRA_RUNTIME_SURFACE_PAYLOAD =
+            "org.openphone.assistant.extra.RUNTIME_SURFACE_PAYLOAD";
     private static final int MAX_PENDING_RUNTIME_VOICE_REPLIES = 16;
     private static volatile String sLatestRuntimeStatusJson =
             "{\"status\":\"disabled\",\"manager_status\":\"not_created\"}";
@@ -70,6 +83,8 @@ public final class OpenPhoneAssistantService extends Service {
     private TextToSpeech mRuntimeReplyTts;
     private boolean mRuntimeReplyTtsReady;
     private final Set<String> mPendingRuntimeVoicePhoneSessions = new LinkedHashSet<>();
+    private volatile boolean mUnlockedStateReady;
+    private BroadcastReceiver mUserUnlockReceiver;
 
     private final PolicyEngine mPolicyEngine = new PolicyEngine();
     private final AuditLog mAuditLog = new AuditLog(TAG);
@@ -82,6 +97,9 @@ public final class OpenPhoneAssistantService extends Service {
         @Override
         public String getStatus() {
             String runtimeStatus = "runtime=" + runtimeStatusJson();
+            if (!mUnlockedStateReady) {
+                return "assistant.locked " + runtimeStatus;
+            }
             if (mAgentManager == null) {
                 return "assistant.ready framework.unavailable " + runtimeStatus;
             }
@@ -90,6 +108,9 @@ public final class OpenPhoneAssistantService extends Service {
 
         @Override
         public String startTask(String taskRequestJson) throws RemoteException {
+            if (!mUnlockedStateReady) {
+                return userLockedResponse();
+            }
             if (mAgentManager != null) {
                 return mAgentManager.startTask(taskRequestJson);
             }
@@ -98,6 +119,9 @@ public final class OpenPhoneAssistantService extends Service {
 
         @Override
         public String getScreenContext(String taskId) throws RemoteException {
+            if (!mUnlockedStateReady) {
+                return userLockedResponse();
+            }
             if (mAgentManager != null) {
                 return mAgentManager.getScreenContext(taskId);
             }
@@ -106,6 +130,9 @@ public final class OpenPhoneAssistantService extends Service {
 
         @Override
         public String executeAction(String taskId, String actionRequestJson) throws RemoteException {
+            if (!mUnlockedStateReady) {
+                return userLockedResponse();
+            }
             if (mAgentManager != null) {
                 return mAgentManager.executeAction(taskId, actionRequestJson);
             }
@@ -115,6 +142,9 @@ public final class OpenPhoneAssistantService extends Service {
         @Override
         public String confirmAction(String pendingActionId, boolean approved)
                 throws RemoteException {
+            if (!mUnlockedStateReady) {
+                return userLockedResponse();
+            }
             if (mAgentManager != null) {
                 return mAgentManager.confirmAction(pendingActionId, approved);
             }
@@ -133,6 +163,9 @@ public final class OpenPhoneAssistantService extends Service {
 
         @Override
         public String getAuditLog(int maxEvents) throws RemoteException {
+            if (!mUnlockedStateReady) {
+                return "{\"events\":[],\"source\":\"assistant.user_locked\"}";
+            }
             if (mAgentManager != null) {
                 return mAgentManager.getAuditLog(maxEvents);
             }
@@ -143,6 +176,19 @@ public final class OpenPhoneAssistantService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        if (!isUserUnlocked()) {
+            waitForUserUnlock();
+            return;
+        }
+        initializeUnlockedState();
+    }
+
+    private void initializeUnlockedState() {
+        if (mUnlockedStateReady || !isUserUnlocked()) {
+            return;
+        }
+        unregisterUserUnlockReceiver();
+        mUnlockedStateReady = true;
         mPointerOverlayController = new PointerOverlayController(this, this::answerScreenInOverlay);
         mPointerOverlayController.setConfirmationHandler(new PointerOverlayController.ConfirmationHandler() {
             @Override
@@ -178,6 +224,10 @@ public final class OpenPhoneAssistantService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!ensureUnlockedStateReady()) {
+            Log.i(TAG, "Deferring assistant service command until user unlock");
+            return START_STICKY;
+        }
         refreshIslandAutonomy();
         ensureRuntimeManagerReady();
         String action = intent != null ? intent.getAction() : null;
@@ -204,6 +254,10 @@ public final class OpenPhoneAssistantService extends Service {
             requestRuntimeAttention(intent);
             return START_STICKY;
         }
+        if (ACTION_RUNTIME_SURFACE_EVENT.equals(action)) {
+            forwardRuntimeSurfaceEvent(intent);
+            return START_STICKY;
+        }
         if (OpenPhoneNotificationController.ACTION_START.equals(action)) {
             mIslandHiddenByActivity = false;
             mNotificationTaskId = startNotificationTask();
@@ -219,6 +273,17 @@ public final class OpenPhoneAssistantService extends Service {
                 || OpenPhoneNotificationController.ACTION_EXTERNAL_DENY.equals(action)) {
             resolveRuntimeConfirmation(intent,
                     OpenPhoneNotificationController.ACTION_EXTERNAL_APPROVE.equals(action));
+            return START_STICKY;
+        }
+        if (OpenPhoneNotificationController.ACTION_BACKGROUND_APPROVE.equals(action)
+                || OpenPhoneNotificationController.ACTION_BACKGROUND_DENY.equals(action)) {
+            final String confirmationId = intent == null ? "" : intent.getStringExtra(
+                    OpenPhoneNotificationController.EXTRA_BACKGROUND_CONFIRMATION_ID);
+            final boolean approved =
+                    OpenPhoneNotificationController.ACTION_BACKGROUND_APPROVE.equals(action);
+            new Thread(() -> BackgroundJobReviewManager.resolve(
+                    OpenPhoneAssistantService.this, confirmationId, approved),
+                    "OpenPhoneBackgroundReview").start();
             return START_STICKY;
         }
         if (!mIslandHiddenByActivity) {
@@ -237,6 +302,7 @@ public final class OpenPhoneAssistantService extends Service {
 
     @Override
     public void onDestroy() {
+        unregisterUserUnlockReceiver();
         if (mPointerOverlayController != null) {
             mPointerOverlayController.hide();
         }
@@ -246,6 +312,56 @@ public final class OpenPhoneAssistantService extends Service {
         shutdownRuntimeReplyTts();
         OpenPhoneNotificationController.cancel(this);
         super.onDestroy();
+    }
+
+    private boolean ensureUnlockedStateReady() {
+        if (mUnlockedStateReady) {
+            return true;
+        }
+        if (!isUserUnlocked()) {
+            waitForUserUnlock();
+            return false;
+        }
+        initializeUnlockedState();
+        return mUnlockedStateReady;
+    }
+
+    private void waitForUserUnlock() {
+        sLatestRuntimeStatusJson = USER_LOCKED_RUNTIME_STATUS;
+        if (mUserUnlockReceiver != null) {
+            return;
+        }
+        mUserUnlockReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())) {
+                    return;
+                }
+                initializeUnlockedState();
+            }
+        };
+        registerReceiver(mUserUnlockReceiver, new IntentFilter(Intent.ACTION_USER_UNLOCKED),
+                Context.RECEIVER_NOT_EXPORTED);
+        if (isUserUnlocked()) {
+            initializeUnlockedState();
+            return;
+        }
+        Log.i(TAG, "Assistant service is waiting for credential-encrypted storage to unlock");
+    }
+
+    private void unregisterUserUnlockReceiver() {
+        if (mUserUnlockReceiver == null) {
+            return;
+        }
+        try {
+            unregisterReceiver(mUserUnlockReceiver);
+        } catch (IllegalArgumentException ignored) {
+        }
+        mUserUnlockReceiver = null;
+    }
+
+    private static String userLockedResponse() {
+        return "{\"status\":\"denied\",\"reason\":\"user_locked\"}";
     }
 
     private String startNotificationTask() {
@@ -280,6 +396,21 @@ public final class OpenPhoneAssistantService extends Service {
         return status;
     }
 
+    private void forwardRuntimeSurfaceEvent(Intent intent) {
+        if (mRuntimeManager == null || intent == null) {
+            return;
+        }
+        String runtime = cleanRuntime(intent.getStringExtra(EXTRA_RUNTIME_SURFACE_RUNTIME));
+        String event = cleanExtra(intent.getStringExtra(EXTRA_RUNTIME_SURFACE_EVENT), "");
+        JSONObject payload = parseObject(
+                intent.getStringExtra(EXTRA_RUNTIME_SURFACE_PAYLOAD));
+        if (runtime.isEmpty() || event.isEmpty()) {
+            return;
+        }
+        mRuntimeManager.sendEventToRuntime(runtime, new org.openphone.assistant.runtime.RuntimeEvent(
+                event, payload));
+    }
+
     static String latestRuntimeStatusJson() {
         return sLatestRuntimeStatusJson;
     }
@@ -291,7 +422,8 @@ public final class OpenPhoneAssistantService extends Service {
             return false;
         }
         if (mRuntimeManager == null) {
-            mRuntimeManager = new RuntimeManager(this, mAgentManager);
+            mRuntimeManager = new RuntimeManager(
+                    this, new OpenPhoneOsToolGateway(this, mAgentManager));
             configureRuntimeCallback();
             mRuntimeManager.start();
         }
@@ -310,7 +442,8 @@ public final class OpenPhoneAssistantService extends Service {
             return;
         }
         if (mRuntimeManager == null) {
-            mRuntimeManager = new RuntimeManager(this, mAgentManager);
+            mRuntimeManager = new RuntimeManager(
+                    this, new OpenPhoneOsToolGateway(this, mAgentManager));
         }
         configureRuntimeCallback();
         mRuntimeManager.start();

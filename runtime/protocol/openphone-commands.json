@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "deprecated": true,
+  "superseded_by": "ifp1/",
   "commands": [
     {
       "name": "openphone.device.status",

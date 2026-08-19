@@ -1,0 +1,18 @@
+{
+  "schema": "openphone.island_state.v1",
+  "revision": 13,
+  "mode": "needs_review",
+  "label": "Review",
+  "title": "Approval needed",
+  "detail": "Open AI Home to review",
+  "visible": true,
+  "needs_attention": true,
+  "sensitivity": "personal",
+  "active_task_id": "task-912345",
+  "pending_confirmation_id": "job-confirm-fixture-42",
+  "live_runs": 1,
+  "updated_at": 1784410001000,
+  "published_at": 1784410001001,
+  "published_elapsed_ms": 23000,
+  "source": "assistant"
+}

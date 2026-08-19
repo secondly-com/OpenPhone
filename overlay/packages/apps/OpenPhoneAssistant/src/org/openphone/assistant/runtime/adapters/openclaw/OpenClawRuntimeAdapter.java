@@ -17,11 +17,14 @@ import org.openphone.assistant.runtime.RuntimeToolRequest;
 import org.openphone.assistant.runtime.RuntimeToolResult;
 import org.openphone.assistant.runtime.RuntimeTransport;
 import org.openphone.assistant.session.PhoneSessionStore;
+import org.openphone.assistant.surface.AssistantOutput;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -50,6 +53,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
                     return size() > MAX_SEEN_RUNTIME_MESSAGES;
                 }
             };
+    private final Set<String> mActiveSessionKeys = new LinkedHashSet<>();
     private final AtomicReference<String> mStatus = new AtomicReference<>("idle");
     private volatile String mConnectNonce = "";
     private volatile boolean mConnectSent;
@@ -106,6 +110,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
                             if (!status().startsWith("auth_failed")) {
                                 mStatus.set("closed");
                             }
+                            emitDisconnectedSessions(reason);
                         }
 
                         @Override
@@ -146,7 +151,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
         if (mClient == null || !"connected".equals(status())) {
             return;
         }
-        sendRpc("node.event", buildNodeEventParams(event.event(), event.payload()));
+        sendRpc("node.event", buildNodeEventParams(wireEvent(event.event()), event.payload()));
     }
 
     @Override
@@ -210,6 +215,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
             return "";
         }
         subscribeToSessionFanout(sessionKey);
+        mActiveSessionKeys.add(sessionKey);
         sendRpc("node.event", buildNodeEventParams("agent.request", payload));
         return sessionKey;
     }
@@ -306,7 +312,13 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
                 .append("or openphone.notifications.open.\n")
                 .append("- Mutating phone actions may require local confirmation on ")
                 .append("the Android device; wait for the tool result and report ")
-                .append("whether it was approved, denied, or completed.");
+                .append("whether it was approved, denied, or completed.\n")
+                .append("- When a visual result is materially clearer than prose and the ")
+                .append("runtime transport supports it, send an explicit ")
+                .append("openphone.assistant_output.v1 object through ")
+                .append("openphone.surface.present or openphone.surface.replace. ")
+                .append("Do not paste a surface JSON document into ordinary assistant text; ")
+                .append("plain text remains the fallback.");
         if (includeScreen) {
             out.append("\n- This request asked to include the screen. Before answering ")
                     .append("screen/app/UI questions, read the phone screen with ")
@@ -440,6 +452,18 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
                 }
                 return;
             }
+            if ("node.event".equals(event)) {
+                String nestedEvent = payload.optString("event", "");
+                JSONObject nestedPayload = payload.optJSONObject("payload");
+                if (nestedPayload == null) {
+                    nestedPayload = OpenClawJson.parseObject(
+                            payload.optString("payloadJSON", "{}"));
+                }
+                if (isSurfaceWireEvent(nestedEvent)) {
+                    handleSurfaceEvent(nestedEvent, nestedPayload);
+                }
+                return;
+            }
             if ("chat".equals(event)) {
                 handleChatEvent(payload);
                 return;
@@ -450,6 +474,10 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
             }
             if ("node.invoke.request".equals(event)) {
                 handleInvoke(payload);
+                return;
+            }
+            if (isSurfaceWireEvent(event)) {
+                handleSurfaceEvent(event, payload);
             }
             return;
         }
@@ -480,6 +508,11 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
         if (!terminal) {
             return;
         }
+        AssistantOutput output = explicitAssistantOutput(payload);
+        if (output != null) {
+            emitRuntimeOutput(sessionKeyFromPayload(payload), output, true);
+            return;
+        }
         String text = extractMessageText(payload);
         if ("error".equals(state)) {
             String errorText = OpenClawJson.firstNonEmpty(payload.optString("errorMessage", ""),
@@ -498,6 +531,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
             return;
         }
         emitRuntimeMessage(sessionKey, text, true);
+        markSessionTerminal(sessionKey);
     }
 
     private void handleAgentEvent(JSONObject payload) {
@@ -507,6 +541,11 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
         String stream = payload.optString("stream", "");
         String sessionKey = sessionKeyFromPayload(payload);
         if ("assistant".equals(stream)) {
+            AssistantOutput output = explicitAssistantOutput(payload);
+            if (output != null) {
+                emitRuntimeOutput(sessionKey, output, false);
+                return;
+            }
             String text = agentText(payload, payload.optJSONObject("data"));
             if (!text.isEmpty()) {
                 rememberLatestAgentText(sessionKey, text);
@@ -534,6 +573,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
                     emitRuntimeMessageOnce("agent:" + sessionKey + ":final:" + text,
                             sessionKey, text, true);
                 }
+                markSessionTerminal(sessionKey);
             }
             return;
         }
@@ -542,6 +582,7 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
             String displayError = openClawErrorForUser(error);
             emitRuntimeMessageOnce("agent:" + sessionKey + ":terminal:" + displayError,
                     sessionKey, displayError, true);
+            markSessionTerminal(sessionKey);
         }
     }
 
@@ -584,6 +625,107 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
         } catch (RuntimeException e) {
             Log.w(TAG, "runtime callback failed", e);
         }
+    }
+
+    private void emitRuntimeOutput(String sessionKey, AssistantOutput output, boolean terminal) {
+        if (mCallback == null || output == null) {
+            return;
+        }
+        try {
+            mCallback.onRuntimeOutput(name(), sessionKey == null ? "" : sessionKey,
+                    output, terminal);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "runtime output callback failed", e);
+        }
+    }
+
+    private void handleSurfaceEvent(String wireEvent, JSONObject payload) {
+        if (mCallback == null || payload == null) {
+            return;
+        }
+        String event = protocolSurfaceEvent(wireEvent);
+        String sessionKey = sessionKeyFromPayload(payload);
+        JSONObject normalized = OpenClawJson.parseObject(payload.toString());
+        if ("runtime.surface.present".equals(event)
+                || "runtime.surface.replace".equals(event)) {
+            AssistantOutput output = explicitAssistantOutput(payload);
+            if (output == null) {
+                Log.w(TAG, "Ignoring surface event without explicit assistant output");
+                return;
+            }
+            try {
+                normalized.put("output", output.toJson());
+            } catch (JSONException ignored) {
+            }
+        }
+        try {
+            mCallback.onRuntimeSurfaceEvent(name(), sessionKey, event, normalized);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "runtime surface callback failed", e);
+        }
+    }
+
+    private static AssistantOutput explicitAssistantOutput(JSONObject payload) {
+        if (payload == null) {
+            return null;
+        }
+        AssistantOutput direct = AssistantOutput.fromJson(payload);
+        if (direct != null) {
+            return direct;
+        }
+        for (String key : new String[] {
+                "output", "openphone_output", "openphoneAssistantOutput"
+        }) {
+            AssistantOutput nested = AssistantOutput.fromJson(payload.optJSONObject(key));
+            if (nested != null) {
+                return nested;
+            }
+        }
+        JSONObject message = payload.optJSONObject("message");
+        if (message != null) {
+            AssistantOutput nested = explicitAssistantOutput(message);
+            if (nested != null) {
+                return nested;
+            }
+            JSONObject metadata = message.optJSONObject("metadata");
+            nested = AssistantOutput.fromJson(metadata == null
+                    ? null : metadata.optJSONObject("openphone_output"));
+            if (nested != null) {
+                return nested;
+            }
+        }
+        JSONObject data = payload.optJSONObject("data");
+        return data == null ? null : AssistantOutput.fromJson(
+                data.optJSONObject("openphone_output"));
+    }
+
+    private static boolean isSurfaceWireEvent(String event) {
+        return "openphone.surface.present".equals(event)
+                || "openphone.surface.replace".equals(event)
+                || "openphone.surface.dismiss".equals(event)
+                || "runtime.surface.present".equals(event)
+                || "runtime.surface.replace".equals(event)
+                || "runtime.surface.dismiss".equals(event);
+    }
+
+    private static String protocolSurfaceEvent(String event) {
+        if (event != null && event.startsWith("openphone.surface.")) {
+            return "runtime.surface." + event.substring("openphone.surface.".length());
+        }
+        return event == null ? "" : event;
+    }
+
+    private static String wireEvent(String event) {
+        if ("runtime.surface.action_result".equals(event)) {
+            return "openphone.surface.action_result";
+        }
+        if ("phone.surface.action_invoked".equals(event)) {
+            return "openphone.surface.action_invoked";
+        }
+        if ("phone.surface.dismissed".equals(event)) {
+            return "openphone.surface.dismissed";
+        }
+        return event == null ? "" : event;
     }
 
     private static String extractMessageText(JSONObject payload) {
@@ -751,6 +893,29 @@ public final class OpenClawRuntimeAdapter implements RuntimeAdapter {
         }
         String text = mLatestAgentTextBySession.remove(cleanSessionKey);
         return text == null ? "" : text;
+    }
+
+    private synchronized void markSessionTerminal(String sessionKey) {
+        mActiveSessionKeys.remove(sessionKey == null ? "" : sessionKey.trim());
+    }
+
+    private void emitDisconnectedSessions(String reason) {
+        Set<String> sessions;
+        synchronized (this) {
+            sessions = new LinkedHashSet<>(mActiveSessionKeys);
+            mActiveSessionKeys.clear();
+        }
+        if (sessions.isEmpty()) {
+            return;
+        }
+        String detail = safePromptText(reason, 120);
+        String message = detail.isEmpty()
+                ? "OpenClaw disconnected before completing the request."
+                : "OpenClaw disconnected before completing the request: " + detail;
+        for (String sessionKey : sessions) {
+            emitRuntimeMessageOnce(
+                    "disconnect:" + sessionKey, sessionKey, message, true);
+        }
     }
 
     private String runtimeSessionId(JSONObject payload, JSONObject params) {

@@ -254,6 +254,145 @@ Manual or screenshot-backed checks:
 - tapping outside the composer dismisses the keyboard;
 - recent logcat has no `FATAL EXCEPTION` or `AndroidRuntime` crash signature.
 
+## AI Home And App Space Smoke Test
+
+AI Home changes affect Android Home resolution and require a full product build
+or an assistant APK plus the matching Launcher3 patch. An assistant-only APK
+push does not remove Launcher3 as a competing Home candidate.
+
+On a build containing both sides of the change, verify:
+
+- after a reboot, the direct-boot-aware assistant service reports locked and
+  defers its island/runtime state while an early `OpenPhoneHomeActivity`
+  launch renders only its black locked-boot shell; neither path opens
+  credential-encrypted stores, and both initialize after `USER_UNLOCKED`
+  without crashing `org.openphone.assistant`;
+- clean boot/setup resolves Home to
+  `org.openphone.assistant/.OpenPhoneHomeActivity`;
+- an unsecured owner boots/wakes directly into AI Home without the
+  non-secure swipe keyguard, while a configured pattern, PIN, or password
+  continues to show Android's secure keyguard;
+- the Home surface owns the full display without status or navigation chrome,
+  remains usable when no model runtime is configured, and exposes transient
+  system bars only after an edge swipe;
+- holding the orb starts voice capture and release submits it;
+- a short tap opens text entry;
+- the visible Apps action and a two-finger inward pinch open the explicit
+  Launcher3 App Space activity;
+- Launcher3 initializes Quickstep without a
+  `OverviewComponentObserver` null-home crash when App Space opens;
+- pressing Home from App Space or another app returns to AI Home;
+- tapping the compact idle island returns to AI Home;
+- queued/running jobs, watchers, commitments, and foreground sessions appear
+  as stable Home activity bubbles without relaunching Home;
+- Home shows no more than three individual activity bubbles plus a `+N`
+  overflow control, and the compact SystemUI island reports the same live-run
+  count and attention state;
+- tapping a bubble shows its title, source kind, phase, latest progress, and
+  applicable Pause/Resume/Stop/Dismiss actions;
+- stopping supported work updates its source store and survives assistant
+  process restart; dismissing a terminal result hides only its presentation
+  and never stops live work;
+- terminal results remain visible until inspected and then age out after 24
+  hours; attention-required and live work sort ahead of recent terminal work;
+- the notification shade, Quick Settings, secure keyguard, IME, recents,
+  system dialogs, camera, dialer, and emergency surfaces are not covered by a
+  full-screen OpenPhone overlay;
+- TalkBack exposes the voice orb, Apps action, settings/history action, text
+  composer, review actions, run bubbles, overflow control, and run actions.
+
+### SystemUI island checks
+
+Run `node scripts/validate-island-contract.mjs` (also included in
+`./scripts/check.sh`). The idle and approval-needed snapshots must pass, while
+unknown-mode, secret-bearing, and oversized snapshots must fail. This validator
+also checks the framework/SystemUI patch contract: a bounded status-bar
+sub-panel, non-modal touch flags, keyguard redaction, stale-state degradation,
+and no confirmation execution from the island itself.
+
+This path requires a full product build containing framework patches `0020`
+and `0021`; an assistant-only APK does not add the Binder listener or SystemUI
+renderer. On a matching device, verify:
+
+- idle, listening, working, live-run count, completion, error, and
+  approval-needed transitions update without recreating SystemUI;
+- recreating or killing only the assistant activity leaves the latest
+  `system_server` snapshot rendered, while a publisher that stays absent beyond
+  the stale bound becomes a generic `OpenPhone · Offline` chip;
+- opening AI Home hides the island and returning to App Space restores it;
+- tapping the island dismisses keyguard when necessary and opens AI Home;
+- long-press stops only an unlocked active foreground task; approval-needed,
+  stale, background-only, and locked states route to AI Home instead;
+- approval details and personal status are replaced with a generic locked glyph
+  on keyguard, and Approve/Deny remain available only on AI Home;
+- the App Space chip preserves the legacy compact 288 x 90 px proportions on
+  the Pixel 9a reference density, with a black capsule and terse state glyphs;
+- touches immediately outside the fixed chip reach the underlying app, and
+  notification shade, Quick Settings, IME, recents, camera, dialer, and
+  emergency UI remain unobstructed;
+- active pointer/glow visualization is non-touchable and disappears when
+  device control finishes.
+
+### Resumable background review checks
+
+Run `node scripts/validate-background-review-contract.mjs` (also included in
+`./scripts/check.sh`). The known-valid `awaiting_review` job must pass, while a
+modified-parameter request and a secret-bearing request must fail.
+
+On a device, create a background job that proposes a registered state-changing
+tool, then verify:
+
+- the tool does not execute before review and the job becomes
+  `awaiting_review`;
+- its Home bubble and notification show the exact tool and arguments;
+- Deny returns `background.action_denied`, queues the same job, and lets it
+  complete gracefully;
+- Approve executes only the persisted request and resumes from its stored tool
+  result;
+- tapping Approve or Deny twice executes at most once;
+- force-stopping and restarting the assistant before review preserves the
+  request and expiry;
+- letting the request expire queues a structured timeout continuation and
+  removes the review notification;
+- killing the assistant after an approval claim never replays an outcome whose
+  completion is unknown;
+- audit/context events include binding digests and lifecycle state but no raw
+  tool parameters.
+
+### Adaptive Surface V1 checks
+
+Run `node scripts/validate-surface-contract.mjs` (also included in
+`./scripts/check.sh`) and verify the known-valid calendar/message fixtures pass
+while external-image, unknown-component, and unknown-action fixtures fail.
+
+On a device, ask for a calendar list, message summary, and notification
+summary, then verify:
+
+- a deterministic surface replaces prose-only result presentation on AI Home;
+- rotating/recreating Home restores the same surface and revision;
+- dismissing it survives recreation, and an expired surface is not shown;
+- every interactive element has a useful TalkBack label;
+- action taps use the registered phone tool, and a stale revision is rejected;
+- read-only actions execute through the tool bridge; mutating actions show the
+  existing local approval UI and cannot execute before approval;
+- sensitive message/notification surfaces do not appear over a locked device;
+- malformed documents, undeclared actions, arbitrary component types, and
+  remote image URLs render nothing and create a rejection event.
+
+Useful resolution checks:
+
+```bash
+adb shell cmd package resolve-activity \
+  -a android.intent.action.MAIN \
+  -c android.intent.category.HOME
+
+adb shell am start -W \
+  -n org.openphone.assistant/.OpenPhoneHomeActivity
+
+adb shell am start -W \
+  -n com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher
+```
+
 If the mounted APK bytes match the new OTA but PackageManager still reports an
 older persistent system-app version, treat it as stale `/data/system` package
 metadata. On the Pixel 9a test device this happened after a v54 OTA: the

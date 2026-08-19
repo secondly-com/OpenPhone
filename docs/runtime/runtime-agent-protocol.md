@@ -16,6 +16,10 @@ boundary; remote runtimes own agent reasoning.
 5. `RuntimeToolBridge` validates the command, applies autonomy policy, creates
    confirmations for mutating actions, runs the phone tool, and returns the
    result.
+6. A runtime may return plain text unchanged, or explicitly send an
+   `openphone.assistant_output.v1` envelope containing speech/text and an
+   optional `openphone.surface.v1` document. OpenPhone never attempts to parse
+   arbitrary assistant prose as an envelope.
 
 ## Stable Concepts
 
@@ -26,6 +30,27 @@ boundary; remote runtimes own agent reasoning.
 - Attention request: phone-to-runtime user request.
 - Tool request: runtime-to-phone inspect/action request.
 - Confirmation: Android-local approval for risky actions.
+- Assistant output: runtime-neutral structured result with optional surface.
+- Adaptive surface: revisioned, phone-validated UI document whose actions are
+  bound back to registered phone tools.
+
+## Adaptive Surface Events
+
+The additive V1 events are:
+
+- `runtime.surface.present`;
+- `runtime.surface.replace` with `expected_revision`;
+- `runtime.surface.dismiss`;
+- `runtime.surface.action_result`;
+- `phone.surface.action_invoked`;
+- `phone.surface.dismissed`.
+
+The phone verifies transport/runtime/session ownership before accepting a
+surface. Replacement and dismissal are revision-bound. Renderer actions resolve
+against the current stored revision and use `RuntimeToolBridge`; remote
+runtimes cannot bypass local policy or confirmation. Accepted surfaces remain
+inspectable if the runtime disconnects, while the phone execution session moves
+to a terminal error state.
 
 ## Autonomy
 
@@ -45,6 +70,8 @@ session's autonomy. If no session is available, it falls back to
 - Events: `runtime/protocol/openphone-events.json`
 - Capabilities: `runtime/protocol/openphone-capabilities.json`
 - Shape reference: `runtime/protocol/openphone-runtime.schema.json`
+- Surface/output contracts: `schemas/openphone-surface.schema.json` and
+  `schemas/openphone-assistant-output.schema.json`
 
 ## Versioning
 

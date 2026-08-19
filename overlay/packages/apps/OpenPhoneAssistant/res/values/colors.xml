@@ -10,4 +10,6 @@
     <color name="openphone_text_primary">#0F172A</color>
     <color name="openphone_text_secondary">#334155</color>
     <color name="openphone_text_muted">#64748B</color>
+    <color name="openphone_home_background">#000000</color>
+    <color name="openphone_home_accent">#43B7FF</color>
 </resources>

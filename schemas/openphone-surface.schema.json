@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openphone.dev/schemas/openphone-surface.schema.json",
+  "title": "OpenPhone Adaptive Surface V1",
+  "type": "object",
+  "required": [
+    "schema",
+    "surface_id",
+    "revision",
+    "session_id",
+    "runtime",
+    "title",
+    "presentation",
+    "expires_at",
+    "sensitivity",
+    "body",
+    "actions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "openphone.surface.v1"
+    },
+    "surface_id": {
+      "type": "string",
+      "pattern": "^surface-[A-Za-z0-9._-]{1,120}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "runtime": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "presentation": {
+      "enum": ["full", "sheet", "inline"]
+    },
+    "expires_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sensitivity": {
+      "enum": ["public", "personal", "sensitive", "restricted"]
+    },
+    "body": {
+      "$ref": "#/$defs/component"
+    },
+    "actions": {
+      "type": "object",
+      "maxProperties": 24,
+      "additionalProperties": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/artifactReference"
+      }
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "artifactReference": {
+      "type": "object",
+      "required": ["artifact_id", "path"],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "pattern": "^artifact-[A-Za-z0-9._-]{1,120}$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^\\$([.][A-Za-z0-9_-]+|\\[[0-9]+\\])*$",
+          "maxLength": 240
+        }
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "required": ["label", "tool", "params", "reason"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,79}$"
+        },
+        "params": {
+          "type": "object",
+          "maxProperties": 32
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "requires_confirmation": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "component": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "column",
+            "row",
+            "spacer",
+            "divider",
+            "scroll",
+            "text",
+            "icon",
+            "image",
+            "badge",
+            "progress",
+            "card",
+            "list",
+            "list_item",
+            "timeline",
+            "button",
+            "chip",
+            "choice_group",
+            "toggle",
+            "text_input",
+            "native_handoff",
+            "confirmation",
+            "capability_disclosure",
+            "error"
+          ]
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/component"
+          }
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/component"
+          }
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "subtitle": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "content_description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "style": {
+          "enum": ["title", "headline", "body", "caption"]
+        },
+        "tone": {
+          "enum": ["primary", "secondary", "warning", "danger"]
+        },
+        "density": {
+          "enum": ["compact", "comfortable"]
+        },
+        "spacing": {
+          "enum": ["none", "xs", "sm", "md", "lg", "xl"]
+        },
+        "action_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,119}$"
+        },
+        "input_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,79}$"
+        },
+        "placeholder": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "value": {
+          "type": ["string", "number", "boolean"]
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifactReference"
+        },
+        "icon": {
+          "enum": [
+            "calendar",
+            "message",
+            "notification",
+            "person",
+            "phone",
+            "location",
+            "clock",
+            "check",
+            "warning",
+            "error",
+            "open",
+            "agent"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 120
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "native_target": {
+          "enum": [
+            "app_space",
+            "calendar",
+            "messages",
+            "notifications",
+            "dialer",
+            "settings"
+          ]
+        },
+        "capability": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

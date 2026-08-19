@@ -1,14 +1,13 @@
 package org.openphone.assistant.runtime;
 
 import android.content.Context;
-import android.openphone.OpenPhoneAgentManager;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.actions.ToolCatalog;
-import org.openphone.assistant.agent.FrameworkToolExecutor;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.session.PhoneExecutionSession;
 import org.openphone.assistant.session.PhoneSessionStore;
 
@@ -29,8 +28,7 @@ public final class RuntimeToolBridge {
     private static final String TAG = "OpenPhoneRuntime";
     private static final int MAX_COMPLETED_IDEMPOTENCY_RESULTS = 128;
 
-    private final OpenPhoneAgentManager mAgentManager;
-    private final FrameworkToolExecutor mToolExecutor;
+    private final PhoneToolGateway mPhoneGateway;
     private final PhoneSessionStore mSessionStore;
     private final Map<String, String> mTaskIdsByRuntimeSession = new HashMap<>();
     private final Map<String, RuntimePendingConfirmation> mPendingConfirmations =
@@ -55,14 +53,13 @@ public final class RuntimeToolBridge {
             });
     private RuntimeConfirmationCallback mConfirmationCallback;
 
-    public RuntimeToolBridge(Context context, OpenPhoneAgentManager agentManager) {
-        this(context, agentManager, new PhoneSessionStore(context));
+    public RuntimeToolBridge(Context context, PhoneToolGateway phoneGateway) {
+        this(context, phoneGateway, new PhoneSessionStore(context));
     }
 
-    public RuntimeToolBridge(Context context, OpenPhoneAgentManager agentManager,
+    public RuntimeToolBridge(Context context, PhoneToolGateway phoneGateway,
             PhoneSessionStore sessionStore) {
-        mAgentManager = agentManager;
-        mToolExecutor = new FrameworkToolExecutor(context, agentManager);
+        mPhoneGateway = phoneGateway;
         mSessionStore = sessionStore == null ? new PhoneSessionStore(context) : sessionStore;
     }
 
@@ -137,6 +134,23 @@ public final class RuntimeToolBridge {
             logResult(request, result);
             return result;
         }
+        if (!mPhoneGateway.supportsTool(request.tool())) {
+            JSONObject details = new JSONObject();
+            try {
+                details.put("tool", request.tool())
+                        .put("phone_platform", mPhoneGateway.profile());
+            } catch (JSONException ignored) {
+            }
+            RuntimeToolResult result = RuntimeToolResult.denied(
+                    request.requestId(),
+                    "tool_not_supported_by_phone_platform",
+                    "The active phone platform does not support this tool.",
+                    details,
+                    auditId);
+            markSessionForResult(request, result);
+            logResult(request, result);
+            return result;
+        }
         RuntimeToolResult completed = completedResultFor(request, auditId);
         if (completed != null) {
             markSessionForResult(request, completed);
@@ -196,9 +210,9 @@ public final class RuntimeToolBridge {
         }
 
         markSession(request, "running");
-        String rawResult = mToolExecutor.execute(taskId, request.tool(), params);
+        String rawResult = mPhoneGateway.executeTool(taskId, request.tool(), params);
         if (approvedMutation) {
-            rawResult = confirmFrameworkActionIfNeeded(rawResult);
+            rawResult = confirmPhoneActionIfNeeded(rawResult);
         }
         RuntimeToolResult result = normalizeToolResult(request, rawResult, auditId, taskId);
         if (approvedMutation) {
@@ -323,7 +337,9 @@ public final class RuntimeToolBridge {
     }
 
     private RuntimeToolResult validate(RuntimeToolRequest request, String auditId) {
-        if (mAgentManager == null) {
+        if (mPhoneGateway == null || !mPhoneGateway.isAvailable()) {
+            // Keep the established result code stable during this
+            // dependency-only refactor.
             return RuntimeToolResult.error(request.requestId(), "framework_unavailable",
                     "OpenPhone framework service is not available.");
         }
@@ -388,7 +404,7 @@ public final class RuntimeToolBridge {
                     .put("approved_capabilities", new JSONArray()
                             .put("tasks.observe")
                             .put("screen.read.visible"));
-            JSONObject response = parseObject(mAgentManager.startTask(task.toString()));
+            JSONObject response = parseObject(mPhoneGateway.startTask(task.toString()));
             return response.optString("task_id", "");
         } catch (JSONException | RuntimeException e) {
             Log.w(TAG, "runtime task start failed runtime=" + request.runtime()
@@ -397,7 +413,7 @@ public final class RuntimeToolBridge {
         }
     }
 
-    private String confirmFrameworkActionIfNeeded(String rawResult) {
+    private String confirmPhoneActionIfNeeded(String rawResult) {
         JSONObject parsed = parseObject(rawResult);
         String pendingActionId = findStringRecursive(parsed, "pending_action_id");
         if (pendingActionId.isEmpty() || "null".equals(pendingActionId)) {
@@ -409,7 +425,7 @@ public final class RuntimeToolBridge {
             return rawResult;
         }
         try {
-            return mAgentManager.confirmAction(pendingActionId, true);
+            return mPhoneGateway.confirmAction(pendingActionId, true);
         } catch (RuntimeException e) {
             return errorJson("framework_confirmation_failed", e.getClass().getSimpleName());
         }

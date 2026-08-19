@@ -1,0 +1,18 @@
+{
+  "schema": "openphone.island_state.v1",
+  "revision": 14,
+  "mode": "execute_without_review",
+  "label": "OpenPhone",
+  "title": "Working",
+  "detail": "Task running",
+  "visible": true,
+  "needs_attention": false,
+  "sensitivity": "personal",
+  "active_task_id": "",
+  "pending_confirmation_id": "",
+  "live_runs": 1,
+  "updated_at": 1784410002000,
+  "published_at": 1784410002001,
+  "published_elapsed_ms": 24000,
+  "source": "assistant"
+}

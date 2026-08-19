@@ -51,10 +51,23 @@ Device
 The current repo implements the first OpenPhone product layer:
 
 - `vendor/openphone` product config.
-- `OpenPhoneAssistant` privileged app with a chat-style user surface, text and
-  voice task entry, stateful mic/send/stop composer action, advanced model and
-  developer controls, task grants, screen context, trace/audit export, OTA
-  preview controls, and audit controls.
+- `OpenPhoneAssistant` privileged app with a dedicated Android Home activity,
+  a calm voice-first AI Home surface, explicit conventional-launcher App Space
+  handoff, text and voice task entry, stateful mic/send/stop controls, advanced
+  model and developer controls, task grants, screen context, trace/audit
+  export, OTA preview controls, and audit controls. AI Home is an immersive
+  normal application window rather than an opaque overlay: it hides Android
+  status/navigation chrome while foreground and allows transient system bars
+  by edge swipe, while Android retains ownership of secure keyguard,
+  notifications, IME, recents, emergency UI, and system dialogs. OpenPhone
+  disables only the non-secure swipe keyguard by default; configuring a
+  pattern, PIN, or password restores Android's credential gate.
+- A `PhoneToolGateway` boundary keeps model, runtime, and adaptive-surface
+  packages independent from hidden `android.openphone` APIs. The current
+  `OpenPhoneOsToolGateway` binds that portable contract to the framework-backed
+  executor; a future public-SDK implementation can expose a smaller supported
+  tool set without forking the product runtime. See
+  [APP_OS_BOUNDARY.md](APP_OS_BOUNDARY.md).
 - Initial capability and policy config files. `scripts/check.sh` validates that
   the assistant fallback `PolicyEngine` covers every capability in
   `openphone_capabilities.json` with the same risk class.
@@ -66,9 +79,51 @@ The current repo implements the first OpenPhone product layer:
 - Agent Runtime V1 background jobs. The first assistant-side implementation
   persists background agent turns, schedules them with AlarmManager, wakes them
   at boot/package replacement/service startup, delivers notification results,
-  and blocks state-changing background tools until a foreground reviewed
-  approval flow exists. The runtime contract is documented in
+  and pauses state-changing tools behind exact, expiring Android-owned review.
+  Approval or denial produces a bound checkpoint result; resume cannot
+  regenerate or substitute the authorized request, duplicate taps cannot
+  execute twice, and interrupted approval execution fails safe without replay.
+  The runtime contract is documented in
   [AGENT_RUNTIME_V1.md](AGENT_RUNTIME_V1.md).
+- A unified agent-run projection reads jobs, watchers, commitments, and
+  foreground execution sessions without creating a second execution store.
+  AI Home uses it for stable activity bubbles and run detail, while the
+  SystemUI island reads the same projection for compact recent/live status.
+  Approval-needed bubbles expose exact review detail and Approve/Deny actions;
+  queued work can be paused/resumed, and the compact island routes review back
+  to AI Home.
+  Inspection and dismissal state is local presentation metadata; source stores
+  remain authoritative for execution and stop operations.
+- The compact OpenPhone island is owned by SystemUI. The assistant publishes a
+  bounded, privacy-minimized state projection through the OpenPhone agent
+  Binder service; `system_server` validates it, assigns revision/timestamps,
+  retains the latest snapshot across assistant UI recreation, and sends
+  one-way change events to SystemUI. SystemUI renders only a fixed-size
+  `TYPE_STATUS_BAR_SUB_PANEL` window with non-modal touch behavior, redacts
+  personal/review state on keyguard, routes detail and approval to AI Home, and
+  degrades to a generic bounded status when the publisher becomes stale. Its
+  compact geometry, black capsule, centered typography, and terse state glyphs
+  preserve the established assistant-island presentation while moving window
+  ownership into SystemUI. The
+  assistant's full-screen `TYPE_SYSTEM_ERROR` layer remains only for
+  non-touchable pointer/glow visualization during active device control; the
+  old assistant island is a property-gated compatibility renderer.
+- Adaptive Surface V1 is a phone-owned, revisioned UI document contract.
+  Runtimes can request only a bounded semantic component registry; the
+  assistant validates identity, ownership, expiry, depth/node/text/image
+  limits, local artifact provenance, registered tool bindings, tool parameter
+  shapes, accessibility labels, and mutation disclosure before persistence or
+  rendering. Surface actions resolve against the current revision and then
+  enter the existing runtime tool bridge, so policy, grants, confirmation,
+  idempotency, and framework audit remain authoritative. The Compose renderer
+  has no WebView, HTML, remote image URL, arbitrary color, absolute-position,
+  or runtime-code path.
+- Built-in calendar search and message/notification result paths produce
+  deterministic Adaptive Surface documents from trusted phone tool results.
+  Tool artifacts retain session/runtime/capability/sensitivity/expiry
+  provenance separately from the layout, while the surface repository survives
+  activity recreation and fails closed on stale, malformed, expired, or
+  cross-session content.
 - Runtime Agent Protocol for external agent runtimes. This is an OpenPhone AI
   layer boundary, not a separate product stack: Android owns sessions, screen
   context, tool execution, confirmations, and audit, while adapters map remote

@@ -19,6 +19,7 @@ required=(
   docs/README.md
   docs/AI_FIRST_ENGINEERING.md
   docs/AGENT_RUNTIME_V1.md
+  docs/APP_OS_BOUNDARY.md
   docs/ARCHITECTURE.md
   docs/BUILD.md
   docs/CAPABILITIES.md
@@ -49,12 +50,16 @@ required=(
   schemas/action-result.schema.json
   schemas/agent-eval-report.schema.json
   schemas/agent-job.schema.json
+  schemas/background-confirmation.schema.json
   schemas/agent-task.schema.json
   schemas/app-policy.schema.json
   schemas/audit-evidence.schema.json
   schemas/audit-event.schema.json
   schemas/audit-log.schema.json
   schemas/model-tool.schema.json
+  schemas/openphone-assistant-output.schema.json
+  schemas/openphone-island-state.schema.json
+  schemas/openphone-surface.schema.json
   schemas/ota-feed.schema.json
   schemas/screen-context.schema.json
   schemas/trajectory-event.schema.json
@@ -91,6 +96,11 @@ required=(
   scripts/run-assistant-task.sh
   scripts/pull-latest-trajectory.sh
   scripts/check-runtime-protocol.sh
+  scripts/validate-background-review-contract.mjs
+  scripts/validate-app-os-boundary.mjs
+  scripts/validate-home-shell-contract.mjs
+  scripts/validate-island-contract.mjs
+  scripts/validate-surface-contract.mjs
   scripts/smoke-test-openclaw-device-failures.sh
   scripts/smoke-test-openclaw-runtime.sh
   scripts/setup-model-broker-tls.sh
@@ -118,17 +128,43 @@ required=(
   runtime/protocol/openphone-runtime-tools.mjs
   runtime/protocol/openphone-runtime.schema.json
   runtime/protocol/validate-runtime-protocol.mjs
+  runtime/protocol/ifp1/openphone-tools.ifp1.json
+  runtime/protocol/ifp1/adapter.mjs
+  runtime/protocol/ifp1/validator.ts
+  runtime/protocol/ifp1/machine.ts
+  runtime/protocol/ifp1/MIGRATION.md
+  runtime/protocol/ifp1/fixtures/messages.json
+  runtime/protocol/ifp1/fixtures/sequences.json
+  runtime/protocol/ifp1/fixtures/params-hash-vectors.json
   integrations/adb/openphone-adb-transport.mjs
   integrations/cli/README.md
   integrations/cli/package.json
   integrations/cli/src/index.mjs
   tests/README.md
   tests/integrations/adb-stateful-gating-contract.mjs
+  tests/integrations/ifp1-conformance-contract.mjs
+  tests/integrations/ifp1-adapter-contract.mjs
   tests/integrations/runtime-cli-contract.mjs
   tests/integrations/runtime-mcp-contract.mjs
   tests/integrations/runtime-protocol-versioning-contract.mjs
   tests/integrations/openclaw-plugin-policy-contract.mjs
   tests/integrations/runtime-package-contract.mjs
+  tests/fixtures/surfaces/calendar-agenda.json
+  tests/fixtures/surfaces/message-summary.json
+  tests/fixtures/runtime/surface-present-event.json
+  tests/fixtures/runtime/surface-replace-event.json
+  tests/fixtures/runtime/surface-dismiss-event.json
+  tests/fixtures/surfaces/invalid-external-image.json
+  tests/fixtures/surfaces/invalid-unknown-action.json
+  tests/fixtures/surfaces/invalid-unknown-component.json
+  tests/fixtures/jobs/background-awaiting-review.json
+  tests/fixtures/jobs/invalid-background-review-tampered.json
+  tests/fixtures/jobs/invalid-background-review-secret.json
+  tests/fixtures/island/idle.json
+  tests/fixtures/island/needs-review.json
+  tests/fixtures/island/invalid-mode.json
+  tests/fixtures/island/invalid-secret.json
+  tests/fixtures/island/invalid-oversized.json
   integrations/mcp-server/README.md
   integrations/mcp-server/package.json
   integrations/mcp-server/src/index.mjs
@@ -183,6 +219,8 @@ required=(
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/OpenPhoneQuickSettingsTileService.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/OpenPhoneTriggerReceiver.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/PointerOverlayController.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/island/IslandState.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/island/IslandStateRepository.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/IOpenPhoneAssistant.aidl
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/agent/FrameworkToolExecutor.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/agent/TrajectoryRecorder.java
@@ -191,6 +229,8 @@ required=(
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/model/LocalHeuristicModelAdapter.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/model/OpenAiRealtimeAdapter.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/ota/OtaUpdateClient.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/platform/PhoneToolGateway.java
+  overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/platform/OpenPhoneOsToolGateway.java
   overlay/packages/apps/OpenPhoneAssistant/src/org/openphone/assistant/policy/AppCapabilityPolicy.java
   patches/frameworks_base/0001-OpenPhone-add-agent-manager-framework-service.patch
   patches/frameworks_base/0002-OpenPhone-add-foreground-context-and-audit-mediation.patch
@@ -204,6 +244,8 @@ required=(
   patches/frameworks_base/0010-OpenPhone-capture-screenshots-as-system-server.patch
   patches/frameworks_base/0011-OpenPhone-add-SystemUI-agent-QS-tile.patch
   patches/frameworks_base/0012-OpenPhone-add-mediated-open-url-action.patch
+  patches/frameworks_base/0020-OpenPhone-add-durable-island-state-contract.patch
+  patches/frameworks_base/0021-OpenPhone-render-compact-island-in-SystemUI.patch
   patches/packages_apps_Settings/0001-OpenPhone-add-About-phone-version-surface.patch
   patches/packages_apps_Settings/0002-OpenPhone-add-settings-dashboard.patch
   patches/packages_apps_Settings/0003-OpenPhone-add-Settings-hosted-audit-and-grant-pages.patch
@@ -1113,6 +1155,11 @@ if grep -R "SPDX-license-identifier-Apache-2.0" \
 fi
 
 "$root/scripts/check-runtime-protocol.sh"
+node "$root/scripts/validate-surface-contract.mjs"
+node "$root/scripts/validate-background-review-contract.mjs"
+node "$root/scripts/validate-app-os-boundary.mjs"
+node "$root/scripts/validate-home-shell-contract.mjs"
+node "$root/scripts/validate-island-contract.mjs"
 "$root/scripts/check-assistant-java.sh"
 
 printf 'OpenPhone repo checks passed.\n'

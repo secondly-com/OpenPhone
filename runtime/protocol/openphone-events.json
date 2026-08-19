@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "deprecated": true,
+  "superseded_by": "ifp1/",
   "events": [
     { "name": "runtime.presence.online", "direction": "phone_to_runtime" },
     { "name": "runtime.presence.offline", "direction": "phone_to_runtime" },
@@ -12,7 +14,13 @@
     { "name": "runtime.tool.result", "direction": "phone_to_runtime" },
     { "name": "runtime.confirmation.required", "direction": "phone_to_runtime" },
     { "name": "runtime.confirmation.resolved", "direction": "phone_to_runtime" },
-    { "name": "runtime.session.updated", "direction": "bidirectional" }
+    { "name": "runtime.session.updated", "direction": "bidirectional" },
+    { "name": "runtime.surface.present", "direction": "runtime_to_phone" },
+    { "name": "runtime.surface.replace", "direction": "runtime_to_phone" },
+    { "name": "runtime.surface.dismiss", "direction": "runtime_to_phone" },
+    { "name": "runtime.surface.action_result", "direction": "phone_to_runtime" },
+    { "name": "phone.surface.action_invoked", "direction": "phone_to_runtime" },
+    { "name": "phone.surface.dismissed", "direction": "phone_to_runtime" }
   ],
   "transport_mappings": [
     {
@@ -23,6 +31,12 @@
         { "protocol": "runtime.presence.offline", "wire": "openphone.presence.offline" },
         { "protocol": "runtime.confirmation.required", "wire": "openphone.confirmation.required" },
         { "protocol": "runtime.confirmation.resolved", "wire": "openphone.confirmation.resolved" },
+        { "protocol": "runtime.surface.present", "wire": "openphone.surface.present" },
+        { "protocol": "runtime.surface.replace", "wire": "openphone.surface.replace" },
+        { "protocol": "runtime.surface.dismiss", "wire": "openphone.surface.dismiss" },
+        { "protocol": "runtime.surface.action_result", "wire": "openphone.surface.action_result" },
+        { "protocol": "phone.surface.action_invoked", "wire": "openphone.surface.action_invoked" },
+        { "protocol": "phone.surface.dismissed", "wire": "openphone.surface.dismissed" },
         { "protocol": "runtime.presence.online", "wire": "node.presence.alive" }
       ]
     }

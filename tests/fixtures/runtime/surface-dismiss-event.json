@@ -1,0 +1,9 @@
+{
+  "event": "runtime.surface.dismiss",
+  "payload": {
+    "sessionKey": "openphone:fixture:phone-sess-fixture",
+    "surface_id": "surface-runtime-fixture",
+    "revision": 2,
+    "reason": "runtime_completed"
+  }
+}

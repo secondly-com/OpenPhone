@@ -8,6 +8,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public final class PhoneSessionStore {
@@ -101,22 +103,29 @@ public final class PhoneSessionStore {
     }
 
     public synchronized String listJson(int limit) {
-        JSONArray sessions = readSessions();
         JSONArray out = new JSONArray();
-        int emitted = 0;
-        for (int i = sessions.length() - 1; i >= 0 && emitted < Math.max(1, limit); i--) {
-            JSONObject session = sessions.optJSONObject(i);
-            if (session == null) {
-                continue;
-            }
-            out.put(session);
-            emitted++;
+        for (PhoneExecutionSession session : list(limit)) {
+            out.put(session.toJson());
         }
         try {
             return new JSONObject().put("sessions", out).toString();
         } catch (JSONException e) {
             return "{\"sessions\":[]}";
         }
+    }
+
+    public synchronized List<PhoneExecutionSession> list(int limit) {
+        JSONArray sessions = readSessions();
+        ArrayList<PhoneExecutionSession> out = new ArrayList<>();
+        int boundedLimit = Math.max(1, Math.min(limit, MAX_SESSIONS));
+        for (int i = sessions.length() - 1; i >= 0 && out.size() < boundedLimit; i--) {
+            PhoneExecutionSession session =
+                    PhoneExecutionSession.fromJson(sessions.optJSONObject(i));
+            if (session != null) {
+                out.add(session);
+            }
+        }
+        return out;
     }
 
     public static String extractPhoneSessionId(String runtimeSessionId) {
