@@ -50,7 +50,7 @@ public final class OpenAiRealtimeVoiceSession {
         void onStopped();
     }
 
-    public static final String MODEL = "gpt-realtime-2";
+    public static final String MODEL = "gpt-realtime-2.1";
 
     private static final int SAMPLE_RATE = 24000;
     private static final long CONNECT_TIMEOUT_MS = 20000;
@@ -71,6 +71,12 @@ public final class OpenAiRealtimeVoiceSession {
     private static final long ACTION_RESPONSE_STALL_MS = 9000;
     private static final long STALL_CANCEL_GRACE_MS = 1800;
     private static final int ACTION_RESPONSE_STALL_MAX_RECOVERIES = 2;
+    private static final double LOCAL_SPEECH_RMS = 850.0;
+    private static final long LOCAL_SPEECH_MIN_MS = 220;
+    private static final long LOCAL_SILENCE_COMMIT_MS = 850;
+    private static final long LOCAL_COMMIT_COOLDOWN_MS = 1800;
+    private static final long LOCAL_MIN_AUDIO_BEFORE_COMMIT_MS = 500;
+    private static final long MIC_RMS_LOG_INTERVAL_MS = 1000;
     private static final String REALTIME_URL =
             "wss://api.openai.com/v1/realtime?model=" + MODEL;
 
@@ -91,6 +97,14 @@ public final class OpenAiRealtimeVoiceSession {
     private volatile NoiseSuppressor mNoiseSuppressor;
     private volatile AutomaticGainControl mAutomaticGainControl;
     private volatile double mRecentMicRms;
+    private volatile long mInputAudioBytesSinceCommit;
+    private volatile boolean mServerVadActive;
+    private volatile boolean mLocalSpeechActive;
+    private volatile boolean mManualCommitPending;
+    private volatile long mLocalSpeechStartedUptimeMillis;
+    private volatile long mLastLocalSpeechUptimeMillis;
+    private volatile long mLastManualCommitUptimeMillis;
+    private volatile long mLastMicLogUptimeMillis;
     private String mPendingAssistantTranscript;
     private volatile boolean mAssistantAudioActive;
     private boolean mPendingToolResponseCreate;
@@ -386,6 +400,7 @@ public final class OpenAiRealtimeVoiceSession {
                         byte[] chunk = new byte[read];
                         System.arraycopy(buffer, 0, chunk, 0, read);
                         sendAudioChunk(socket, chunk);
+                        observeLocalAudio(socket, callback, rms, read);
                         maybeStopPlaybackForLocalBargeIn(socket, callback, rms);
                     } catch (IOException | JSONException e) {
                         if (!mCancelled) {
@@ -399,6 +414,54 @@ public final class OpenAiRealtimeVoiceSession {
         }, "OpenPhoneRealtimeMic");
         mAudioThread = audioThread;
         audioThread.start();
+    }
+
+    private void observeLocalAudio(RealtimeWebSocket socket, Callback callback, double rms,
+            int bytesRead) throws IOException, JSONException {
+        long now = SystemClock.uptimeMillis();
+        mInputAudioBytesSinceCommit += Math.max(0, bytesRead);
+        if (now - mLastMicLogUptimeMillis >= MIC_RMS_LOG_INTERVAL_MS) {
+            mLastMicLogUptimeMillis = now;
+            Log.i(TAG, "mic rms=" + Math.round(rms)
+                    + " bytes_since_commit=" + mInputAudioBytesSinceCommit
+                    + " server_vad=" + mServerVadActive
+                    + " manual_pending=" + mManualCommitPending);
+        }
+        if (rms >= LOCAL_SPEECH_RMS) {
+            if (!mLocalSpeechActive) {
+                mLocalSpeechActive = true;
+                mLocalSpeechStartedUptimeMillis = now;
+                Log.i(TAG, "local speech started rms=" + Math.round(rms));
+            }
+            mLastLocalSpeechUptimeMillis = now;
+            return;
+        }
+        if (!mLocalSpeechActive || mServerVadActive || mManualCommitPending) {
+            return;
+        }
+        long speechMs = mLastLocalSpeechUptimeMillis - mLocalSpeechStartedUptimeMillis;
+        long silenceMs = now - mLastLocalSpeechUptimeMillis;
+        long audioMs = audioBytesToMillis(mInputAudioBytesSinceCommit);
+        if (speechMs < LOCAL_SPEECH_MIN_MS || silenceMs < LOCAL_SILENCE_COMMIT_MS
+                || audioMs < LOCAL_MIN_AUDIO_BEFORE_COMMIT_MS
+                || now - mLastManualCommitUptimeMillis < LOCAL_COMMIT_COOLDOWN_MS) {
+            return;
+        }
+        socket.send(new JSONObject().put("type", "input_audio_buffer.commit"));
+        mManualCommitPending = true;
+        mLastManualCommitUptimeMillis = now;
+        mLocalSpeechActive = false;
+        callback.onStatus("Observing");
+        Log.w(TAG, "manual input_audio_buffer.commit after local speech speechMs="
+                + speechMs + " silenceMs=" + silenceMs + " audioMs=" + audioMs);
+    }
+
+    private static long audioBytesToMillis(long bytes) {
+        long bytesPerSecond = SAMPLE_RATE * 2L;
+        if (bytes <= 0 || bytesPerSecond <= 0) {
+            return 0;
+        }
+        return (bytes * 1000L) / bytesPerSecond;
     }
 
     private static AudioRecord createAudioRecord(int bufferSize) throws IOException {
@@ -456,6 +519,7 @@ public final class OpenAiRealtimeVoiceSession {
             ModelAdapter.ToolExecutor executor, Callback callback, JSONObject event)
             throws IOException, JSONException {
         String type = event.optString("type");
+        logRealtimeEvent(type);
         markActionResponseActivity(type);
         if ("error".equals(type)) {
             JSONObject error = event.optJSONObject("error");
@@ -472,6 +536,9 @@ public final class OpenAiRealtimeVoiceSession {
             throw new IOException(error == null ? event.toString() : error.toString());
         }
         if ("input_audio_buffer.speech_started".equals(type)) {
+            mServerVadActive = true;
+            mManualCommitPending = false;
+            Log.i(TAG, "server speech_started micRms=" + Math.round(mRecentMicRms));
             if (isPlaybackActiveOrRecentlyActive()) {
                 if (mRecentMicRms >= SERVER_BARGE_IN_RMS) {
                     handleServerSpeechStartedDuringPlayback(socket, callback);
@@ -485,10 +552,16 @@ public final class OpenAiRealtimeVoiceSession {
             return;
         }
         if ("input_audio_buffer.speech_stopped".equals(type)) {
+            mServerVadActive = false;
+            Log.i(TAG, "server speech_stopped micRms=" + Math.round(mRecentMicRms));
             callback.onStatus("Observing");
             return;
         }
         if ("input_audio_buffer.committed".equals(type)) {
+            mServerVadActive = false;
+            mManualCommitPending = false;
+            mLocalSpeechActive = false;
+            mInputAudioBytesSinceCommit = 0;
             callback.onStatus("Observing");
             resetTurnToolState();
             appendAutoScreenContext(socket, executor,
@@ -583,6 +656,19 @@ public final class OpenAiRealtimeVoiceSession {
             drainPlayback("response_done");
             flushAssistantTranscript(callback);
             mActionResponseOutstanding = false;
+        }
+    }
+
+    private static void logRealtimeEvent(String type) {
+        if (type == null || type.isEmpty()) {
+            Log.i(TAG, "event=<empty>");
+            return;
+        }
+        if (type.startsWith("response.")
+                || type.startsWith("input_audio_buffer.")
+                || type.startsWith("conversation.item.input_audio_transcription")
+                || type.contains("function_call")) {
+            Log.i(TAG, "event=" + type);
         }
     }
 
