@@ -20,8 +20,17 @@ Responsibilities:
   `RuntimeToolRequest`s.
 - Return tool results through `node.invoke.result`.
 - Send confirmation required/resolved events through existing node event paths.
+- Map `openphone.surface.present|replace|dismiss` node events to the generic
+  runtime surface lifecycle, accepting only explicit assistant-output
+  envelopes.
+- Map local surface invocation, result, and dismissal events back to
+  `openphone.surface.*` node events.
+- Mark active phone sessions failed and leave their last accepted surface
+  inspectable if the gateway disconnects before completion.
 
 The adapter should not define OpenClaw core policy. Policy belongs in the plugin.
+Surface validation, rendering, revision checks, and phone-tool execution remain
+Android responsibilities rather than plugin or gateway responsibilities.
 
 ## Plugin
 

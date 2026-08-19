@@ -30,8 +30,14 @@ public final class OpenPhoneNotificationController {
             "org.openphone.assistant.action.EXTERNAL_APPROVE";
     static final String ACTION_EXTERNAL_DENY =
             "org.openphone.assistant.action.EXTERNAL_DENY";
+    static final String ACTION_BACKGROUND_APPROVE =
+            "org.openphone.assistant.action.BACKGROUND_APPROVE";
+    static final String ACTION_BACKGROUND_DENY =
+            "org.openphone.assistant.action.BACKGROUND_DENY";
     static final String EXTRA_EXTERNAL_CONFIRMATION_ID =
             "org.openphone.assistant.extra.EXTERNAL_CONFIRMATION_ID";
+    static final String EXTRA_BACKGROUND_CONFIRMATION_ID =
+            "org.openphone.assistant.extra.BACKGROUND_CONFIRMATION_ID";
     static final int NOTIFICATION_ID = 1001;
     private static final int COMMITMENT_NOTIFICATION_BASE_ID = 5000;
     private static final int WATCHER_NOTIFICATION_BASE_ID = 6000;
@@ -229,6 +235,65 @@ public final class OpenPhoneNotificationController {
         manager.notify(agentJobNotificationId(job.id), builder.build());
     }
 
+    public static void showAgentJobReview(Context context, AgentJobRecord job,
+            JSONObject pendingRequest) {
+        if (context == null || job == null || pendingRequest == null) {
+            return;
+        }
+        String confirmationId = pendingRequest.optString("confirmation_id", "");
+        if (confirmationId.trim().isEmpty()) {
+            return;
+        }
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) {
+            return;
+        }
+        ensureAgentJobChannel(manager);
+        String tool = pendingRequest.optString("tool", "OpenPhone action");
+        JSONObject params = pendingRequest.optJSONObject("params");
+        String exact = params == null ? "{}" : params.toString();
+        String detail = pendingRequest.optString("summary", "").trim();
+        if (detail.isEmpty()) {
+            detail = tool + " with " + exact;
+        }
+        String expanded = "Job: " + job.title + "\nAction: " + tool
+                + "\nExact arguments: " + exact;
+        Notification.Builder builder = new Notification.Builder(context)
+                .setSmallIcon(R.drawable.ic_openphone_tile)
+                .setContentTitle("Review background action")
+                .setContentText(summarize(detail))
+                .setStyle(new Notification.BigTextStyle().bigText(expanded))
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setShowWhen(true)
+                .setWhen(System.currentTimeMillis())
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(homePendingIntent(context,
+                        jobRequestCode(job.id, 30)))
+                .addAction(new Notification.Action.Builder(
+                        R.drawable.ic_openphone_tile,
+                        "Approve",
+                        backgroundReviewAction(context, ACTION_BACKGROUND_APPROVE,
+                                confirmationId, job.id, 31)).build())
+                .addAction(new Notification.Action.Builder(
+                        R.drawable.ic_openphone_tile,
+                        "Deny",
+                        backgroundReviewAction(context, ACTION_BACKGROUND_DENY,
+                                confirmationId, job.id, 32)).build());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setChannelId(AGENT_JOB_CHANNEL_ID);
+        }
+        manager.notify(agentJobNotificationId(job.id), builder.build());
+    }
+
+    public static void cancelAgentJobReview(Context context, long jobId) {
+        NotificationManager manager = context == null
+                ? null : context.getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.cancel(agentJobNotificationId(jobId));
+        }
+    }
+
     public static void showRuntimeMessage(Context context, String runtime,
             String title, String text, String messageId) {
         if (context == null) {
@@ -383,6 +448,29 @@ public final class OpenPhoneNotificationController {
         }
         return PendingIntent.getBroadcast(context,
                 runtimeRequestCode(confirmationId) + actionCode, intent, flags);
+    }
+
+    private static PendingIntent backgroundReviewAction(Context context, String action,
+            String confirmationId, long jobId, int actionCode) {
+        Intent intent = new Intent(context, OpenPhoneTriggerReceiver.class);
+        intent.setAction(action);
+        intent.putExtra(EXTRA_BACKGROUND_CONFIRMATION_ID, confirmationId);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return PendingIntent.getBroadcast(context,
+                jobRequestCode(jobId, actionCode), intent, flags);
+    }
+
+    private static PendingIntent homePendingIntent(Context context, int requestCode) {
+        Intent intent = new Intent(context, OpenPhoneHomeActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return PendingIntent.getActivity(context, requestCode, intent, flags);
     }
 
     private static void ensureCommitmentChannel(Context context, NotificationManager manager) {

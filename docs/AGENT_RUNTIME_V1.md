@@ -10,8 +10,8 @@ session.
 - Persist background agent work as first-class jobs.
 - Wake jobs from alarms, boot, package replacement, and explicit tool calls.
 - Keep delivery, retries, diagnostics, and failure state with the job.
-- Preserve the reviewed autonomy posture: background jobs do not silently
-  perform state-changing actions.
+- Preserve the reviewed autonomy posture: background jobs pause before
+  state-changing actions and resume only from an exact Android-owned review.
 - Keep model routing in the registry and schemas instead of Java keyword
   routing.
 
@@ -45,7 +45,7 @@ An `agent_job` records durable background work.
     "mode": "notification",
     "notification_text": "Release notes changed"
   },
-  "status": "active",
+  "status": "queued",
   "created_at": 1781480000000,
   "updated_at": 1781480000000,
   "next_run_at": 1781483055000,
@@ -53,9 +53,26 @@ An `agent_job` records durable background work.
   "last_run_at": 0,
   "last_result": "",
   "failure_count": 0,
-  "failure_alert_at": 0
+  "failure_alert_at": 0,
+  "phase": "queued",
+  "progress_text": "Queued",
+  "progress_current": 0,
+  "progress_total": 0,
+  "checkpoint_json": {},
+  "pending_confirmation_id": "",
+  "pending_tool_request_json": {},
+  "last_surface_id": "",
+  "resume_token": "",
+  "last_event_at": 1781480000000,
+  "unread_result": false,
+  "paused_at": 0
 }
 ```
+
+Lifecycle states are `queued`, `running`, `waiting`, `awaiting_review`,
+`paused`, `completed`, `failed`, and `stopped`. Readers continue accepting the
+legacy `active` value during migration. Runtime dispatch may also persist
+`dispatched` while an external runtime owns the next step.
 
 Job types:
 
@@ -77,7 +94,8 @@ model/tool trace and must not be dumped directly into the notification surface.
 
 The assistant schedules a single alarm for the next active job. On wake it:
 
-1. repairs stale `running` jobs,
+1. expires pending reviews and repairs stale `running` or review-resolution
+   jobs,
 2. marks due jobs `running`,
 3. starts bounded background runners,
 4. persists completion/failure,
@@ -89,13 +107,29 @@ service startup.
 
 ## Safety
 
-Background jobs may call observe/read tools and terminal tools. State-changing
-tools return `background.confirmation_required` instead of executing. The
-foreground reviewed flow remains the only path for actions that mutate device,
-account, communication, or external state.
+Background jobs may call observe/read tools and terminal tools directly. A
+state-changing tool is never executed by the background model loop. Instead,
+OpenPhone:
 
-This is intentionally conservative. The follow-up design can add reviewed
-background approvals with a notification action and a resumable job checkpoint.
+1. bounds and sanitizes the exact proposed tool arguments;
+2. persists an `awaiting_review` checkpoint and 15-minute confirmation;
+3. shows the exact action in an Android notification and AI Home run detail;
+4. atomically claims the first Approve or Deny tap;
+5. verifies the tool, parameter digest, runtime, phone session, job, expiry,
+   idempotency key, checkpoint, and resume token;
+6. executes only the persisted request after approval, or records a structured
+   denial/timeout result;
+7. resumes the job with that bound result instead of regenerating the action.
+
+Provider secrets, raw authorization, screenshots, data URLs, large encoded
+blobs, and unbounded context are rejected from checkpoints. Audit events store
+digests and lifecycle metadata, not raw parameters. If the process dies while
+an approved action is resolving, stale-run repair marks the outcome unknown
+and does not replay it. A denied action can safely resume after restart.
+
+The wire shapes are defined by `schemas/agent-job.schema.json` and
+`schemas/background-confirmation.schema.json`; recorded valid, tampered, and
+secret-bearing fixtures run in `./scripts/check.sh`.
 
 ## OpenClaw/Hermes Mapping
 

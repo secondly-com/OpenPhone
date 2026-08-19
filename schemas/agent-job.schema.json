@@ -20,7 +20,19 @@
     "last_run_at",
     "last_result",
     "failure_count",
-    "failure_alert_at"
+    "failure_alert_at",
+    "phase",
+    "progress_text",
+    "progress_current",
+    "progress_total",
+    "checkpoint_json",
+    "pending_confirmation_id",
+    "pending_tool_request_json",
+    "last_surface_id",
+    "resume_token",
+    "last_event_at",
+    "unread_result",
+    "paused_at"
   ],
   "properties": {
     "id": { "type": "integer", "minimum": 1 },
@@ -45,7 +57,18 @@
       "additionalProperties": true
     },
     "status": {
-      "enum": ["active", "running", "completed", "failed", "stopped"]
+      "enum": [
+        "active",
+        "queued",
+        "running",
+        "waiting",
+        "awaiting_review",
+        "paused",
+        "completed",
+        "failed",
+        "stopped",
+        "dispatched"
+      ]
     },
     "created_at": { "type": "integer", "minimum": 0 },
     "updated_at": { "type": "integer", "minimum": 0 },
@@ -54,7 +77,19 @@
     "last_run_at": { "type": "integer", "minimum": 0 },
     "last_result": { "type": "string" },
     "failure_count": { "type": "integer", "minimum": 0 },
-    "failure_alert_at": { "type": "integer", "minimum": 0 }
+    "failure_alert_at": { "type": "integer", "minimum": 0 },
+    "phase": { "type": "string", "maxLength": 120 },
+    "progress_text": { "type": "string", "maxLength": 4000 },
+    "progress_current": { "type": "integer", "minimum": 0 },
+    "progress_total": { "type": "integer", "minimum": 0 },
+    "checkpoint_json": { "type": "object" },
+    "pending_confirmation_id": { "type": "string", "maxLength": 200 },
+    "pending_tool_request_json": { "type": "object" },
+    "last_surface_id": { "type": "string", "maxLength": 160 },
+    "resume_token": { "type": "string", "maxLength": 200 },
+    "last_event_at": { "type": "integer", "minimum": 0 },
+    "unread_result": { "type": "boolean" },
+    "paused_at": { "type": "integer", "minimum": 0 }
   },
   "additionalProperties": false
 }

@@ -25,4 +25,11 @@ public final class R {
         private drawable() {
         }
     }
+
+    public static final class array {
+        public static final int openphone_app_space_components = 0;
+
+        private array() {
+        }
+    }
 }

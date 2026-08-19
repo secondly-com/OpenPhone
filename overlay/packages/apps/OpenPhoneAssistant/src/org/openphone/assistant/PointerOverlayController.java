@@ -31,10 +31,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.openphone.assistant.context.ContextIndexStore;
+import org.openphone.assistant.island.IslandStateRepository;
 import org.openphone.assistant.runtime.RuntimeConfig;
 import org.openphone.assistant.runtime.RuntimeRegistry;
-import org.openphone.assistant.jobs.AgentJobRecord;
-import org.openphone.assistant.jobs.AgentJobStore;
+import org.openphone.assistant.runs.AgentRunProjection;
+import org.openphone.assistant.runs.AgentRunSummary;
 import org.openphone.assistant.watchers.OpenPhoneWatcherScheduler;
 import org.openphone.assistant.watchers.WatcherRecord;
 import org.openphone.assistant.watchers.WatcherStore;
@@ -78,6 +79,7 @@ public final class PointerOverlayController {
     private static final long ISLAND_RESIZE_MS = 260L;
     private static final long THINKING_DOTS_INTERVAL_MS = 420L;
     private static final long REPLY_AUTO_COLLAPSE_MS = 7000L;
+    private static final long SYSTEM_UI_STATE_REFRESH_MS = 2000L;
     private static final int REPLY_MAX_LINES = 8;
     private static final int CAMERA_RESERVED_WIDTH = 96;
     private static final int CAMERA_ISLAND_FALLBACK_TOP = 42;
@@ -90,6 +92,7 @@ public final class PointerOverlayController {
     private static final long DONE_VISIBLE_MS = 2200;
     private static final Set<PointerOverlayController> sControllers =
             Collections.newSetFromMap(new WeakHashMap<>());
+    private static PointerOverlayController sIslandOwner;
     private static String sLatestUserMessage = "";
     private static String sLatestAssistantMessage = "";
     private static long sLatestConversationAtMillis;
@@ -105,6 +108,7 @@ public final class PointerOverlayController {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private final Runnable mWatchdogHide = this::hide;
     private final ScreenAnswerProvider mScreenAnswerProvider;
+    private final IslandStateRepository mIslandStateRepository;
     private ConfirmationHandler mConfirmationHandler;
     private WindowManager mWindowManager;
     private FrameLayout mRoot;
@@ -135,6 +139,7 @@ public final class PointerOverlayController {
     private TextView mDenyButton;
     private TextView mActionLabel;
     private String mMode = "idle";
+    private String mActiveTaskId = "";
     private String mStateDetail = "";
     private String mTranscriptText = "";
     private String mReplyText = "";
@@ -144,6 +149,7 @@ public final class PointerOverlayController {
     private boolean mInspectExpanded;
     private boolean mLargeExpanded;
     private boolean mIslandDragExpanded;
+    private boolean mIslandVisible;
     private float mIslandTouchDownY;
     private int mStatusTab = STATUS_TAB_CHAT;
     private int mThinkingDotsFrame;
@@ -163,6 +169,17 @@ public final class PointerOverlayController {
             mHandler.postDelayed(this, THINKING_DOTS_INTERVAL_MS);
         }
     };
+    private final Runnable mSystemUiStateRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (!mIslandVisible || !isIslandOwner()
+                    || !mIslandStateRepository.isSystemUiOwned()) {
+                return;
+            }
+            publishSystemUiState();
+            mHandler.postDelayed(this, SYSTEM_UI_STATE_REFRESH_MS);
+        }
+    };
     private ValueAnimator mIslandResizeAnimator;
 
     PointerOverlayController(Context context) {
@@ -172,6 +189,7 @@ public final class PointerOverlayController {
     PointerOverlayController(Context context, ScreenAnswerProvider screenAnswerProvider) {
         mContext = context.getApplicationContext();
         mScreenAnswerProvider = screenAnswerProvider;
+        mIslandStateRepository = new IslandStateRepository(mContext);
         synchronized (sControllers) {
             sControllers.add(this);
         }
@@ -185,6 +203,7 @@ public final class PointerOverlayController {
     void show(String taskId) {
         mHandler.post(() -> {
             mMode = "action_running";
+            mActiveTaskId = taskId == null ? "" : taskId.trim();
             mInspectExpanded = false;
             ensurePointerLayer();
             showPointerDot();
@@ -196,6 +215,19 @@ public final class PointerOverlayController {
 
     void hide() {
         mHandler.post(() -> {
+            boolean publishHidden;
+            synchronized (sControllers) {
+                publishHidden = sIslandOwner == null || sIslandOwner == this;
+                if (sIslandOwner == this) {
+                    sIslandOwner = null;
+                }
+            }
+            mIslandVisible = false;
+            mHandler.removeCallbacks(mSystemUiStateRefresh);
+            if (publishHidden) {
+                mIslandStateRepository.publish(
+                        mMode, false, mActiveTaskId, mWatchingCount);
+            }
             mHandler.removeCallbacks(mWatchdogHide);
             mHandler.removeCallbacks(mReplyAutoCollapse);
             stopThinkingDots();
@@ -406,6 +438,7 @@ public final class PointerOverlayController {
     private void showMicButtonNow() {
         stopThinkingDots();
         mMode = mWatchingCount > 0 ? "watching" : "idle";
+        mActiveTaskId = "";
         mInspectExpanded = false;
         mLargeExpanded = false;
         mTranscriptText = "";
@@ -554,22 +587,28 @@ public final class PointerOverlayController {
     }
 
     private void ensureIslandWindow() {
+        mIslandVisible = true;
+        ArrayList<PointerOverlayController> controllers;
+        synchronized (sControllers) {
+            sIslandOwner = this;
+            controllers = new ArrayList<>(sControllers);
+        }
+        // Only one island state owner may exist across service and activity
+        // controller instances. The latest claimant wins.
+        for (PointerOverlayController other : controllers) {
+            if (other != this) {
+                other.removeIslandNow();
+            }
+        }
+        if (mIslandStateRepository.isSystemUiOwned()) {
+            startSystemUiStateRefresh();
+            return;
+        }
         if (mWindowManager == null) {
             mWindowManager = mContext.getSystemService(WindowManager.class);
         }
         if (mWindowManager == null) {
             return;
-        }
-        // Only one island may exist across all controller instances
-        // (service + activities); the latest claimant wins.
-        ArrayList<PointerOverlayController> controllers;
-        synchronized (sControllers) {
-            controllers = new ArrayList<>(sControllers);
-        }
-        for (PointerOverlayController other : controllers) {
-            if (other != this) {
-                other.removeIslandNow();
-            }
         }
         if (mIslandRoot != null) {
             return;
@@ -786,11 +825,22 @@ public final class PointerOverlayController {
                 mInspectExpanded = false;
                 mLargeExpanded = false;
             } else {
-                mInspectExpanded = true;
-                mLargeExpanded = false;
-                mStatusTab = STATUS_TAB_CHAT;
+                launchAiHome();
+                return;
             }
             updateIslandViews();
+        }
+    }
+
+    private void launchAiHome() {
+        Intent intent = new Intent(mContext, OpenPhoneHomeActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        try {
+            mContext.startActivity(intent);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Unable to launch OpenPhone Home", e);
         }
     }
 
@@ -861,6 +911,13 @@ public final class PointerOverlayController {
     }
 
     private void removeIslandNow() {
+        mIslandVisible = false;
+        mHandler.removeCallbacks(mSystemUiStateRefresh);
+        synchronized (sControllers) {
+            if (sIslandOwner == this) {
+                sIslandOwner = null;
+            }
+        }
         mHandler.removeCallbacks(mWatchdogHide);
         if (mIslandResizeAnimator != null) {
             mIslandResizeAnimator.cancel();
@@ -973,6 +1030,10 @@ public final class PointerOverlayController {
     }
 
     private void updateIslandViews() {
+        publishSystemUiState();
+        if (mIslandStateRepository.isSystemUiOwned()) {
+            return;
+        }
         if (mLeftIslandText == null || mRightIslandText == null
                 || mIslandBodyText == null || mIslandChatColumn == null) {
             return;
@@ -991,6 +1052,26 @@ public final class PointerOverlayController {
             applyExpandedIslandLayout(presentation);
         } else {
             applyCompactIslandLayout();
+        }
+    }
+
+    private void startSystemUiStateRefresh() {
+        mHandler.removeCallbacks(mSystemUiStateRefresh);
+        publishSystemUiState();
+        mHandler.postDelayed(mSystemUiStateRefresh, SYSTEM_UI_STATE_REFRESH_MS);
+    }
+
+    private void publishSystemUiState() {
+        if (!isIslandOwner()) {
+            return;
+        }
+        mIslandStateRepository.publish(
+                mMode, mIslandVisible, mActiveTaskId, mWatchingCount);
+    }
+
+    private boolean isIslandOwner() {
+        synchronized (sControllers) {
+            return sIslandOwner == this;
         }
     }
 
@@ -1336,18 +1417,28 @@ public final class PointerOverlayController {
     }
 
     private String runsStatusBody() {
-        List<AgentJobRecord> jobs = activeJobs(5);
-        int jobCount = activeJobCount();
+        List<AgentRunSummary> runs = projectedRuns(50);
+        int runCount = runs.size();
         StringBuilder body = new StringBuilder();
-        body.append("Queued agent tasks that keep working after current chat.");
-        if (jobCount <= 0) {
-            body.append("\n\n◌\nNo queued runs");
+        body.append("Durable agent work across jobs, commitments, and sessions.");
+        if (runCount <= 0) {
+            body.append("\n\n◌\nNo recent runs");
             return body.toString();
         }
-        body.append("\nRuns: ").append(jobCount).append(" active");
-        for (AgentJobRecord job : jobs) {
-            body.append("\n").append(compactStatusLine(job.id, job.title,
-                    job.type, job.status, job.nextRunAtMillis));
+        int liveCount = 0;
+        for (AgentRunSummary run : runs) {
+            if (run.isLive()) {
+                liveCount++;
+            }
+        }
+        body.append("\nRuns: ").append(liveCount).append(" live");
+        int visible = Math.min(5, runs.size());
+        for (int i = 0; i < visible; i++) {
+            AgentRunSummary run = runs.get(i);
+            body.append("\n").append(compactRunStatusLine(run));
+        }
+        if (runs.size() > visible) {
+            body.append("\n").append(runs.size() - visible).append(" more");
         }
         return body.toString();
     }
@@ -1483,16 +1574,14 @@ public final class PointerOverlayController {
         }
     }
 
-    private List<AgentJobRecord> activeJobs(int limit) {
-        List<AgentJobRecord> out = new ArrayList<>();
+    private List<AgentRunSummary> projectedRuns(int limit) {
+        List<AgentRunSummary> out = new ArrayList<>();
         try {
-            for (AgentJobRecord job : new AgentJobStore(mContext).list("", 50)) {
-                if (!isLiveJob(job)) {
+            for (AgentRunSummary run : new AgentRunProjection(mContext).snapshot(limit)) {
+                if (AgentRunSummary.KIND_WATCHER.equals(run.kind)) {
                     continue;
                 }
-                if (out.size() < Math.max(1, limit)) {
-                    out.add(job);
-                }
+                out.add(run);
             }
         } catch (RuntimeException ignored) {
         }
@@ -1501,19 +1590,12 @@ public final class PointerOverlayController {
 
     private int activeJobCount() {
         int count = 0;
-        try {
-            for (AgentJobRecord job : new AgentJobStore(mContext).list("", 50)) {
-                if (isLiveJob(job)) {
-                    count++;
-                }
+        for (AgentRunSummary run : projectedRuns(50)) {
+            if (run.isLive()) {
+                count++;
             }
-        } catch (RuntimeException ignored) {
         }
         return count;
-    }
-
-    private static boolean isLiveJob(AgentJobRecord job) {
-        return job != null && ("active".equals(job.status) || "running".equals(job.status));
     }
 
     private String latestConversationBody() {
@@ -1638,6 +1720,25 @@ public final class PointerOverlayController {
         }
         if (!cleanStatus.isEmpty() && !"active".equals(cleanStatus)) {
             line.append(" ").append(cleanStatus);
+        }
+        if (!timing.isEmpty()) {
+            line.append(" ").append(timing);
+        }
+        return line.toString();
+    }
+
+    private static String compactRunStatusLine(AgentRunSummary run) {
+        String cleanTitle = shortText(firstNonEmpty(run.title, run.kind, "Agent run"), 44);
+        String phase = shortText(firstNonEmpty(run.phase, run.status, ""), 18);
+        String timing = relativeTime(run.nextRunAtMillis);
+        StringBuilder line = new StringBuilder();
+        line.append(run.needsAttention ? "! " : "- ");
+        line.append(cleanTitle);
+        if (!phase.isEmpty()) {
+            line.append(" · ").append(phase);
+        }
+        if (!run.pendingConfirmationId.isEmpty()) {
+            line.append(" · approval needed · Open AI Home");
         }
         if (!timing.isEmpty()) {
             line.append(" ").append(timing);

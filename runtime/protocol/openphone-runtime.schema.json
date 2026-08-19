@@ -22,6 +22,27 @@
     },
     "confirmation": {
       "$ref": "#/$defs/confirmation"
+    },
+    "assistant_output": {
+      "$ref": "#/$defs/assistantOutput"
+    },
+    "surface_present": {
+      "$ref": "#/$defs/surfacePresent"
+    },
+    "surface_replace": {
+      "$ref": "#/$defs/surfaceReplace"
+    },
+    "surface_dismiss": {
+      "$ref": "#/$defs/surfaceDismiss"
+    },
+    "surface_action_result": {
+      "$ref": "#/$defs/surfaceActionResult"
+    },
+    "surface_action_invocation": {
+      "$ref": "#/$defs/surfaceActionInvocation"
+    },
+    "phone_surface_dismissed": {
+      "$ref": "#/$defs/phoneSurfaceDismissed"
     }
   },
   "required": [
@@ -189,6 +210,143 @@
           "type": "integer",
           "minimum": 1
         }
+      }
+    },
+    "assistantOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "session_id", "speech", "text"],
+      "properties": {
+        "schema": {
+          "const": "openphone.assistant_output.v1"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "speech": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 12000
+        },
+        "surface": {
+          "type": ["object", "null"]
+        },
+        "background_run": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "surfacePresent": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["output"],
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/assistantOutput"
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      }
+    },
+    "surfaceReplace": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["output", "expected_revision"],
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/assistantOutput"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      }
+    },
+    "surfaceDismiss": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["surface_id", "revision", "reason"],
+      "properties": {
+        "surface_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionKey": {
+          "type": "string"
+        }
+      }
+    },
+    "surfaceActionResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["surface_id", "revision", "status"],
+      "properties": {
+        "surface_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "surfaceActionInvocation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "surface_id",
+        "revision",
+        "session_id",
+        "runtime",
+        "action_id",
+        "idempotency_key"
+      ],
+      "properties": {
+        "surface_id": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "session_id": { "type": "string" },
+        "runtime": { "type": "string" },
+        "action_id": { "type": "string" },
+        "idempotency_key": { "type": "string" }
+      }
+    },
+    "phoneSurfaceDismissed": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["surface_id", "revision", "session_id", "runtime", "reason"],
+      "properties": {
+        "surface_id": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "session_id": { "type": "string" },
+        "runtime": { "type": "string" },
+        "reason": { "type": "string" }
       }
     }
   }

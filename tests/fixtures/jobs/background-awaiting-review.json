@@ -1,0 +1,62 @@
+{
+  "id": 42,
+  "type": "agent_turn",
+  "title": "Clean up duplicate calendar event",
+  "prompt": "Remove the duplicate calendar event.",
+  "payload_json": {},
+  "schedule_json": {},
+  "session_target": "main",
+  "delivery_json": {
+    "mode": "notification"
+  },
+  "status": "awaiting_review",
+  "created_at": 1784400000000,
+  "updated_at": 1784400600000,
+  "next_run_at": 0,
+  "running_at": 0,
+  "last_run_at": 0,
+  "last_result": "",
+  "failure_count": 0,
+  "failure_alert_at": 0,
+  "phase": "awaiting_review",
+  "progress_text": "Approval needed: calendar_delete_event",
+  "progress_current": 0,
+  "progress_total": 0,
+  "checkpoint_json": {
+    "schema": "openphone.background_checkpoint.v1",
+    "job_id": 42,
+    "phase": "awaiting_review",
+    "tool": "calendar_delete_event",
+    "params_digest": "9f293c6f544ebcd106ac33dd942773bf8b945f9f8e981f533583bd0ebb651b68",
+    "binding_digest": "195b6e1f2f5fc1f31ce429b2e22654571f3ebfda9da064eb6c7c9313b0b7f9d9",
+    "idempotency_key": "job:42:fixture-delete-event",
+    "resume_token": "job-resume-fixture-42",
+    "created_at": 1784400600000,
+    "resume_pending": false
+  },
+  "pending_confirmation_id": "job-confirm-fixture-42",
+  "pending_tool_request_json": {
+    "schema": "openphone.background_confirmation.v1",
+    "confirmation_id": "job-confirm-fixture-42",
+    "job_id": 42,
+    "runtime": "builtin",
+    "phone_session_id": "background-job:42",
+    "tool": "calendar_delete_event",
+    "params": {
+      "event_id": 123,
+      "reason": "Remove duplicate meeting"
+    },
+    "params_digest": "9f293c6f544ebcd106ac33dd942773bf8b945f9f8e981f533583bd0ebb651b68",
+    "binding_digest": "195b6e1f2f5fc1f31ce429b2e22654571f3ebfda9da064eb6c7c9313b0b7f9d9",
+    "idempotency_key": "job:42:fixture-delete-event",
+    "created_at": 1784400600000,
+    "expires_at": 1784401500000,
+    "review_state": "pending",
+    "summary": "calendar delete event with {\"event_id\":123,\"reason\":\"Remove duplicate meeting\"}"
+  },
+  "last_surface_id": "",
+  "resume_token": "job-resume-fixture-42",
+  "last_event_at": 1784400600000,
+  "unread_result": false,
+  "paused_at": 0
+}

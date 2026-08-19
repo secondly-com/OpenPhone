@@ -1,16 +1,20 @@
 package org.openphone.assistant;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.openphone.OpenPhoneAgentManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
@@ -42,7 +46,14 @@ import org.openphone.assistant.orchestrator.OpenPhoneOrchestrator;
 import org.openphone.assistant.orchestrator.OperatingMode;
 import org.openphone.assistant.orchestrator.OrchestratorDecision;
 import org.openphone.assistant.ota.OtaUpdateClient;
+import org.openphone.assistant.platform.OpenPhoneOsToolGateway;
+import org.openphone.assistant.platform.PhoneToolGateway;
 import org.openphone.assistant.policy.AppCapabilityPolicy;
+import org.openphone.assistant.surface.AdaptiveSurface;
+import org.openphone.assistant.surface.AssistantOutput;
+import org.openphone.assistant.surface.DeterministicSurfaceFactory;
+import org.openphone.assistant.surface.SurfaceMutationResult;
+import org.openphone.assistant.surface.SurfaceRepository;
 import org.openphone.assistant.watchers.OpenPhoneWatcherScheduler;
 
 import java.io.IOException;
@@ -76,6 +87,8 @@ public class AssistantActivityBackend extends ComponentActivity {
     private static final String EXTRA_GOAL = "org.openphone.assistant.extra.GOAL";
     private static final String EXTRA_GOAL_BASE64 =
             "org.openphone.assistant.extra.GOAL_BASE64";
+    private static final String EXTRA_INPUT_SOURCE =
+            "org.openphone.assistant.extra.INPUT_SOURCE";
     private static final String EXTRA_RUN = "org.openphone.assistant.extra.RUN";
     static final String EXTRA_START_VOICE =
             "org.openphone.assistant.extra.START_VOICE";
@@ -233,6 +246,8 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean mRuntimeReplyTtsReady;
     private boolean mPendingRuntimeVoiceReply;
     private boolean mVoiceCaptureFinishRequested;
+    private boolean mWaitingForUserUnlock;
+    private BroadcastReceiver mUserUnlockReceiver;
     private boolean mRealtimeVoiceErrorShown;
     private boolean mPendingVoiceForceClassic;
     private boolean mVolumeChordPendingClassic;
@@ -268,9 +283,18 @@ public class AssistantActivityBackend extends ComponentActivity {
     private boolean mComposeAdvancedVisible;
     private ComposeStateCallbacks mComposeStateCallbacks;
 
+    PhoneToolGateway phoneToolGatewayForSurfaces() {
+        return new OpenPhoneOsToolGateway(this, mAgentManager);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UserManager userManager = getSystemService(UserManager.class);
+        if (userManager != null && !userManager.isUserUnlocked()) {
+            showLockedBootShell();
+            return;
+        }
         mAgentManager = getSystemService(OpenPhoneAgentManager.class);
         mPointerOverlayController = new PointerOverlayController(this);
         // Wire inline Approve / Deny on the island to this activity's
@@ -313,20 +337,35 @@ public class AssistantActivityBackend extends ComponentActivity {
                     }
                     return;
                 }
+                if (isHomeSurface()) {
+                    return;
+                }
                 setEnabled(false);
                 getOnBackPressedDispatcher().onBackPressed();
             }
         });
-        setContentView(AssistantComposeHost.createView(this));
+        setContentView(createActivityContentView());
         setServiceIslandVisible(false);
         mPointerOverlayController.hide();
         refreshAll();
         applyDebugIntentExtras(getIntent());
     }
 
+    /**
+     * Activity-specific content hook. The conversation/settings activity keeps
+     * the existing Compose host while OpenPhoneHomeActivity supplies the
+     * deliberately smaller AI Home surface.
+     */
+    protected View createActivityContentView() {
+        return AssistantComposeHost.createView(this);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        if (mWaitingForUserUnlock) {
+            return;
+        }
         sForegroundActivity = this;
         if (isControlSurface()) {
             return;
@@ -339,14 +378,34 @@ public class AssistantActivityBackend extends ComponentActivity {
     }
 
     @Override
+    protected void onPause() {
+        if (mWaitingForUserUnlock) {
+            super.onPause();
+            return;
+        }
+        if (isHomeSurface() && !isControlSurface()) {
+            setServiceIslandVisible(true);
+        }
+        super.onPause();
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (mWaitingForUserUnlock) {
+            return;
+        }
         applyDebugIntentExtras(intent);
     }
 
     @Override
     protected void onDestroy() {
+        unregisterUserUnlockReceiver();
+        if (mWaitingForUserUnlock) {
+            super.onDestroy();
+            return;
+        }
         shutdownRuntimeReplyTts();
         if (isControlSurface()) {
             super.onDestroy();
@@ -361,6 +420,43 @@ public class AssistantActivityBackend extends ComponentActivity {
         }
         setServiceIslandVisible(true);
         super.onDestroy();
+    }
+
+    private void showLockedBootShell() {
+        mWaitingForUserUnlock = true;
+        View lockedBootView = new View(this);
+        lockedBootView.setBackgroundColor(Color.BLACK);
+        setContentView(lockedBootView);
+        mUserUnlockReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())) {
+                    return;
+                }
+                unregisterUserUnlockReceiver();
+                recreate();
+            }
+        };
+        registerReceiver(mUserUnlockReceiver, new IntentFilter(Intent.ACTION_USER_UNLOCKED),
+                Context.RECEIVER_NOT_EXPORTED);
+        UserManager userManager = getSystemService(UserManager.class);
+        if (userManager != null && userManager.isUserUnlocked()) {
+            unregisterUserUnlockReceiver();
+            recreate();
+            return;
+        }
+        Log.i(TAG, "AI Home is waiting for credential-encrypted storage to unlock");
+    }
+
+    private void unregisterUserUnlockReceiver() {
+        if (mUserUnlockReceiver == null) {
+            return;
+        }
+        try {
+            unregisterReceiver(mUserUnlockReceiver);
+        } catch (IllegalArgumentException ignored) {
+        }
+        mUserUnlockReceiver = null;
     }
 
     private void setServiceIslandVisible(boolean visible) {
@@ -504,12 +600,16 @@ public class AssistantActivityBackend extends ComponentActivity {
         String goal = debugGoalFromIntent(intent);
         if (goal != null) {
             setCurrentGoalText(goal);
+            if (isHomeSurface() && "silent_speech".equals(debugInputSourceFromIntent(intent))) {
+                OpenPhoneHomeComposeHost.deliverSilentSpeechTranscript(goal);
+            }
         }
         if (intent.getBooleanExtra(EXTRA_RUN, false)) {
+            final String inputSource = debugInputSourceFromIntent(intent);
             postToUi(new Runnable() {
                 @Override
                 public void run() {
-                    routeMessageFromCurrentMessage();
+                    routeMessageFromCurrentMessage(inputSource);
                     if (isControlSurface()) {
                         moveTaskToBack(true);
                     }
@@ -522,7 +622,16 @@ public class AssistantActivityBackend extends ComponentActivity {
         return "userdebug".equals(Build.TYPE) || "eng".equals(Build.TYPE);
     }
 
+    private static String debugInputSourceFromIntent(Intent intent) {
+        return "silent_speech".equals(intent.getStringExtra(EXTRA_INPUT_SOURCE))
+                ? "silent_speech" : "chat";
+    }
+
     protected boolean isControlSurface() {
+        return false;
+    }
+
+    protected boolean isHomeSurface() {
         return false;
     }
 
@@ -755,6 +864,54 @@ public class AssistantActivityBackend extends ComponentActivity {
 
     public void onComposeMic() {
         startVoiceAgent();
+    }
+
+    public void onHomeVoiceHoldStarted() {
+        // AI Home's primary gesture has deterministic push-to-talk semantics:
+        // hold records, release transcribes and submits. Live sessions remain
+        // available through the volume gesture and assistant settings.
+        startVoiceAgent(true, true, "ai_home_voice");
+    }
+
+    public void onHomeVoiceHoldFinished() {
+        if (!mListening || !mVoiceHoldToRecord) {
+            return;
+        }
+        mVoiceCaptureFinishRequested = true;
+        OpenAiSpeechTranscriber speechTranscriber = mRunningSpeechTranscriber;
+        if (speechTranscriber != null) {
+            speechTranscriber.stopRecording();
+        }
+    }
+
+    public void onHomeVoiceHoldCancelled() {
+        if (mListening || mRunningRealtimeVoiceSession != null
+                || mRunningGeminiLiveVoiceSession != null) {
+            stopTask();
+        }
+    }
+
+    public void onHomeTextSubmitted(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            setTaskText("Type a request first.");
+            updateIsland("Ready");
+            return;
+        }
+        setCurrentGoalText(clean);
+        routeMessageFromCurrentMessage("ai_home");
+    }
+
+    public void onSilentSpeechDecoded(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            setTaskText("Silent Speech did not detect a request.");
+            updateIsland("Ready");
+            return;
+        }
+        OpenPhoneHomeComposeHost.deliverSilentSpeechTranscript(clean);
+        setCurrentGoalText(clean);
+        routeMessageFromCurrentMessage("silent_speech");
     }
 
     public void onComposeStop() {
@@ -3230,7 +3387,6 @@ public class AssistantActivityBackend extends ComponentActivity {
         final String taskId = mActiveTaskId;
         final ModelEndpointConfig endpointConfig = modelEndpointConfig();
         setTaskText("Working on: " + goal);
-        updateIsland("Agent is working");
         FrameworkToolExecutor toolExecutor = new FrameworkToolExecutor(this, mAgentManager);
         ModelAdapter adapter = selectedModelAdapter(endpointConfig);
         mRunningModelAdapter = adapter;
@@ -3318,6 +3474,12 @@ public class AssistantActivityBackend extends ComponentActivity {
                         showConfirmationIfNeeded(result);
                         boolean finished = result.contains("\"status\":\"task.finished\"")
                                 || result.contains("\"status\": \"task.finished\"");
+                        boolean failed = isActionResultFailure(result);
+                        if (finished) {
+                            AdaptiveSurface surface =
+                                    presentDeterministicSurface(result, taskId);
+                            trajectory.recordSurfacePresented(surface);
+                        }
                         String displayReply = finished
                                 ? taskFinishedMessage(result) : agentResultForDisplay(result);
                         appendConversation("OpenPhone", displayReply);
@@ -3328,7 +3490,7 @@ public class AssistantActivityBackend extends ComponentActivity {
                                 displayReply,
                                 taskId, result);
                         updateIsland(finished
-                                ? "Done" : "Needs review");
+                                ? "Done" : failed ? "Try again" : "Needs review");
                         if (finished && displayReply != null
                                 && !displayReply.trim().isEmpty()
                                 && mPointerOverlayController != null) {
@@ -3341,7 +3503,33 @@ public class AssistantActivityBackend extends ComponentActivity {
         }, "OpenPhoneModelRunner");
         mAgentThread = agentThread;
         updateComposerActionButton();
+        updateIsland("Agent is working");
         agentThread.start();
+    }
+
+    private AdaptiveSurface presentDeterministicSurface(
+            String agentResultJson, String sessionId) {
+        AdaptiveSurface surface = new DeterministicSurfaceFactory(this)
+                .fromAgentResult(agentResultJson, sessionId, RuntimeRegistry.BUILTIN);
+        if (surface == null) {
+            return null;
+        }
+        SurfaceMutationResult result = new SurfaceRepository(this).present(surface);
+        if (!result.ok) {
+            Log.w(TAG, "Deterministic surface rejected code=" + result.code);
+            return null;
+        }
+        AssistantOutput output = AssistantOutput.builtin(
+                sessionId, "", taskFinishedMessage(agentResultJson), surface);
+        if (output != null) {
+            recordContextAgentEvent(
+                    "assistant.output.presented",
+                    "Assistant output presented",
+                    output.displayText(),
+                    sessionId,
+                    output.toJson().toString());
+        }
+        return surface;
     }
 
     private void confirmPending(boolean approved) {
@@ -4215,7 +4403,11 @@ public class AssistantActivityBackend extends ComponentActivity {
         return status.contains("error")
                 || status.contains("failed")
                 || status.contains("denied")
-                || status.contains("blocked");
+                || status.contains("blocked")
+                || "step_limit_reached".equals(status)
+                || "duration_limit_reached".equals(status)
+                || "provider_unavailable".equals(status)
+                || "unavailable".equals(status);
     }
 
     private static String confirmationBodyFromActionResult(String json) {

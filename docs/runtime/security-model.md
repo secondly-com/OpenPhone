@@ -18,6 +18,13 @@ the authority for local capabilities, confirmations, and audit.
   execution to `userdebug`/`eng` builds.
 - Plain `ws://` runtime URLs are rejected unless they target local/private
   network hosts; public remote runtimes must use `wss://`.
+- Structured UI is accepted only through an explicit assistant-output/surface
+  event. The phone rejects runtime/session mismatches, stale revisions,
+  unregistered tools, unknown components, excessive documents, remote image
+  URLs, and sensitive cross-session artifacts before persistence or rendering.
+- Surface actions are declarative bindings, not executable runtime code. They
+  re-enter `RuntimeToolBridge`, including idempotency and Android-local
+  confirmation.
 
 ## Prompt And Context Safety
 

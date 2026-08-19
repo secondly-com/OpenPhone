@@ -15,4 +15,9 @@
     <string name="action_stop_task">Stop</string>
     <string name="action_open_assistant">Open</string>
     <string name="accessibility_service_description">Lets OpenPhone understand visible controls during active assistant tasks.</string>
+    <string-array name="openphone_app_space_components" translatable="false">
+        <item>com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher</item>
+        <item>com.android.launcher3/com.android.launcher3.Launcher</item>
+        <item>com.android.launcher3/com.android.launcher3.Launcher3QuickStepGo</item>
+    </string-array>
 </resources>
