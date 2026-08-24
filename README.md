@@ -200,3 +200,7 @@ modify, sublicense, redistribute, and commercialize the submitted work. See
 [docs/legal/COMMERCIAL.md](docs/legal/COMMERCIAL.md), [LICENSE](LICENSE),
 [docs/legal/LICENSE.noncommercial](docs/legal/LICENSE.noncommercial), and
 [docs/legal/THIRD_PARTY_NOTICES.md](docs/legal/THIRD_PARTY_NOTICES.md).
+
+## Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
