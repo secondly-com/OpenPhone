@@ -9,6 +9,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -55,11 +56,21 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     private static final int MAX_CONSECUTIVE_TOOL_ERRORS = 2;
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_ACTIONS = 2;
     private static final long MAX_DURATION_MS = 300000;
+    // Transient upstream failures (429/5xx) retry with exponential backoff
+    // plus jitter, honoring Retry-After when the server sends one. The
+    // attempt count is deliberately small so an interactive turn is not
+    // stalled for minutes behind a dead upstream; background jobs get their
+    // durability from the job store's own failure backoff on top of this.
+    private static final int MAX_HTTP_ATTEMPTS = 3;
+    private static final long INITIAL_BACKOFF_MILLIS = 1_000L;
+    private static final long MAX_BACKOFF_MILLIS = 30_000L;
+    private static final long BACKOFF_POLL_MILLIS = 250L;
 
     private final ModelEndpointConfig mEndpointConfig;
     private final boolean mFullYolo;
     private volatile boolean mCancelled;
     private volatile HttpURLConnection mActiveConnection;
+    private volatile ToolExecutor mActiveExecutor;
 
     public OpenAiResponsesAgentAdapter(String apiKey) {
         this(ModelEndpointConfig.directOpenAi(apiKey), false);
@@ -239,6 +250,10 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
         }
 
         JSONArray steps = new JSONArray();
+        // Publish the executor so the HTTP retry loop can observe external
+        // cancellation (e.g. a background job stopped by the user) while it
+        // is backing off between attempts.
+        mActiveExecutor = executor;
         try {
             long startedAtMillis = System.currentTimeMillis();
             int consecutiveToolErrors = 0;
@@ -407,6 +422,18 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 return cancelledResult(userGoal, steps);
             }
             return error("network_error", e.getMessage(), steps);
+        } catch (RuntimeException e) {
+            // A misbehaving upstream (broker returning garbage, HTTP stack
+            // throwing unchecked) must surface as a failed task result so
+            // the calling agent thread survives and can apply its own
+            // retry/backoff instead of dying with an uncaught exception.
+            if (mCancelled || executor.isCancelled()) {
+                return cancelledResult(userGoal, steps);
+            }
+            return error("adapter_error",
+                    e.getClass().getSimpleName() + ": " + e.getMessage(), steps);
+        } finally {
+            mActiveExecutor = null;
         }
     }
 
@@ -430,44 +457,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                         .put("openphone_chat", "true")
                         .put("mode", "conversation"))
                 .put("max_output_tokens", 350);
-
-        HttpURLConnection connection = (HttpURLConnection) new URL(
-                mEndpointConfig.responsesUrl()).openConnection();
-        mActiveConnection = connection;
-        try {
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(45000);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer "
-                    + mEndpointConfig.bearerToken());
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Accept", "application/json");
-            if (mEndpointConfig.isBrokerMode()) {
-                connection.setRequestProperty("X-OpenPhone-Model-Provider", "openai_responses");
-                connection.setRequestProperty("X-OpenPhone-Request-Shape", "responses_proxy");
-            }
-
-            byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(bodyBytes.length);
-            try (OutputStream outputStream = connection.getOutputStream()) {
-                outputStream.write(bodyBytes);
-            }
-
-            int statusCode = connection.getResponseCode();
-            String responseBody = readAll(statusCode >= 200 && statusCode < 300
-                    ? connection.getInputStream() : connection.getErrorStream());
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
-                        + summarizeError(responseBody));
-            }
-            return new JSONObject(responseBody);
-        } finally {
-            if (mActiveConnection == connection) {
-                mActiveConnection = null;
-            }
-            connection.disconnect();
-        }
+        return postResponses(body);
     }
 
     private JSONObject callOrchestratorResponsesApi(String userMessage, boolean hasActiveTask,
@@ -727,10 +717,46 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
     }
 
     private JSONObject postResponses(JSONObject body) throws IOException, JSONException {
+        TransientHttpException transientFailure = null;
+        for (int attempt = 1; attempt <= MAX_HTTP_ATTEMPTS; attempt++) {
+            if (attempt > 1 && !backoffBeforeRetry(attempt - 1,
+                    transientFailure.retryAfterMillis)) {
+                break;
+            }
+            try {
+                return postResponsesOnce(body);
+            } catch (TransientHttpException e) {
+                if (e.retryAfterMillis > MAX_BACKOFF_MILLIS) {
+                    // The server closed the window for longer than this call
+                    // is willing to wait; retrying sooner would land inside
+                    // the declared closed window, so fail fast and let the
+                    // caller's own backoff (e.g. the job store) reschedule.
+                    throw e;
+                }
+                transientFailure = e;
+            }
+        }
+        if (transientFailure == null) {
+            throw new IOException("request_cancelled");
+        }
+        throw transientFailure;
+    }
+
+    private JSONObject postResponsesOnce(JSONObject body) throws IOException, JSONException {
+        if (isRequestCancelled()) {
+            throw new IOException("request_cancelled");
+        }
         HttpURLConnection connection = (HttpURLConnection) new URL(
                 mEndpointConfig.responsesUrl()).openConnection();
         mActiveConnection = connection;
         try {
+            // Re-check after publishing the connection: a cancel() that
+            // fired in between saw no connection to disconnect, so without
+            // this the request would proceed with nothing able to abort it
+            // until the watchdog's next cancel poll.
+            if (isRequestCancelled()) {
+                throw new IOException("request_cancelled");
+            }
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(45000);
             connection.setRequestMethod("POST");
@@ -754,8 +780,12 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
             String responseBody = readAll(statusCode >= 200 && statusCode < 300
                     ? connection.getInputStream() : connection.getErrorStream());
             if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
-                        + summarizeError(responseBody));
+                String message = "OpenAI HTTP " + statusCode + ": "
+                        + summarizeError(responseBody);
+                if (isTransientStatus(statusCode)) {
+                    throw new TransientHttpException(message, retryAfterMillis(connection));
+                }
+                throw new IOException(message);
             }
             return new JSONObject(responseBody);
         } finally {
@@ -763,6 +793,75 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                 mActiveConnection = null;
             }
             connection.disconnect();
+        }
+    }
+
+    private static boolean isTransientStatus(int statusCode) {
+        return statusCode == 429 || (statusCode >= 500 && statusCode < 600);
+    }
+
+    /** Parses Retry-After as delta seconds or an HTTP date; 0 when absent or invalid. */
+    private static long retryAfterMillis(HttpURLConnection connection) {
+        String header = connection.getHeaderField("Retry-After");
+        if (header == null || header.trim().isEmpty()) {
+            return 0L;
+        }
+        try {
+            return Math.max(0L, Long.parseLong(header.trim()) * 1000L);
+        } catch (NumberFormatException ignored) {
+        }
+        long retryAtMillis = connection.getHeaderFieldDate("Retry-After", 0L);
+        return retryAtMillis <= 0L ? 0L
+                : Math.max(0L, retryAtMillis - System.currentTimeMillis());
+    }
+
+    /**
+     * Waits before retry number {@code retryIndex} (1-based), preferring the
+     * server-provided Retry-After delay over exponential backoff with jitter.
+     * The wait polls for cancellation so a stopped task or a disconnected
+     * caller does not sit out the full backoff; returns false when the wait
+     * was cut short by cancellation.
+     */
+    private boolean backoffBeforeRetry(int retryIndex, long retryAfterMillis) {
+        long backoff = INITIAL_BACKOFF_MILLIS << Math.min(retryIndex - 1, 5);
+        long delay = retryAfterMillis > 0 ? retryAfterMillis
+                : backoff / 2 + ThreadLocalRandom.current().nextLong(backoff / 2 + 1);
+        delay = Math.min(delay, MAX_BACKOFF_MILLIS);
+        // Monotonic deadline: a wall-clock adjustment mid-backoff must not
+        // stretch or skip the wait.
+        long deadlineNanos = System.nanoTime() + delay * 1_000_000L;
+        while (true) {
+            long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+            if (remainingMillis <= 0) {
+                break;
+            }
+            if (isRequestCancelled()) {
+                return false;
+            }
+            try {
+                Thread.sleep(Math.min(BACKOFF_POLL_MILLIS, Math.max(1L, remainingMillis)));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return !isRequestCancelled();
+    }
+
+    private boolean isRequestCancelled() {
+        if (mCancelled) {
+            return true;
+        }
+        ToolExecutor executor = mActiveExecutor;
+        return executor != null && executor.isCancelled();
+    }
+
+    private static final class TransientHttpException extends IOException {
+        final long retryAfterMillis;
+
+        TransientHttpException(String message, long retryAfterMillis) {
+            super(message);
+            this.retryAfterMillis = retryAfterMillis;
         }
     }
 
@@ -900,44 +999,7 @@ public final class OpenAiResponsesAgentAdapter implements ModelAdapter {
                                 .put("content", content)))
                 .put("metadata", requestMetadata(screenJson))
                 .put("max_output_tokens", 500);
-
-        HttpURLConnection connection = (HttpURLConnection) new URL(
-                mEndpointConfig.responsesUrl()).openConnection();
-        mActiveConnection = connection;
-        try {
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(45000);
-            connection.setRequestMethod("POST");
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization", "Bearer "
-                    + mEndpointConfig.bearerToken());
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("Accept", "application/json");
-            if (mEndpointConfig.isBrokerMode()) {
-                connection.setRequestProperty("X-OpenPhone-Model-Provider", "openai_responses");
-                connection.setRequestProperty("X-OpenPhone-Request-Shape", "responses_proxy");
-            }
-
-            byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(bodyBytes.length);
-            try (OutputStream outputStream = connection.getOutputStream()) {
-                outputStream.write(bodyBytes);
-            }
-
-            int statusCode = connection.getResponseCode();
-            String responseBody = readAll(statusCode >= 200 && statusCode < 300
-                    ? connection.getInputStream() : connection.getErrorStream());
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new IOException("OpenAI HTTP " + statusCode + ": "
-                        + summarizeError(responseBody));
-            }
-            return new JSONObject(responseBody);
-        } finally {
-            if (mActiveConnection == connection) {
-                mActiveConnection = null;
-            }
-            connection.disconnect();
-        }
+        return postResponses(body);
     }
 
     private static JSONObject parseDecision(String outputText) throws JSONException {
